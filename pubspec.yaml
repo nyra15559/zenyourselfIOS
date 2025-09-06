@@ -1,0 +1,120 @@
+name: zenyourself
+description: ZenYourself App mit Sprach-Input und GPT-Antwort
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  # Moderne Pakete (intl, flutter_svg, notifications, speech_to_text) brauchen Dart 3.x
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # ---- State / DI -----------------------------------------------------
+  provider: ^6.1.5
+
+  # ---- System / Storage ----------------------------------------------
+  path_provider: ^2.1.5
+  # WICHTIG: Diese Version ist stabil und kompatibel zu unserem LocalStorageService
+  shared_preferences: ^2.2.2
+  flutter_secure_storage: ^9.0.0
+
+  # ---- Networking / JSON ---------------------------------------------
+  http: ^1.4.0
+  json_annotation: ^4.9.0
+
+  # ---- UI / UX --------------------------------------------------------
+  flutter_localizations:
+    sdk: flutter
+  flutter_svg: ^2.0.10
+  lottie: ^3.3.1
+  animations: ^2.0.11
+  fl_chart: ^1.0.0
+
+  # ---- Media / Audio --------------------------------------------------
+  just_audio: ^0.9.36
+  # audioplayers: ^6.5.0   # absichtlich entfernt (Konflikte vermeiden)
+
+  # ---- Device / Permissions / Notifications --------------------------
+  permission_handler: ^11.3.0
+  flutter_local_notifications: ^19.0.0
+
+  # ---- Utilities ------------------------------------------------------
+  share_plus: ^11.0.0
+  speech_to_text: ^7.2.0
+  flutter_dotenv: ^5.0.2
+  screenshot: ^3.0.0
+  uuid: ^4.4.2
+  collection: ^1.18.0
+  intl: ^0.20.2   # kompatibel zu flutter_localizations (DE-Formatierungen)
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  build_runner: ^2.4.9
+  json_serializable: ^6.7.1
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    # Einzelbilder (Hero/Backdrops etc.)
+    - assets/journey_rain.png
+    - assets/schoen.png
+    - assets/schmetterlingpanda.png
+    - assets/reflektionpanda.png
+    - assets/zen_background.png
+    - assets/logo.png
+    - assets/zen_pattern.png
+    - assets/reflektionpanda2.png
+    - assets/pandalaterne2.png
+    - assets/pandalaterne.png
+    - assets/megaschön.png
+    - assets/langerweg.png
+    - assets/flusspanda.png
+    - assets/brueckenpanda.png
+    - assets/onboard_speak.png
+    - assets/bild1.png
+    - assets/bild2.png
+    - assets/bild3.png
+    - assets/bild4.png
+    - assets/bild5.png
+    - assets/bild6.png
+    - assets/startbild1.png
+    - assets/startbild2.png
+    - assets/startbild3.png
+    - assets/startbild4.png
+    - assets/startbild5.png
+    - assets/startbild6.png
+    - assets/panda.png
+    - assets/logo_zenyourself.png
+    - assets/zen_garden.png
+    - assets/zen_journey_bg.png
+    - assets/startscreen1.png
+    - assets/reflekt.png
+    - assets/voice_panda.png
+    - assets/pro_screen.png
+    - assets/butterfly_left.png
+    - assets/butterfly_right.png
+    - assets/butterfly_center.png
+    - assets/paper_texture.png
+    - assets/teich.png
+    - assets/tempel.png
+    - assets/welcomescreen.png
+    - assets/woleknhimmel.png  # (prüf: Schreibweise korrekt?)
+    - assets/wolken.png
+    - assets/zweiwege.png
+
+    # Ordner komplett einbinden:
+    - assets/audio/
+    - assets/panda_moods/
+
+  fonts:
+    - family: NotoSans
+      fonts:
+        - asset: assets/fonts/NotoSans-Regular.ttf
+    # - family: ZenKalligrafie
+    #   fonts:
+    #     - asset: assets/fonts/ZenKalligrafie-Regular.ttf

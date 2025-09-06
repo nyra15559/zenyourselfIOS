@@ -1,0 +1,343 @@
+// lib/features/start/zen_home_screen.dart
+//
+// ZenHomeScreen — Oxford Calm UX Edition (Unified Champion, v2.3)
+
+import 'dart:ui';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
+
+import '../../shared/zen_style.dart' as zs; // Tokens (Farben, Radii, Spacing)
+import '../../shared/ui/zen_widgets.dart' show ZenBackdrop; // Widget-Backdrop
+import '../../shared/ui/zen_tabbar.dart';
+
+import '../../models/mood_entries_provider.dart';
+import '../../models/reflection_entries_provider.dart';
+
+import '../journey/journey_map.dart';
+import '../reflection/reflection_screen.dart';
+import '../impulse/impulse_screen.dart';
+import '../community/question_voting.dart';
+import '../pro/pro_screen.dart';
+
+class ZenHomeScreen extends StatefulWidget {
+  const ZenHomeScreen({Key? key}) : super(key: key);
+
+  @override
+  State<ZenHomeScreen> createState() => _ZenHomeScreenState();
+}
+
+class _ZenHomeScreenState extends State<ZenHomeScreen>
+    with TickerProviderStateMixin, RestorationMixin {
+  final _bucket = PageStorageBucket();
+
+  // Restorable Tab-Index (merkt sich den letzten Tab über App-Restarts)
+  final RestorableInt _currentTab = RestorableInt(0);
+  int get _tabIndex => _currentTab.value;
+  set _tabIndex(int v) => _currentTab.value = v;
+
+  static const List<IconData> _tabIcons = <IconData>[
+    Icons.landscape_rounded,         // Reise
+    Icons.self_improvement_rounded,  // Reflektieren
+    Icons.lightbulb_rounded,         // Impulse
+    Icons.people_alt_rounded,        // Community
+    Icons.person_rounded,            // Profil
+  ];
+
+  static const List<String> _tabTitles = <String>[
+    'Reise',
+    'Reflektieren',
+    'Impulse',
+    'Community',
+    'Profil',
+  ];
+
+  static const List<PageStorageKey<String>> _screenKeys =
+      <PageStorageKey<String>>[
+    PageStorageKey<String>('journey_screen'),
+    PageStorageKey<String>('reflection_screen'),
+    PageStorageKey<String>('impulse_screen'),
+    PageStorageKey<String>('community_screen'),
+    PageStorageKey<String>('pro_screen'),
+  ];
+
+  @override
+  String? get restorationId => 'zen_home_screen';
+
+  @override
+  void restoreState(RestorationBucket? oldBucket, bool initialRestore) {
+    registerForRestoration(_currentTab, 'tab_index');
+  }
+
+  @override
+  void dispose() {
+    _currentTab.dispose();
+    super.dispose();
+  }
+
+  void _selectTab(int i) {
+    if (_tabIndex == i) {
+      // Haptics bei Re-Select; optional: scroll-to-top broadcast
+      HapticFeedback.selectionClick();
+      return;
+    }
+    setState(() => _tabIndex = i);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final moodEntries = context.watch<MoodEntriesProvider>().entries;
+    final reflectionEntries =
+        context.watch<ReflectionEntriesProvider>().reflections;
+
+    final List<Widget> screens = <Widget>[
+      PageStorage(
+        bucket: _bucket,
+        child: JourneyMapScreen(
+          key: _screenKeys[0],
+          moodEntries: moodEntries,
+          reflections: reflectionEntries,
+        ),
+      ),
+      // WICHTIG: kein 'const' hier, da der Key per Index kommt.
+      ReflectionScreen(key: _screenKeys[1]),
+      ImpulseScreen(key: _screenKeys[2]),
+      CommunityQuestionVoting(key: _screenKeys[3]),
+      PageStorage(
+        bucket: _bucket,
+        child: ProScreen(
+          key: _screenKeys[4],
+          moodEntries: moodEntries,
+          reflectionEntries: reflectionEntries,
+        ),
+      ),
+    ];
+
+    final overlay = Theme.of(context).brightness == Brightness.dark
+        ? SystemUiOverlayStyle.light
+        : SystemUiOverlayStyle.dark;
+
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: overlay,
+      child: Stack(
+        children: [
+          // 0) Einheitlicher Backdrop (kein Zoom, keine Weißränder)
+          const Positioned.fill(
+            child: ZenBackdrop(
+              asset: 'assets/zen_journey_bg.png', // neutraler Home-BG
+              fixedContain: true,
+              artBaseWidth: 1440,
+              artBaseHeight: 810,
+              glow: .36,
+              enableHaze: true,
+              hazeStrength: .14,
+              vignette: .12,
+              dimRight: false,
+            ),
+          ),
+
+          // Inhalt + AppBar
+          WillPopScope(
+            onWillPop: () async {
+              if (_tabIndex != 0) {
+                setState(() => _tabIndex = 0);
+                return false;
+              }
+              return true;
+            },
+            child: Scaffold(
+              backgroundColor: Colors.transparent,
+              extendBodyBehindAppBar: true,
+              appBar: _ZenAppBar(
+                tabIndex: _tabIndex,
+                onSettingsTap: () => setState(() => _tabIndex = 4),
+              ),
+              body: SafeArea(
+                top: false,
+                bottom: false,
+                child: Semantics(
+                  label: 'ZenYourself Hauptbildschirm',
+                  child: IndexedStack(index: _tabIndex, children: screens),
+                ),
+              ),
+              bottomNavigationBar: ZenTabBar(
+                currentIndex: _tabIndex,
+                onTap: _selectTab,
+                items: List<ZenTabItem>.generate(
+                  _tabIcons.length,
+                  (int i) => ZenTabItem(_tabIcons[i], _tabTitles[i]),
+                ),
+              ),
+              floatingActionButton:
+                  _tabIndex == 1 ? const _ZenReflectFab() : null,
+              floatingActionButtonLocation:
+                  FloatingActionButtonLocation.endFloat,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ---- Glas-AppBar (stärkerer Blur, feiner Border, ruhige Opazität) ----
+class _ZenAppBar extends StatelessWidget implements PreferredSizeWidget {
+  final int tabIndex;
+  final VoidCallback onSettingsTap;
+
+  const _ZenAppBar({
+    Key? key,
+    required this.tabIndex,
+    required this.onSettingsTap,
+  }) : super(key: key);
+
+  @override
+  Size get preferredSize => const Size.fromHeight(60);
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: const BorderRadius.vertical(bottom: zs.ZenRadii.xl),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+        child: AnimatedContainer(
+          duration: zs.animMed,
+          decoration: BoxDecoration(
+            color: zs.ZenColors.white.withOpacity(0.88),
+            borderRadius: const BorderRadius.vertical(bottom: zs.ZenRadii.xl),
+            border: Border(
+              bottom: BorderSide(
+                color: zs.ZenColors.sage.withOpacity(0.18),
+                width: 1.0,
+              ),
+            ),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x14000000), // ~8%
+                blurRadius: 18,
+                offset: Offset(0, 6),
+              ),
+            ],
+          ),
+          child: Padding(
+            padding:
+                const EdgeInsets.only(top: 18, right: 22, left: 10, bottom: 4),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                // Settings nur ausblenden, wenn bereits im Profil
+                AnimatedSwitcher(
+                  duration: zs.animShort,
+                  child: tabIndex != 4
+                      ? IconButton(
+                          key: const ValueKey<String>('settings-btn'),
+                          icon: const Icon(
+                            Icons.settings,
+                            color: zs.ZenColors.jade,
+                            size: 27,
+                          ),
+                          tooltip: 'Profil & Einstellungen',
+                          onPressed: onSettingsTap,
+                        )
+                      : const SizedBox(width: 38),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ---- Zen FloatingActionButton für „Reflektieren“ ----
+class _ZenReflectFab extends StatefulWidget {
+  const _ZenReflectFab({Key? key}) : super(key: key);
+
+  @override
+  State<_ZenReflectFab> createState() => _ZenReflectFabState();
+}
+
+class _ZenReflectFabState extends State<_ZenReflectFab>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _glowController;
+
+  @override
+  void initState() {
+    super.initState();
+    _glowController =
+        AnimationController(vsync: this, duration: zs.animLong)..repeat(
+          reverse: true,
+        );
+  }
+
+  @override
+  void dispose() {
+    _glowController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _glowController,
+      builder: (context, child) {
+        final double glow = 13 + 14 * _glowController.value;
+        return Container(
+          decoration: BoxDecoration(
+            boxShadow: <BoxShadow>[
+              BoxShadow(
+                color: zs.ZenColors.jadeMid
+                    .withOpacity(0.21 + 0.08 * _glowController.value),
+                blurRadius: glow,
+                spreadRadius: 1.3,
+              ),
+            ],
+            borderRadius: const BorderRadius.all(zs.ZenRadii.l),
+          ),
+          child: Semantics(
+            button: true,
+            label: 'Reflexion starten',
+            child: FloatingActionButton.extended(
+              heroTag: 'reflect_btn',
+              backgroundColor: zs.ZenColors.jade,
+              elevation: 1.7,
+              onPressed: () async {
+                HapticFeedback.lightImpact();
+                await showModalBottomSheet(
+                  context: context,
+                  isScrollControlled: true,
+                  useSafeArea: true,
+                  barrierColor:
+                      zs.ZenColors.jade.withOpacity(0.25), // ruhige grüne Barrier
+                  backgroundColor: Colors.transparent,
+                  shape: const RoundedRectangleBorder(
+                    borderRadius: BorderRadius.vertical(top: zs.ZenRadii.l),
+                  ),
+                  builder: (_) => const ReflectionScreen(),
+                );
+              },
+              icon: const Icon(
+                Icons.self_improvement_rounded,
+                color: Colors.white,
+                size: 25,
+              ),
+              label: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 2.0),
+                child: Text(
+                  'Reflektieren',
+                  style: zs.ZenTextStyles.button.copyWith(
+                    fontSize: 16.4,
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.03,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}

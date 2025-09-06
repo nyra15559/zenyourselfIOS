@@ -1,0 +1,236 @@
+// lib/main.dart
+//
+// ZenYourself — App Bootstrap (Oxford-Zen, Pro-Level, 2025-08)
+// ------------------------------------------------------------
+// • Robustes Bootstrapping (runZonedGuarded, PlatformDispatcher.onError)
+// • API-Wiring mit --dart-define Fallback auf ZenEnv (env_config.dart)
+// • Provider-Setup inkl. Journal-Persistenz (kanonisch)
+// • A11y, i18n, Themes, sanftes Scroll-Verhalten
+
+import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:provider/provider.dart';
+import 'app_theme.dart';
+
+// --- State Management Provider ---
+import 'models/mood_entries_provider.dart';
+import 'models/reflection_entries_provider.dart';
+import 'models/user_profile_provider.dart';
+import 'models/app_settings.dart'; // ← persistente AppSettings (KANON)
+import 'providers/journal_entries_provider.dart'; // ← kanonischer Journal-Store
+
+// --- Kanonisches Journal-Modell (für Provider + Persistenz) ---
+import 'models/journal_entry.dart' as jm;
+
+// --- Accessibility ---
+import 'features/accessibility/color_blind_mode.dart';
+import 'features/accessibility/large_text_mode.dart';
+import 'features/accessibility/a11y_utils.dart';
+
+// --- Audio/Sound ---
+import 'audio/soundscape_manager.dart';
+
+// --- Local Storage Service ---
+import 'services/local_storage.dart';
+
+// --- Services (Pro): Guidance + ApiClient ---
+import 'services/guidance_service.dart';
+import 'services/api_client.dart';
+
+// --- Core Screens ---
+import 'features/start/start_screen.dart';
+
+// --- Env Defaults / Fallback ---
+import 'env_config.dart';
+
+/// Compile-Time Konfiguration (per --dart-define)
+const String _kApiUrl = String.fromEnvironment('ZEN_API_URL', defaultValue: '');
+const bool _kApiEnabled =
+    bool.fromEnvironment('ZEN_API_ENABLED', defaultValue: true);
+const String _kApiToken =
+    String.fromEnvironment('ZEN_APP_TOKEN', defaultValue: '');
+
+Future<void> main() async {
+  runZonedGuarded(() async {
+    WidgetsFlutterBinding.ensureInitialized();
+
+    // Lokaler Storage
+    try {
+      await LocalStorageService().init();
+    } catch (e, st) {
+      debugPrint('[Init] LocalStorage error: $e\n$st');
+    }
+
+    // Fehlerabfang
+    FlutterError.onError = (details) {
+      FlutterError.dumpErrorToConsole(details);
+    };
+    WidgetsBinding.instance.platformDispatcher.onError = (error, stack) {
+      debugPrint('[Platform] Uncaught: $error\n$stack');
+      return true;
+    };
+
+    // HTTP-Backend initialisieren (mit Fallback)
+    _setupZenApi();
+
+    runApp(const ZenYourselfApp());
+  }, (e, st) {
+    debugPrint('[Zoned] Uncaught: $e\n$st');
+  });
+}
+
+/// Liest zuerst --dart-define, sonst lib/env_config.dart.
+void _setupZenApi() {
+  final bool definesUsed =
+      _kApiUrl.isNotEmpty || _kApiToken.isNotEmpty || !_kApiEnabled;
+
+  final bool enabled = definesUsed ? _kApiEnabled : ZenEnv.apiEnabled;
+  final String url =
+      definesUsed && _kApiUrl.isNotEmpty ? _kApiUrl : ZenEnv.apiUrl;
+  final String token =
+      definesUsed && _kApiToken.isNotEmpty ? _kApiToken : ZenEnv.appToken;
+
+  if (enabled && url.isNotEmpty) {
+    try {
+      final client = ApiClient(
+        baseUrl: Uri.parse(url),
+        tokenProvider: () async => token.isNotEmpty ? token : null,
+        onLog: (msg) => debugPrint('[Api] $msg'),
+      );
+
+      GuidanceService.instance.configureHttp(
+        invoker: client.call,
+        baseUrl: client.baseUrlStr,
+      );
+
+      if (token.isEmpty) {
+        debugPrint(
+            '⚠️  ZenYourself: Kein APP_TOKEN gesetzt – der Worker könnte 401/403 liefern.');
+      }
+      debugPrint('✅ GuidanceService HTTP enabled → $url');
+    } catch (e, st) {
+      debugPrint('❌ ApiClient setup failed: $e\n$st');
+    }
+  } else {
+    debugPrint(
+      'ℹ️ GuidanceService HTTP disabled (lokaler Fallback aktiv). '
+      'Grund: enabled=$enabled, url="${url.isEmpty ? '<leer>' : url}"',
+    );
+  }
+}
+
+class ZenYourselfApp extends StatelessWidget {
+  const ZenYourselfApp({Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    final storage = LocalStorageService();
+
+    return MultiProvider(
+      providers: [
+        // --- A11y / System ---
+        ChangeNotifierProvider(create: (_) => ColorBlindModeProvider(false)),
+        ChangeNotifierProvider(create: (_) => LargeTextModeProvider()),
+        ChangeNotifierProvider(create: (_) => SoundscapeManager()),
+        ChangeNotifierProvider(create: (_) => UserProfileProvider()),
+        ChangeNotifierProvider(create: (_) => AppSettings()),
+
+        // --- Domain ---
+        ChangeNotifierProvider(create: (_) => MoodEntriesProvider()),
+        ChangeNotifierProvider(create: (_) => ReflectionEntriesProvider()),
+
+        // JournalEntriesProvider mit Persistenz-Hooks (KANON)
+        ChangeNotifierProvider(
+          create: (_) {
+            final p = JournalEntriesProvider();
+            // Restore & Persist (asynchron starten)
+            // ignore: discarded_futures
+            p.attachPersistence(
+              load: () async => await storage
+                  .loadJournalEntries<jm.JournalEntry>(jm.JournalEntry.fromMap),
+              save: (entries) async => await storage.saveJournalEntries(entries),
+              loadNow: true,
+            );
+            return p;
+          },
+        ),
+      ],
+      child: const _ZenYourselfMaterialApp(),
+    );
+  }
+}
+
+class _ZenYourselfMaterialApp extends StatelessWidget {
+  const _ZenYourselfMaterialApp({Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = context.watch<AppSettings>();
+    final isDark = settings.darkMode;
+
+    return A11yProvider(
+      colorBlind: context.watch<ColorBlindModeProvider>().enabled,
+      darkMode: isDark,
+      child: LargeTextProvider(
+        child: MaterialApp(
+          restorationScopeId: 'zenyourself-app',
+          debugShowCheckedModeBanner: false,
+
+          // Locale / i18n
+          locale: settings.locale,
+          supportedLocales: const [
+            Locale('de', 'DE'),
+            Locale('en', 'US'),
+            Locale('fr', 'FR'),
+            Locale('it', 'IT'),
+          ],
+          localizationsDelegates: const [
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
+          localeListResolutionCallback:
+              (List<Locale>? locales, Iterable<Locale> supported) {
+            if (locales == null || locales.isEmpty) return supported.first;
+            for (final dev in locales) {
+              for (final s in supported) {
+                final lang = s.languageCode == dev.languageCode;
+                final regionOk =
+                    s.countryCode == null || s.countryCode == dev.countryCode;
+                if (lang && regionOk) return s;
+              }
+              for (final s in supported) {
+                if (s.languageCode == dev.languageCode) return s;
+              }
+            }
+            return supported.first;
+          },
+
+          // Themes
+          themeMode: isDark ? ThemeMode.dark : ThemeMode.light,
+          theme: AppTheme.light,
+          darkTheme: AppTheme.dark,
+
+          // UX-Verhalten
+          scrollBehavior: const _ZenScrollBehavior(),
+
+          // Start
+          home: const StartScreen(),
+        ),
+      ),
+    );
+  }
+}
+
+class _ZenScrollBehavior extends MaterialScrollBehavior {
+  const _ZenScrollBehavior();
+  @override
+  Widget buildOverscrollIndicator(
+    BuildContext context,
+    Widget child,
+    ScrollableDetails details,
+  ) {
+    return child; // kein Glow
+  }
+}

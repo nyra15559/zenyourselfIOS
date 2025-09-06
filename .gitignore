@@ -1,0 +1,17 @@
+/flutter/
+/zen_project1337_backup_*/
+.buildlog/
+/build/
+/.dart_tool/
+/.flutter-plugins
+/.flutter-plugins-dependencies
+.packages
+.melos_tool
+.idea/
+/.vscode/
+/.DS_Store
+patches/*.rej
+
+# dumps & backups
+*.csv
+*.zip
