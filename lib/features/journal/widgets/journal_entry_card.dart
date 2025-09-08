@@ -11,8 +11,8 @@
 // • Animation ohne projektexterne Tokens (Duration/Curve lokal).
 
 import 'package:flutter/material.dart';
-import '../../models/journal_entry.dart';
-import '../../shared/zen_style.dart' as zs;
+import '../../../models/journal_entry.dart';
+import '../../../shared/zen_style.dart' as zs;
 
 class JournalEntryCard extends StatefulWidget {
   final JournalEntry entry;
