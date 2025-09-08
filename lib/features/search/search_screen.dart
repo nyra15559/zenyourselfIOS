@@ -15,7 +15,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../providers/journal_entries_provider.dart';
-import '../../data/journal_entry.dart';
+import '../../models/journal_entry.dart';
 import '../../shared/zen_style.dart';
 
 class SearchScreen extends StatefulWidget {
@@ -190,7 +190,7 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
       runSpacing: 8,
       children: [
         build('Alle', Icons.all_inclusive, null),
-        build('Notizen', Icons.edit_note_rounded, JournalType.note),
+        build('Notizen', Icons.edit_note_rounded, JournalType.journal),
         build('Reflexionen', Icons.psychology_rounded, JournalType.reflection),
         build('Stories', Icons.auto_stories_rounded, JournalType.story),
       ],
@@ -308,7 +308,7 @@ class _SearchResultTile extends StatelessWidget {
 
   static IconData _typeIcon(JournalType t) {
     switch (t) {
-      case JournalType.note:
+      case JournalType.journal:
         return Icons.edit_note_rounded;
       case JournalType.reflection:
         return Icons.psychology_rounded;
@@ -319,7 +319,7 @@ class _SearchResultTile extends StatelessWidget {
 
   static Color _typeColor(JournalType t) {
     switch (t) {
-      case JournalType.note:
+      case JournalType.journal:
         return ZenColors.deepSage;
       case JournalType.reflection:
         return ZenColors.jadeMid;

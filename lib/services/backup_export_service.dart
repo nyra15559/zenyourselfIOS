@@ -41,7 +41,7 @@
 import 'dart:convert';
 import 'dart:io';
 
-import '../data/journal_entry.dart';
+import '../models/journal_entry.dart';
 
 class BackupBundle {
   /// Basis des Dateinamens, z. B. "zen_backup_2025-01-10_201530Z"

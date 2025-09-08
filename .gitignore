@@ -17,3 +17,4 @@ patches/*.rej
 *.zip
 
 legacy_backup/
+legacy_disabled/

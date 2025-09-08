@@ -5,7 +5,7 @@
 import 'dart:convert';
 import 'dart:io' show File;
 
-import '../data/journal_entry.dart';
+import '../models/journal_entry.dart';
 import 'persistence_adapter.dart';
 import 'persistence_serializer.dart';
 

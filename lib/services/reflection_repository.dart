@@ -19,7 +19,7 @@
 
 import 'dart:convert';
 import '../data/reflection_entry.dart';
-import '../data/journal_entry.dart';
+import '../models/journal_entry.dart';
 import '../services/local_storage.dart';
 
 class ReflectionRepository {

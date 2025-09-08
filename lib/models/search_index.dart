@@ -34,7 +34,7 @@
 
 import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
-import '../data/journal_entry.dart';
+import '../models/journal_entry.dart';
 
 /// Ergebnis eines Suchtreffers.
 class SearchHit {
