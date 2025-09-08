@@ -410,7 +410,7 @@ class _StoryGate extends StatelessWidget {
                             HapticFeedback.selectionClick();
                             Navigator.of(context).push(
                               MaterialPageRoute(
-                                  builder: (_) => const ReflectionScreen()),
+                                  builder: (_) => ReflectionScreen()),
                             );
                           },
                     style: ElevatedButton.styleFrom(
