@@ -145,7 +145,7 @@ class _CoachingAudioPlayerState extends State<CoachingAudioPlayer> {
       child: ZenCard(
         elevation: 7,
         borderRadius: ZenRadii.l,
-        color: ZenColors.white.withOpacity(0.96),
+        color: ZenColors.white.withValues(alpha: 0.96),
         padding: const EdgeInsets.symmetric(
           vertical: ZenSpacing.m,
           horizontal: ZenSpacing.m,
@@ -185,7 +185,7 @@ class _CoachingAudioPlayerState extends State<CoachingAudioPlayer> {
                       shadows: [
                         Shadow(
                           blurRadius: 8,
-                          color: ZenColors.jade.withOpacity(0.12),
+                          color: ZenColors.jade.withValues(alpha: 0.12),
                           offset: const Offset(0, 2),
                         ),
                       ],
@@ -241,7 +241,7 @@ class _CoachingAudioPlayerState extends State<CoachingAudioPlayer> {
             IconButton(
               tooltip: "15 Sekunden zurück",
               onPressed: () => _seekRelative(const Duration(seconds: -15)),
-              icon: Icon(Icons.replay_10_rounded, color: _accent.withOpacity(0.9)),
+              icon: Icon(Icons.replay_10_rounded, color: _accent.withValues(alpha: 0.9)),
             ),
             // Play/Pause
             Semantics(
@@ -260,7 +260,7 @@ class _CoachingAudioPlayerState extends State<CoachingAudioPlayer> {
             IconButton(
               tooltip: "15 Sekunden vor",
               onPressed: () => _seekRelative(const Duration(seconds: 15)),
-              icon: Icon(Icons.forward_10_rounded, color: _accent.withOpacity(0.9)),
+              icon: Icon(Icons.forward_10_rounded, color: _accent.withValues(alpha: 0.9)),
             ),
           ],
         ),
@@ -270,7 +270,7 @@ class _CoachingAudioPlayerState extends State<CoachingAudioPlayer> {
           children: [
             Text(
               _fmt(position),
-              style: TextStyle(fontSize: 12.5, color: ZenColors.inkSubtle.withOpacity(0.9)),
+              style: TextStyle(fontSize: 12.5, color: ZenColors.inkSubtle.withValues(alpha: 0.9)),
             ),
             Expanded(
               child: Slider(
@@ -279,12 +279,12 @@ class _CoachingAudioPlayerState extends State<CoachingAudioPlayer> {
                 max: maxMs,
                 onChanged: (v) => _player.seek(Duration(milliseconds: v.toInt())),
                 activeColor: _accent,
-                inactiveColor: _accent.withOpacity(0.18),
+                inactiveColor: _accent.withValues(alpha: 0.18),
               ),
             ),
             Text(
               _fmt(duration),
-              style: TextStyle(fontSize: 12.5, color: ZenColors.inkSubtle.withOpacity(0.9)),
+              style: TextStyle(fontSize: 12.5, color: ZenColors.inkSubtle.withValues(alpha: 0.9)),
             ),
           ],
         ),

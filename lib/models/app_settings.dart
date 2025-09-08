@@ -251,7 +251,7 @@ class AppSettings extends ChangeNotifier {
 
       bool changed = false;
 
-      bool _apply<T>(T? incoming, T current, void Function(T) setField) {
+      bool apply<T>(T? incoming, T current, void Function(T) setField) {
         if (incoming != null && incoming != current) {
           setField(incoming);
           return true;
@@ -259,9 +259,9 @@ class AppSettings extends ChangeNotifier {
         return false;
       }
 
-      if (_apply<bool>(dm, darkMode, (v) => darkMode = v)) changed = true;
-      if (_apply<bool>(lt, largeText, (v) => largeText = v)) changed = true;
-      if (_apply<bool>(cb, colorBlindMode, (v) => colorBlindMode = v)) changed = true;
+      if (apply<bool>(dm, darkMode, (v) => darkMode = v)) changed = true;
+      if (apply<bool>(lt, largeText, (v) => largeText = v)) changed = true;
+      if (apply<bool>(cb, colorBlindMode, (v) => colorBlindMode = v)) changed = true;
 
       final decoded = _decodeLocale(locStr);
       if (decoded != null &&
@@ -271,7 +271,7 @@ class AppSettings extends ChangeNotifier {
         changed = true;
       }
 
-      if (_apply<bool>(tOn, therapistModeEnabled, (v) => therapistModeEnabled = v)) {
+      if (apply<bool>(tOn, therapistModeEnabled, (v) => therapistModeEnabled = v)) {
         changed = true;
       }
 
@@ -301,7 +301,7 @@ class AppSettings extends ChangeNotifier {
 
   static String _encodeLocale(Locale l) {
     final cc = l.countryCode;
-    return (cc == null || cc.isEmpty) ? l.languageCode : '${l.languageCode}_${cc}';
+    return (cc == null || cc.isEmpty) ? l.languageCode : '${l.languageCode}_$cc';
   }
 
   static Locale? _decodeLocale(String? s) {

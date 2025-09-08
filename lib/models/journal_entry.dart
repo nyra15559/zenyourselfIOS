@@ -550,7 +550,7 @@ List<String> _asStringList(dynamic v) {
   if (v is List) {
     return v
         .map((e) => _asString(e))
-        .where((s) => s != null && s!.trim().isNotEmpty)
+        .where((s) => s != null && s.trim().isNotEmpty)
         .map((s) => s!.trim())
         .toList(growable: false);
   }

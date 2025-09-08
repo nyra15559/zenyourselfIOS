@@ -39,10 +39,10 @@ class ProScreen extends StatelessWidget {
   final List<ReflectionEntry> reflectionEntries;
 
   const ProScreen({
-    Key? key,
+    super.key,
     required this.moodEntries,
     required this.reflectionEntries,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -56,23 +56,23 @@ class ProScreen extends StatelessWidget {
 
     // Serie & Kennzahlen aus Provider (−2 … +2); Fallbacks auf Legacy.
     final series = hasProv
-        ? _seriesFromProvider(prov!, days: 30)
+        ? _seriesFromProvider(prov, days: 30)
         : _fallbackSeriesFromMoodEntries(moodEntries);
 
     final avgMood = hasProv
-        ? _averageMoodFromProvider(prov!, window: const Duration(days: 30))
+        ? _averageMoodFromProvider(prov, window: const Duration(days: 30))
         : _fallbackAvgMoodFromMoodEntries(moodEntries);
 
     final reflectionsCount = hasProv
-        ? prov!.reflections.length
+        ? prov.reflections.length
         : reflectionEntries.length;
 
     final activeDays = hasProv
-        ? _activeDaysCountFromProvider(prov!)
+        ? _activeDaysCountFromProvider(prov)
         : moodEntries.map((e) => e.dayTag).toSet().length;
 
     final lastInsights = hasProv
-        ? prov!.reflections.take(5).toList()
+        ? prov.reflections.take(5).toList()
         : const <jm.JournalEntry>[];
 
     final last7MoodLegacy = moodEntries.takeLast(7);
@@ -84,9 +84,9 @@ class ProScreen extends StatelessWidget {
     return Scaffold(
       extendBodyBehindAppBar: true,
       backgroundColor: Colors.transparent,
-      appBar: zw.ZenAppBar(
+      appBar: const zw.ZenAppBar(
         title: null,
-        actions: const [
+        actions: [
           Padding(
             padding: EdgeInsets.only(right: 4),
             child: Icon(Icons.settings_outlined, color: zs.ZenColors.deepSage),
@@ -138,7 +138,7 @@ class ProScreen extends StatelessWidget {
                             shadows: [
                               Shadow(
                                 blurRadius: 8,
-                                color: Colors.black.withOpacity(.08),
+                                color: Colors.black.withValues(alpha: .08),
                                 offset: const Offset(0, 2),
                               ),
                             ],
@@ -482,7 +482,7 @@ class ProScreen extends StatelessWidget {
             dense: true,
             contentPadding: EdgeInsets.zero,
             leading: Icon(Icons.bubble_chart_rounded,
-                color: zs.ZenColors.deepSage.withOpacity(0.86)),
+                color: zs.ZenColors.deepSage.withValues(alpha: 0.86)),
             title: Text(
               _bestReflectionTextJournal(e),
               style: tt.bodyMedium!.copyWith(
@@ -510,7 +510,7 @@ class ProScreen extends StatelessWidget {
           dense: true,
           contentPadding: EdgeInsets.zero,
           leading: Icon(Icons.bubble_chart_rounded,
-              color: zs.ZenColors.deepSage.withOpacity(0.86)),
+              color: zs.ZenColors.deepSage.withValues(alpha: 0.86)),
           title: Text(
             _bestReflectionTextLegacy(e),
             style: tt.bodyMedium!.copyWith(
@@ -572,7 +572,7 @@ class ProScreen extends StatelessWidget {
 
 class AnimatedPandaGlow extends StatefulWidget {
   final double size;
-  const AnimatedPandaGlow({this.size = 68, Key? key}) : super(key: key);
+  const AnimatedPandaGlow({this.size = 68, super.key});
   @override
   State<AnimatedPandaGlow> createState() => _AnimatedPandaGlowState();
 }
@@ -606,7 +606,7 @@ class _AnimatedPandaGlowState extends State<AnimatedPandaGlow>
           boxShadow: [
             BoxShadow(
               color: zs.ZenColors.deepSage
-                  .withOpacity(0.10 + 0.17 * _glowController.value),
+                  .withValues(alpha: 0.10 + 0.17 * _glowController.value),
               blurRadius: 30 + 16 * _glowController.value,
               spreadRadius: 4 + 5 * _glowController.value,
             ),
@@ -643,21 +643,21 @@ class _ZenMoodBar extends StatelessWidget {
           margin: const EdgeInsets.symmetric(horizontal: 3),
           decoration: BoxDecoration(
             color: e == null
-                ? Colors.grey.withOpacity(0.12)
-                : e.color.withOpacity(0.96),
+                ? Colors.grey.withValues(alpha: 0.12)
+                : e.color.withValues(alpha: 0.96),
             borderRadius: BorderRadius.circular(10),
             boxShadow: [
               if (e != null)
                 BoxShadow(
-                  color: e.color.withOpacity(0.10),
+                  color: e.color.withValues(alpha: 0.10),
                   blurRadius: 9,
                   offset: const Offset(0, 2),
                 ),
             ],
             border: Border.all(
               color: e == null
-                  ? Colors.grey.withOpacity(0.16)
-                  : e.color.withOpacity(0.35),
+                  ? Colors.grey.withValues(alpha: 0.16)
+                  : e.color.withValues(alpha: 0.35),
               width: 1.1,
             ),
           ),
@@ -697,7 +697,7 @@ class _ZenMoodBarSeries extends StatelessWidget {
       children: List.generate(7, (i) {
         final val = i < norm.length ? norm[i] : null;
         final color = val == null
-            ? Colors.grey.withOpacity(0.12)
+            ? Colors.grey.withValues(alpha: 0.12)
             : (val >= 3.0
                 ? zs.ZenColors.deepSage
                 : (val >= 2.0 ? zs.ZenColors.sage : Colors.grey));
@@ -708,20 +708,20 @@ class _ZenMoodBarSeries extends StatelessWidget {
           margin: const EdgeInsets.symmetric(horizontal: 3),
           decoration: BoxDecoration(
             color:
-                val == null ? Colors.grey.withOpacity(0.12) : color.withOpacity(0.96),
+                val == null ? Colors.grey.withValues(alpha: 0.12) : color.withValues(alpha: 0.96),
             borderRadius: BorderRadius.circular(10),
             boxShadow: [
               if (val != null)
                 BoxShadow(
-                  color: color.withOpacity(0.10),
+                  color: color.withValues(alpha: 0.10),
                   blurRadius: 9,
                   offset: const Offset(0, 2),
                 ),
             ],
             border: Border.all(
               color: val == null
-                  ? Colors.grey.withOpacity(0.16)
-                  : color.withOpacity(0.35),
+                  ? Colors.grey.withValues(alpha: 0.16)
+                  : color.withValues(alpha: 0.35),
               width: 1.1,
             ),
           ),
@@ -749,7 +749,7 @@ class _ZenMoodBarSeries extends StatelessWidget {
 // MoodGraph (fl_chart) – Provider-Serie (−2 … +2) in Glas-Bubble
 class ZenMoodGraphSeries extends StatelessWidget {
   final List<double> series; // −2 … +2; ältestes → neuestes
-  const ZenMoodGraphSeries({required this.series});
+  const ZenMoodGraphSeries({super.key, required this.series});
 
   @override
   Widget build(BuildContext context) {
@@ -762,9 +762,9 @@ class ZenMoodGraphSeries extends StatelessWidget {
         LineChartData(
           minY: -2,
           maxY: 2,
-          gridData: FlGridData(show: false),
+          gridData: const FlGridData(show: false),
           borderData: FlBorderData(show: false),
-          titlesData: FlTitlesData(show: false),
+          titlesData: const FlTitlesData(show: false),
           lineBarsData: [
             LineChartBarData(
               spots: List.generate(
@@ -776,13 +776,13 @@ class ZenMoodGraphSeries extends StatelessWidget {
                 colors: [zs.ZenColors.deepSage, zs.ZenColors.sage],
               ),
               barWidth: 5.0,
-              dotData: FlDotData(show: false),
+              dotData: const FlDotData(show: false),
               belowBarData: BarAreaData(
                 show: true,
                 gradient: LinearGradient(
                   colors: [
-                    zs.ZenColors.sage.withOpacity(0.16),
-                    Colors.white.withOpacity(0.10),
+                    zs.ZenColors.sage.withValues(alpha: 0.16),
+                    Colors.white.withValues(alpha: 0.10),
                   ],
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
@@ -816,7 +816,7 @@ class ZenMoodGraphSeries extends StatelessWidget {
 Widget _vSep() => Container(
       width: 1.6,
       height: 37,
-      color: zs.ZenColors.sage.withOpacity(0.18),
+      color: zs.ZenColors.sage.withValues(alpha: 0.18),
     );
 
 // Statistik-Kachel
@@ -837,7 +837,7 @@ class _ProStatTile extends StatelessWidget {
     return Column(
       children: [
         CircleAvatar(
-          backgroundColor: zs.ZenColors.sage.withOpacity(0.18),
+          backgroundColor: zs.ZenColors.sage.withValues(alpha: 0.18),
           radius: 20.5,
           child: Icon(icon, color: zs.ZenColors.sage, size: 20.5),
         ),

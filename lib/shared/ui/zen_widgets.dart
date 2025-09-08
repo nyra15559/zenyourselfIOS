@@ -155,8 +155,8 @@ class ZenAppBar extends StatelessWidget implements PreferredSizeWidget {
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                   colors: [
-                    Colors.white.withOpacity(.14),
-                    Colors.white.withOpacity(0),
+                    Colors.white.withValues(alpha: .14),
+                    Colors.white.withValues(alpha: 0),
                   ],
                 ),
               ),
@@ -221,7 +221,7 @@ class PandaHeader extends StatelessWidget {
             shadows: [
               Shadow(
                 blurRadius: 8,
-                color: Colors.black.withOpacity(.08),
+                color: Colors.black.withValues(alpha: .08),
                 offset: const Offset(0, 2),
               ),
             ],
@@ -282,7 +282,7 @@ class _AnimatedPandaGlowState extends State<_AnimatedPandaGlow>
           shape: BoxShape.circle,
           boxShadow: [
             BoxShadow(
-              color: ZenColors.deepSage.withOpacity(0.10 + 0.17 * _glow.value),
+              color: ZenColors.deepSage.withValues(alpha: 0.10 + 0.17 * _glow.value),
               blurRadius: 30 + 16 * _glow.value,
               spreadRadius: 4 + 5 * _glow.value,
             ),
@@ -330,8 +330,8 @@ class ZenGlassCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final borderColor = isDark
-        ? Colors.white.withOpacity(borderOpacity)
-        : Colors.black.withOpacity(borderOpacity);
+        ? Colors.white.withValues(alpha: borderOpacity)
+        : Colors.black.withValues(alpha: borderOpacity);
 
     return Padding(
       padding: margin,
@@ -352,8 +352,8 @@ class ZenGlassCard extends StatelessWidget {
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
                       colors: [
-                        Colors.white.withOpacity(topOpacity),
-                        Colors.white.withOpacity(bottomOpacity),
+                        Colors.white.withValues(alpha: topOpacity),
+                        Colors.white.withValues(alpha: bottomOpacity),
                       ],
                     ),
                   ),
@@ -407,11 +407,11 @@ class ZenGlassInput extends StatelessWidget {
           Container(
             decoration: BoxDecoration(
               borderRadius: br,
-              color: Colors.white.withOpacity(isDark ? .06 : .10),
+              color: Colors.white.withValues(alpha: isDark ? .06 : .10),
               border: Border.all(
                 color: isDark
-                    ? Colors.white.withOpacity(.12)
-                    : Colors.black.withOpacity(.08),
+                    ? Colors.white.withValues(alpha: .12)
+                    : Colors.black.withValues(alpha: .08),
                 width: 1.2,
               ),
             ),
@@ -480,7 +480,7 @@ class ZenBackdrop extends StatelessWidget {
         // Wash (Weißschleier)
         if (wash > 0)
           Positioned.fill(
-            child: Container(color: Colors.white.withOpacity(wash.clamp(0, 1))),
+            child: Container(color: Colors.white.withValues(alpha: wash.clamp(0, 1))),
           ),
 
         // Glow (sanftes Aufhellen in der Mitte)
@@ -493,7 +493,7 @@ class ZenBackdrop extends StatelessWidget {
                     center: alignment,
                     radius: 1.0,
                     colors: [
-                      Colors.white.withOpacity(glow.clamp(0, 1) * .55),
+                      Colors.white.withValues(alpha: glow.clamp(0, 1) * .55),
                       Colors.transparent,
                     ],
                     stops: const [0.0, 1.0],
@@ -514,7 +514,7 @@ class ZenBackdrop extends StatelessWidget {
                     radius: 1.1,
                     colors: [
                       Colors.transparent,
-                      Colors.black.withOpacity(vignette.clamp(0, 1)),
+                      Colors.black.withValues(alpha: vignette.clamp(0, 1)),
                     ],
                     stops: const [0.65, 1.0],
                   ),
@@ -529,7 +529,7 @@ class ZenBackdrop extends StatelessWidget {
             child: BackdropFilter(
               filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
               child: Container(
-                color: Colors.white.withOpacity(hazeStrength.clamp(0, 1)),
+                color: Colors.white.withValues(alpha: hazeStrength.clamp(0, 1)),
               ),
             ),
           ),
@@ -613,7 +613,7 @@ class ZenPandaSpeechBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bg = Theme.of(context).colorScheme.surface.withOpacity(.96);
+    final bg = Theme.of(context).colorScheme.surface.withValues(alpha: .96);
 
     return AnimatedContainer(
       duration: _animMed,
@@ -624,12 +624,12 @@ class ZenPandaSpeechBubble extends StatelessWidget {
         borderRadius: const BorderRadius.all(ZenRadii.l),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(.08),
+            color: Colors.black.withValues(alpha: .08),
             blurRadius: elevation,
             offset: const Offset(0, 6),
           ),
         ],
-        border: Border.all(color: ZenColors.outline.withOpacity(.6)),
+        border: Border.all(color: ZenColors.outline.withValues(alpha: .6)),
       ),
       padding: padding,
       child: Stack(
@@ -655,7 +655,7 @@ class ZenPandaSpeechBubble extends StatelessWidget {
               child: CustomPaint(
                 painter: _BubbleTailPainter(
                   fill: bg,
-                  stroke: ZenColors.outline.withOpacity(.6),
+                  stroke: ZenColors.outline.withValues(alpha: .6),
                 ),
                 size: const Size(26, 16),
               ),
@@ -689,7 +689,7 @@ class _BubbleTailPainter extends CustomPainter {
       ..color = stroke
       ..style = PaintingStyle.stroke;
 
-    canvas.drawShadow(p, Colors.black.withOpacity(.18), 3, false);
+    canvas.drawShadow(p, Colors.black.withValues(alpha: .18), 3, false);
     canvas.drawPath(p, fillPaint);
     canvas.drawPath(p, strokePaint);
   }
@@ -789,7 +789,7 @@ class ZenOutlineButton extends StatelessWidget {
       onPressed: onPressed,
       style: OutlinedButton.styleFrom(
         foregroundColor: c,
-        side: BorderSide(color: c.withOpacity(.75), width: 1.1),
+        side: BorderSide(color: c.withValues(alpha: .75), width: 1.1),
         shape: const RoundedRectangleBorder(borderRadius: BorderRadius.all(ZenRadii.l)),
         minimumSize: Size(width ?? 0, height),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -865,10 +865,10 @@ class ZenChipGhost extends StatelessWidget {
       label: Text(label),
       onPressed: onPressed,
       backgroundColor: isDark
-          ? Colors.white.withOpacity(0.06)
-          : ZenColors.surfaceAlt.withOpacity(0.92),
+          ? Colors.white.withValues(alpha: 0.06)
+          : ZenColors.surfaceAlt.withValues(alpha: 0.92),
       labelStyle: Theme.of(context).textTheme.bodyMedium,
-      shape: StadiumBorder(side: BorderSide(color: ZenColors.outline)),
+      shape: const StadiumBorder(side: BorderSide(color: ZenColors.outline)),
       elevation: 0,
       padding: const EdgeInsets.symmetric(
         horizontal: ZenSpacing.chipPadH,
@@ -891,10 +891,10 @@ class ZenChipPrimary extends StatelessWidget {
     return ActionChip(
       label: Text(label),
       onPressed: onPressed,
-      backgroundColor: isDark ? c.withOpacity(0.14) : c.withOpacity(0.10),
+      backgroundColor: isDark ? c.withValues(alpha: 0.14) : c.withValues(alpha: 0.10),
       labelStyle:
           Theme.of(context).textTheme.bodyMedium!.copyWith(color: c, fontWeight: FontWeight.w600),
-      shape: StadiumBorder(side: BorderSide(color: c.withOpacity(0.55))),
+      shape: StadiumBorder(side: BorderSide(color: c.withValues(alpha: 0.55))),
       elevation: 0,
       padding: const EdgeInsets.symmetric(
         horizontal: ZenSpacing.chipPadH,
@@ -913,14 +913,14 @@ class ZenChipOutline extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = (color ?? ZenColors.inkStrong).withOpacity(0.9);
+    final c = (color ?? ZenColors.inkStrong).withValues(alpha: 0.9);
     return ActionChip(
       label: Text(label),
       onPressed: onPressed,
       backgroundColor: Colors.transparent,
       labelStyle:
           Theme.of(context).textTheme.bodyMedium!.copyWith(color: c, fontWeight: FontWeight.w600),
-      shape: StadiumBorder(side: BorderSide(color: ZenColors.outline)),
+      shape: const StadiumBorder(side: BorderSide(color: ZenColors.outline)),
       elevation: 0,
       padding: const EdgeInsets.symmetric(
         horizontal: ZenSpacing.chipPadH,
@@ -960,9 +960,9 @@ class ZenChoiceChip extends StatelessWidget {
       ),
       selected: selected,
       onSelected: onSelected,
-      side: BorderSide(color: selected ? green.withOpacity(.55) : Colors.transparent),
-      selectedColor: green.withOpacity(.10),
-      backgroundColor: (isDark ? Colors.white.withOpacity(.06) : Colors.white.withOpacity(.14)),
+      side: BorderSide(color: selected ? green.withValues(alpha: .55) : Colors.transparent),
+      selectedColor: green.withValues(alpha: .10),
+      backgroundColor: (isDark ? Colors.white.withValues(alpha: .06) : Colors.white.withValues(alpha: .14)),
       showCheckmark: false,
       shape: const StadiumBorder(),
       padding: const EdgeInsets.symmetric(
@@ -1007,9 +1007,9 @@ class PandaMoodChip extends StatelessWidget {
     return Container(
       padding: EdgeInsets.symmetric(horizontal: small ? 8 : 10, vertical: small ? 4 : 6),
       decoration: BoxDecoration(
-        color: ZenColors.sunHaze.withOpacity(.20),
+        color: ZenColors.sunHaze.withValues(alpha: .20),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: ZenColors.outline.withOpacity(.60)),
+        border: Border.all(color: ZenColors.outline.withValues(alpha: .60)),
         boxShadow: const [BoxShadow(color: Color(0x14000000), blurRadius: 6)],
       ),
       child: Row(
@@ -1136,12 +1136,12 @@ class ZenInfoBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = color ?? ZenColors.jade.withOpacity(.08);
+    final c = color ?? ZenColors.jade.withValues(alpha: .08);
     return Container(
       decoration: BoxDecoration(
         color: c,
         borderRadius: const BorderRadius.all(ZenRadii.m),
-        border: Border.all(color: ZenColors.jade.withOpacity(.20)),
+        border: Border.all(color: ZenColors.jade.withValues(alpha: .20)),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       child: Row(
@@ -1199,7 +1199,7 @@ class ZenTextFieldAction extends StatelessWidget {
       style: OutlinedButton.styleFrom(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         shape: const StadiumBorder(),
-        side: BorderSide(color: ZenColors.jade.withOpacity(.55), width: 1.2),
+        side: BorderSide(color: ZenColors.jade.withValues(alpha: .55), width: 1.2),
         minimumSize: const Size(0, 42),
       ),
     );
@@ -1326,7 +1326,7 @@ class ZenCenteredLoadingOverlay extends StatelessWidget {
       child: IgnorePointer(
         ignoring: ignoreTouches,
         child: Container(
-          color: Colors.black.withOpacity(0.08),
+          color: Colors.black.withValues(alpha: 0.08),
           padding: EdgeInsets.only(top: topPad),
           child: Center(
             child: ConstrainedBox(
@@ -1399,13 +1399,13 @@ class ZenCard extends StatelessWidget {
         padding: padding,
         borderRadius: borderRadius,
         child: _CardInner(
-          child: child,
           width: width,
           height: height,
           elevation: elevation,
           showWatermark: showWatermark,
           bgColor: null, // ZenGlassCard liefert den Fond
           borderRadius: borderRadius,
+          child: child,
         ),
       );
     }
@@ -1413,13 +1413,13 @@ class ZenCard extends StatelessWidget {
     return Padding(
       padding: margin,
       child: _CardInner(
-        child: child,
         width: width,
         height: height,
         elevation: elevation,
         showWatermark: showWatermark,
         bgColor: color ?? Theme.of(context).colorScheme.surface,
         borderRadius: borderRadius,
+        child: child,
       ),
     );
   }
@@ -1456,7 +1456,7 @@ class _CardInner extends StatelessWidget {
         borderRadius: borderRadius,
         boxShadow: ZenShadows.card,
         border: Border.all(
-          color: isDark ? Colors.white.withOpacity(.05) : Colors.black.withOpacity(.03),
+          color: isDark ? Colors.white.withValues(alpha: .05) : Colors.black.withValues(alpha: .03),
         ),
       ),
       child: child,

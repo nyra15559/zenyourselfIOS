@@ -12,8 +12,6 @@
 // System (Sound/TTS/Provider) ohne neue Abhängigkeiten weiter funktioniert.
 
 import 'package:flutter/material.dart';
-import '../../shared/zen_style.dart' as zs
-    hide ZenBackdrop, ZenGlassCard, ZenAppBar;
 import '../../shared/ui/zen_widgets.dart' as zw
     show ZenBackdrop, ZenGlassCard, ZenAppBar, PandaHeader, ZenToast;
 
@@ -32,7 +30,7 @@ class StoryViewScreen extends StatefulWidget {
   final bool initiallyPlaying;
 
   const StoryViewScreen({
-    Key? key,
+    super.key,
     required this.title,
     required this.storyText,
     required this.createdAt,
@@ -41,7 +39,7 @@ class StoryViewScreen extends StatefulWidget {
     this.onSave,
     this.onDelete,
     this.initiallyPlaying = false,
-  }) : super(key: key);
+  });
 
   @override
   State<StoryViewScreen> createState() => _StoryViewScreenState();
@@ -140,11 +138,11 @@ class _StoryViewScreenState extends State<StoryViewScreen> {
 
     return Scaffold(
       extendBodyBehindAppBar: true,
-      appBar: PreferredSize(
-        preferredSize: const Size.fromHeight(64),
+      appBar: const PreferredSize(
+        preferredSize: Size.fromHeight(64),
         child: zw.ZenAppBar(
           title: 'Kurzgeschichte',
-          actions: const [],
+          actions: [],
         ),
       ),
       body: Stack(
@@ -211,14 +209,13 @@ class _ActionBar extends StatelessWidget {
   final VoidCallback onDelete;
 
   const _ActionBar({
-    Key? key,
     required this.isPlaying,
     required this.isSaving,
     required this.isDeleting,
     required this.onTogglePlay,
     required this.onSave,
     required this.onDelete,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {

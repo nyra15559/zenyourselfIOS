@@ -57,7 +57,6 @@ class _PandaStep {
     this.talkLines = const [],
     this.followups = const [],
     this.risk = false,
-    this.answer,
   });
 
   bool get hasAnswer => (answer ?? '').trim().isNotEmpty;
@@ -1194,13 +1193,13 @@ class _RoundBubble extends StatelessWidget {
   Widget build(BuildContext context) {
     final tt = Theme.of(context).textTheme;
     final base = tt.bodyMedium!;
-    final timeStyle = base.copyWith(color: Colors.black.withOpacity(.55), fontSize: 12);
+    final timeStyle = base.copyWith(color: Colors.black.withValues(alpha: .55), fontSize: 12);
 
     // Label neutral & klein, nicht fett
     final labelStyle = base.copyWith(
       fontSize: 12,
       fontWeight: FontWeight.w400,
-      color: Colors.black.withOpacity(.55),
+      color: Colors.black.withValues(alpha: .55),
       letterSpacing: .3,
     );
 
@@ -1529,12 +1528,12 @@ class _InputBar extends StatelessWidget {
   Widget build(BuildContext context) {
     const jade = ZenColors.jade;
     final baseText = Theme.of(context).textTheme.bodyMedium!;
-    final hintStyle = baseText.copyWith(color: jade.withOpacity(0.55));
+    final hintStyle = baseText.copyWith(color: jade.withValues(alpha: 0.55));
 
     final List<BoxShadow> pulse = isRecording
         ? [
-            BoxShadow(color: Colors.black.withOpacity(0.10), blurRadius: 14, offset: const Offset(0, 4)),
-            BoxShadow(color: jade.withOpacity(0.30), blurRadius: 22, spreadRadius: 1.2),
+            BoxShadow(color: Colors.black.withValues(alpha: 0.10), blurRadius: 14, offset: const Offset(0, 4)),
+            BoxShadow(color: jade.withValues(alpha: 0.30), blurRadius: 22, spreadRadius: 1.2),
           ]
         : [
             const BoxShadow(color: Color(0x14000000), blurRadius: 18, offset: Offset(0, 6)),
@@ -1553,7 +1552,7 @@ class _InputBar extends StatelessWidget {
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: const BorderRadius.all(ZenRadii.l),
-            border: Border.all(color: jade.withOpacity(0.75), width: 2),
+            border: Border.all(color: jade.withValues(alpha: 0.75), width: 2),
             boxShadow: pulse,
           ),
           padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
@@ -1585,7 +1584,7 @@ class _InputBar extends StatelessWidget {
                       IconButton(
                         tooltip: 'Panda weiterreden',
                         onPressed: onTalk,
-                        icon: Icon(Icons.chat_bubble_outline_rounded, color: jade),
+                        icon: const Icon(Icons.chat_bubble_outline_rounded, color: jade),
                       ),
                       IconButton(
                         tooltip: isRecording ? 'Aufnahme stoppen' : 'Sprechen',
@@ -1597,7 +1596,7 @@ class _InputBar extends StatelessWidget {
                         onPressed: (hasText && canSend && onSend != null) ? onSend : null,
                         icon: Icon(
                           Icons.send_rounded,
-                          color: (hasText && canSend && onSend != null) ? jade : jade.withOpacity(0.45),
+                          color: (hasText && canSend && onSend != null) ? jade : jade.withValues(alpha: 0.45),
                         ),
                       ),
                     ],

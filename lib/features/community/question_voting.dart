@@ -17,7 +17,7 @@ import 'package:zenyourself/services/local_storage.dart';
 enum _SortMode { top, neu }
 
 class CommunityQuestionVoting extends StatefulWidget {
-  const CommunityQuestionVoting({Key? key}) : super(key: key);
+  const CommunityQuestionVoting({super.key});
 
   @override
   State<CommunityQuestionVoting> createState() => _CommunityQuestionVotingState();
@@ -121,7 +121,7 @@ class _CommunityQuestionVotingState extends State<CommunityQuestionVoting>
             child: Container(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
-                  colors: [Colors.white.withOpacity(0.20), Colors.transparent],
+                  colors: [Colors.white.withValues(alpha: 0.20), Colors.transparent],
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                 ),
@@ -139,10 +139,10 @@ class _CommunityQuestionVotingState extends State<CommunityQuestionVoting>
                   child: Container(
                     constraints: const BoxConstraints(maxWidth: 520),
                     decoration: BoxDecoration(
-                      color: ZenColors.white.withOpacity(0.82),
+                      color: ZenColors.white.withValues(alpha: 0.82),
                       borderRadius: BorderRadius.circular(30),
-                      boxShadow: [ZenShadows.card],
-                      border: Border.all(color: ZenColors.jadeMid.withOpacity(0.08), width: 1.2),
+                      boxShadow: const [ZenShadows.card],
+                      border: Border.all(color: ZenColors.jadeMid.withValues(alpha: 0.08), width: 1.2),
                     ),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 18),
@@ -193,7 +193,7 @@ class _CommunityQuestionVotingState extends State<CommunityQuestionVoting>
                             style: OutlinedButton.styleFrom(
                               foregroundColor: ZenColors.jade,
                               side: const BorderSide(color: ZenColors.jade, width: 1.2),
-                              backgroundColor: Colors.white.withOpacity(0.75),
+                              backgroundColor: Colors.white.withValues(alpha: 0.75),
                               textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
                               padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
@@ -228,10 +228,10 @@ class _CommunityQuestionVotingState extends State<CommunityQuestionVoting>
                     child: Container(
                       padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 22),
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.95),
+                        color: Colors.white.withValues(alpha: 0.95),
                         borderRadius: BorderRadius.circular(23),
-                        boxShadow: [ZenShadows.card],
-                        border: Border.all(color: ZenColors.jadeMid.withOpacity(0.10)),
+                        boxShadow: const [ZenShadows.card],
+                        border: Border.all(color: ZenColors.jadeMid.withValues(alpha: 0.10)),
                       ),
                       child: Text(
                         _toastMessage!,
@@ -275,7 +275,7 @@ class _SortChips extends StatelessWidget {
           backgroundColor: ZenColors.white,
           selectedColor: ZenColors.jade,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          side: BorderSide(color: ZenColors.jade.withOpacity(0.20)),
+          side: BorderSide(color: ZenColors.jade.withValues(alpha: 0.20)),
         ),
       );
     }
@@ -304,7 +304,7 @@ class _QuestionBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final baseColor = hasVoted ? ZenColors.sage : ZenColors.jadeMid;
-    final bg = hasVoted ? ZenColors.sage.withOpacity(0.12) : Colors.white.withOpacity(0.98);
+    final bg = hasVoted ? ZenColors.sage.withValues(alpha: 0.12) : Colors.white.withValues(alpha: 0.98);
 
     return Semantics(
       container: true,
@@ -319,7 +319,7 @@ class _QuestionBubble extends StatelessWidget {
           color: bg,
           borderRadius: BorderRadius.circular(19),
           boxShadow: hasVoted ? [] : [ZenShadows.soft],
-          border: Border.all(color: baseColor.withOpacity(hasVoted ? 0.40 : 0.12), width: 1.1),
+          border: Border.all(color: baseColor.withValues(alpha: hasVoted ? 0.40 : 0.12), width: 1.1),
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,

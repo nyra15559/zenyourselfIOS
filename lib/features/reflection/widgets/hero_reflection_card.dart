@@ -247,7 +247,7 @@ class HeroReflectionCard extends StatelessWidget {
             child: IgnorePointer(
               child: Container(
                 decoration: BoxDecoration(
-                  color: ZenColors.surface.withOpacity(.55),
+                  color: ZenColors.surface.withValues(alpha: .55),
                   borderRadius: const BorderRadius.all(ZenRadii.l),
                 ),
               ),

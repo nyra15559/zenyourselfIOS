@@ -51,7 +51,7 @@ void main() {
           builder: (context, child) {
             final mq = MediaQuery.of(context);
             return MediaQuery(
-              data: mq.copyWith(textScaleFactor: 1.8),
+              data: mq.copyWith(textScaler: const TextScaler.linear(1.8)),
               child: child!,
             );
           },
@@ -70,7 +70,7 @@ void main() {
 // --- Testbed -----------------------------------------------------------------
 
 class _TestApp extends StatelessWidget {
-  const _TestApp({super.key});
+  const _TestApp();
 
   @override
   Widget build(BuildContext context) {
@@ -81,7 +81,7 @@ class _TestApp extends StatelessWidget {
 }
 
 class _CounterPage extends StatefulWidget {
-  const _CounterPage({super.key});
+  const _CounterPage();
 
   @override
   State<_CounterPage> createState() => _CounterPageState();

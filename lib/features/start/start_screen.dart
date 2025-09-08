@@ -26,7 +26,7 @@ import '../../models/reflection_entries_provider.dart';
 import '../journey/journey_map.dart';
 
 class StartScreen extends StatelessWidget {
-  const StartScreen({Key? key}) : super(key: key);
+  const StartScreen({super.key});
 
   static const String _bgAsset = 'assets/startscreen1.png';
   static const String _pandaAsset = 'assets/panda.png';
@@ -109,7 +109,7 @@ class StartScreen extends StatelessWidget {
                             style: titleStyle.copyWith(
                               fontWeight: FontWeight.w800,
                               letterSpacing: -0.2,
-                              color: zs.ZenColors.inkStrong.withOpacity(0.90),
+                              color: zs.ZenColors.inkStrong.withValues(alpha: 0.90),
                             ),
                           ),
 
@@ -133,9 +133,9 @@ class StartScreen extends StatelessWidget {
                             label:
                                 'Hauptvorteile: Geführte Reflexion, Privatsphäre, Mit Expertinnen und Experten entwickelt',
                             container: true,
-                            child: Column(
+                            child: const Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
-                              children: const [
+                              children: [
                                 _ChampionBullet(
                                   icon: Icons.spa_rounded,
                                   text:
@@ -254,14 +254,14 @@ class _PandaWithHalo extends StatelessWidget {
               shape: BoxShape.circle,
               gradient: RadialGradient(
                 colors: [
-                  zs.ZenColors.sage.withOpacity(0.30),
-                  zs.ZenColors.sage.withOpacity(0.00),
+                  zs.ZenColors.sage.withValues(alpha: 0.30),
+                  zs.ZenColors.sage.withValues(alpha: 0.00),
                 ],
                 stops: const [0.0, 1.0],
               ),
               boxShadow: [
                 BoxShadow(
-                  color: zs.ZenColors.jadeMid.withOpacity(0.10),
+                  color: zs.ZenColors.jadeMid.withValues(alpha: 0.10),
                   blurRadius: 22,
                   spreadRadius: 2,
                 ),
@@ -317,10 +317,9 @@ class _PrimaryCtaButton extends StatelessWidget {
   final VoidCallback onPressed;
 
   const _PrimaryCtaButton({
-    Key? key,
     required this.label,
     required this.onPressed,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -343,9 +342,9 @@ class _PrimaryCtaButton extends StatelessWidget {
             borderRadius: BorderRadius.all(zs.ZenRadii.l),
           ),
         ).copyWith(
-          overlayColor: MaterialStateProperty.resolveWith(
-            (states) => states.contains(MaterialState.pressed)
-                ? Colors.black.withOpacity(0.06)
+          overlayColor: WidgetStateProperty.resolveWith(
+            (states) => states.contains(WidgetState.pressed)
+                ? Colors.black.withValues(alpha: 0.06)
                 : null,
           ),
         ),

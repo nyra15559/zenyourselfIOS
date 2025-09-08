@@ -10,11 +10,11 @@ class ReflectionGate extends StatelessWidget {
   final VoidCallback? onDelete;
 
   const ReflectionGate({
-    Key? key,
+    super.key,
     this.onContinue,
     this.onSave,
     this.onDelete,
-  }) : super(key: key);
+  });
 
   factory ReflectionGate.compact({
     VoidCallback? onContinue,
@@ -30,8 +30,8 @@ class ReflectionGate extends StatelessWidget {
         );
 
     Widget pill(IconData i, String t, VoidCallback? f, {bool filled = false}) {
-      final bg = filled ? ZenColors.jade.withOpacity(.12) : ZenColors.surface;
-      final side = BorderSide(color: ZenColors.jadeMid.withOpacity(.35), width: .8);
+      final bg = filled ? ZenColors.jade.withValues(alpha: .12) : ZenColors.surface;
+      final side = BorderSide(color: ZenColors.jadeMid.withValues(alpha: .35), width: .8);
       return InkWell(
         onTap: f,
         borderRadius: const BorderRadius.all(ZenRadii.m),

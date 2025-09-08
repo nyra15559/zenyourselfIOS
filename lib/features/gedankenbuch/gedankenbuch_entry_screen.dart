@@ -32,14 +32,14 @@ import '../../services/guidance_service.dart'
 
 class GedankenbuchEntryScreen extends StatefulWidget {
   const GedankenbuchEntryScreen({
-    Key? key,
+    super.key,
     this.onSave,
     this.initialText,
     this.initialMood,
     this.backgroundAsset = 'assets/schoen.png',
     this.titleNew = '',
     this.titleEdit = '',
-  }) : super(key: key);
+  });
 
   final void Function(String text, String mood)? onSave;
   final String? initialText;
@@ -439,7 +439,7 @@ class _GedankenbuchEntryScreenState extends State<GedankenbuchEntryScreen>
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      barrierColor: Colors.black.withOpacity(.35),
+      barrierColor: Colors.black.withValues(alpha: .35),
       builder: (ctx) {
         final offline = (res.source.toLowerCase() == 'offline');
         return SafeArea(
@@ -466,7 +466,7 @@ class _GedankenbuchEntryScreenState extends State<GedankenbuchEntryScreen>
                     margin:
                         const EdgeInsets.only(bottom: 12, top: 2),
                     decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(.10),
+                      color: Colors.black.withValues(alpha: .10),
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
@@ -481,9 +481,9 @@ class _GedankenbuchEntryScreenState extends State<GedankenbuchEntryScreen>
                           padding: const EdgeInsets.symmetric(
                               horizontal: 10, vertical: 6),
                           decoration: BoxDecoration(
-                            color: zs.ZenColors.jade.withOpacity(.10),
+                            color: zs.ZenColors.jade.withValues(alpha: .10),
                             border: Border.all(
-                                color: zs.ZenColors.jade.withOpacity(.35)),
+                                color: zs.ZenColors.jade.withValues(alpha: .35)),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(
@@ -747,7 +747,7 @@ class _GedankenbuchEntryScreenState extends State<GedankenbuchEntryScreen>
                                           bottom: 12, top: 2),
                                       decoration: BoxDecoration(
                                         color: Colors.black
-                                            .withOpacity(.10),
+                                            .withValues(alpha: .10),
                                         borderRadius:
                                             BorderRadius.circular(2),
                                       ),
@@ -800,10 +800,10 @@ class _GedankenbuchEntryScreenState extends State<GedankenbuchEntryScreen>
                                     ),
                                     if (_structuring) ...[
                                       const SizedBox(height: 10),
-                                      Row(
+                                      const Row(
                                         mainAxisAlignment:
                                             MainAxisAlignment.center,
-                                        children: const [
+                                        children: [
                                           SizedBox(
                                             height: 16,
                                             width: 16,
@@ -871,19 +871,19 @@ class _GedankenbuchEntryScreenState extends State<GedankenbuchEntryScreen>
               Positioned.fill(
                 child: IgnorePointer(
                   child: Container(
-                    color: Colors.black.withOpacity(.06),
-                    child: Center(
+                    color: Colors.black.withValues(alpha: .06),
+                    child: const Center(
                       child: zw.ZenGlassCard(
-                        padding: const EdgeInsets.fromLTRB(
+                        padding: EdgeInsets.fromLTRB(
                             22, 18, 22, 18),
-                        borderRadius: const BorderRadius.all(
+                        borderRadius: BorderRadius.all(
                             zs.ZenRadii.l),
                         topOpacity: .26,
                         bottomOpacity: .10,
                         borderOpacity: .18,
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
-                          children: const [
+                          children: [
                             SizedBox(
                               width: 20,
                               height: 20,
@@ -934,7 +934,7 @@ class _GedankenbuchEntryScreenState extends State<GedankenbuchEntryScreen>
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
-      barrierColor: Colors.black.withOpacity(.35),
+      barrierColor: Colors.black.withValues(alpha: .35),
       builder: (ctx) {
         return SafeArea(
           child: Padding(
@@ -1142,10 +1142,10 @@ class _ComposerTextArea extends StatelessWidget {
 
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface.withOpacity(.55),
+        color: theme.colorScheme.surface.withValues(alpha: .55),
         borderRadius: BorderRadius.circular(16),
         border:
-            Border.all(color: theme.colorScheme.outline.withOpacity(.18)),
+            Border.all(color: theme.colorScheme.outline.withValues(alpha: .18)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
@@ -1172,7 +1172,7 @@ class _ComposerTextArea extends StatelessWidget {
                       border: Border.all(
                         color: isListening
                             ? Colors.transparent
-                            : green.withOpacity(.40),
+                            : green.withValues(alpha: .40),
                         width: 1.2,
                       ),
                       boxShadow: isListening
@@ -1284,9 +1284,9 @@ class _ComposerBottomBar extends StatelessWidget {
             padding:
                 const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
-              color: green.withOpacity(.08),
+              color: green.withValues(alpha: .08),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: green.withOpacity(.28), width: 1.1),
+              border: Border.all(color: green.withValues(alpha: .28), width: 1.1),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -1348,9 +1348,9 @@ class _LengthMeter extends StatelessWidget {
       child: LinearProgressIndicator(
         value: p,
         minHeight: 4,
-        backgroundColor: Colors.black.withOpacity(.06),
+        backgroundColor: Colors.black.withValues(alpha: .06),
         valueColor: AlwaysStoppedAnimation(
-          zs.ZenColors.deepSage.withOpacity(.45),
+          zs.ZenColors.deepSage.withValues(alpha: .45),
         ),
       ),
     );

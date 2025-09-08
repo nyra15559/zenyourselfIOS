@@ -301,7 +301,7 @@ class AnalyticsService with ChangeNotifier {
   Map<String, int> topReflectionTags({int top = 3}) {
     final counts = <String, int>{};
     for (final r in _reflections) {
-      final tags = r.tags?.toList() ?? const [];
+      final tags = r.tags.toList() ?? const [];
       for (final t in tags) {
         counts[t] = (counts[t] ?? 0) + 1;
       }
@@ -336,7 +336,7 @@ class AnalyticsService with ChangeNotifier {
               'id': r.id,
               'ts': r.timestamp.toUtc().toIso8601String(),
               'moodScore': r.moodScore,
-              'tags': r.tags?.toList(),
+              'tags': r.tags.toList(),
               // KEIN userInput/userResponse/aiSummary etc.
             }..removeWhere((_, v) => v == null))
         .toList();

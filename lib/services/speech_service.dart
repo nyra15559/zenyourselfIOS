@@ -298,7 +298,7 @@ class SpeechService with ChangeNotifier {
 
   // ---------------- Fehlerbehandlung ----------------
 
-  void _fail(String message, {Object? error, StackTrace? stack}) {
+  void _fail(String message, {Object? error}) {
     if (_disposed) return;
     _lastError = message;
     if (!_errorCtrl.isClosed) _errorCtrl.add(message);

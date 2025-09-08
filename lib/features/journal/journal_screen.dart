@@ -33,7 +33,7 @@ import 'journal_entry_view.dart' as jv;
 import '../reflection/reflection_screen.dart';
 
 class JournalScreen extends StatelessWidget {
-  const JournalScreen({Key? key}) : super(key: key);
+  const JournalScreen({super.key});
 
   static const double _maxContentWidth = 820;
 
@@ -287,7 +287,7 @@ class JournalScreen extends StatelessWidget {
   // ─────────────────────────── Actions ───────────────────────────
 
   Future<void> _openViewer(BuildContext context, jm.JournalEntry e) async {
-    jv.EntryKind _vk(jm.EntryKind k) {
+    jv.EntryKind vk(jm.EntryKind k) {
       switch (k) {
         case jm.EntryKind.reflection:
           return jv.EntryKind.reflection;
@@ -302,7 +302,7 @@ class JournalScreen extends StatelessWidget {
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => jv.JournalEntryView(
-          kind: _vk(e.kind),
+          kind: vk(e.kind),
           createdAt: e.createdAt,
           journalText: e.kind == jm.EntryKind.journal ? e.thoughtText : null,
           userThought: e.kind == jm.EntryKind.reflection ? e.thoughtText : null,
@@ -568,13 +568,12 @@ class _FilterPill extends StatelessWidget {
   final int storyCount;
 
   const _FilterPill({
-    Key? key,
     required this.provider,
     required this.allCount,
     required this.journalCount,
     required this.reflectionCount,
     required this.storyCount,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -596,15 +595,15 @@ class _FilterPill extends StatelessWidget {
               Text('$label ($count)'),
             ],
           ),
-          selectedColor: zs.ZenColors.sage.withOpacity(.22),
-          backgroundColor: zs.ZenColors.white.withOpacity(.18),
+          selectedColor: zs.ZenColors.sage.withValues(alpha: .22),
+          backgroundColor: zs.ZenColors.white.withValues(alpha: .18),
           showCheckmark: false,
           labelStyle: Theme.of(context).textTheme.labelMedium?.copyWith(
                 color: selected ? zs.ZenColors.deepSage : zs.ZenColors.jadeMid,
                 fontWeight: FontWeight.w700,
               ),
           side: BorderSide(
-            color: selected ? zs.ZenColors.deepSage : zs.ZenColors.jadeMid.withOpacity(.22),
+            color: selected ? zs.ZenColors.deepSage : zs.ZenColors.jadeMid.withValues(alpha: .22),
           ),
           shape: const StadiumBorder(),
         ),
@@ -624,7 +623,7 @@ class _FilterPill extends StatelessWidget {
 
 class _DayHeader extends StatelessWidget {
   final DateTime date;
-  const _DayHeader({Key? key, required this.date}) : super(key: key);
+  const _DayHeader({required this.date});
 
   String _label(DateTime d) {
     final local = d.toLocal();
@@ -649,10 +648,10 @@ class _DayHeader extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 10),
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(.66),
+            color: Colors.white.withValues(alpha: .66),
             borderRadius: const BorderRadius.all(zs.ZenRadii.m),
             border: Border.all(
-              color: zs.ZenColors.jadeMid.withOpacity(0.14),
+              color: zs.ZenColors.jadeMid.withValues(alpha: 0.14),
               width: 1,
             ),
             boxShadow: const [BoxShadow(color: Color(0x14000000), blurRadius: 8)],
@@ -680,11 +679,11 @@ class _TimelineRow extends StatelessWidget {
   final Widget child;
 
   const _TimelineRow({
-    Key? key,
+    super.key,
     required this.showAbove,
     required this.showBelow,
     required this.child,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -748,7 +747,7 @@ class _RailPainter extends CustomPainter {
     }
 
     final dotPaint = Paint()
-      ..color = const Color(0xFF2F5F49).withOpacity(.28)
+      ..color = const Color(0xFF2F5F49).withValues(alpha: .28)
       ..style = PaintingStyle.fill
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 1.2);
     canvas.drawCircle(Offset(centerX, dotY), 4.8, dotPaint);

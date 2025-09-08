@@ -34,7 +34,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'guidance_service.dart' show HttpInvoker;
 
 class ApiClient {
   ApiClient({

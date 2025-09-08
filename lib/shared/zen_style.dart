@@ -187,8 +187,6 @@ ThemeData _buildTheme({required Brightness brightness}) {
     onSecondary:  isDark ? bgDark : ZenColors.inkStrong,
     surface:      isDark ? surfaceDark : ZenColors.surface,
     onSurface:    isDark ? inkDark : ZenColors.ink,
-    background:   isDark ? bgDark : ZenColors.bg,
-    onBackground: isDark ? inkStrongDark : ZenColors.inkStrong,
     error:        ZenColors.error,
     onError:      Colors.white,
     tertiary:     ZenColors.cta,
@@ -211,18 +209,18 @@ ThemeData _buildTheme({required Brightness brightness}) {
 
   final elevated = ElevatedButtonThemeData(
     style: ButtonStyle(
-      backgroundColor: MaterialStateProperty.resolveWith((states) {
-        if (states.contains(MaterialState.pressed)) return ZenColors.ctaPressed;
-        if (states.contains(MaterialState.hovered))  return ZenColors.ctaHover;
+      backgroundColor: WidgetStateProperty.resolveWith((states) {
+        if (states.contains(WidgetState.pressed)) return ZenColors.ctaPressed;
+        if (states.contains(WidgetState.hovered))  return ZenColors.ctaHover;
         return ZenColors.cta;
       }),
-      foregroundColor: const MaterialStatePropertyAll(Colors.white),
-      padding: const MaterialStatePropertyAll(
+      foregroundColor: const WidgetStatePropertyAll(Colors.white),
+      padding: const WidgetStatePropertyAll(
         EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       ),
-      minimumSize: const MaterialStatePropertyAll(Size(0, 52)),
-      elevation: const MaterialStatePropertyAll(1.5),
-      shape: const MaterialStatePropertyAll(
+      minimumSize: const WidgetStatePropertyAll(Size(0, 52)),
+      elevation: const WidgetStatePropertyAll(1.5),
+      shape: const WidgetStatePropertyAll(
         RoundedRectangleBorder(borderRadius: BorderRadius.all(ZenRadii.l)),
       ),
       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -271,7 +269,7 @@ ThemeData _buildTheme({required Brightness brightness}) {
 
   final chip = ChipThemeData(
     backgroundColor: isDark ? surfaceAltDark : ZenColors.surfaceAlt,
-    selectedColor: ZenColors.jade.withOpacity(.18),
+    selectedColor: ZenColors.jade.withValues(alpha: .18),
     labelStyle: TextStyle(color: isDark ? inkDark : ZenColors.ink),
     side: BorderSide(color: isDark ? borderDark : ZenColors.border),
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -289,14 +287,14 @@ ThemeData _buildTheme({required Brightness brightness}) {
     brightness: brightness,
     visualDensity: VisualDensity.standard,
     colorScheme: colorScheme,
-    scaffoldBackgroundColor: colorScheme.background,
+    scaffoldBackgroundColor: colorScheme.surface,
     fontFamily: 'NotoSans',
 
     appBarTheme: appBar,
     textTheme: TextTheme(
       bodyMedium: ZenTypography.body.copyWith(color: colorScheme.onSurface),
-      titleMedium: ZenTypography.title.copyWith(color: colorScheme.onBackground),
-      headlineMedium: ZenTypography.display.copyWith(color: colorScheme.onBackground),
+      titleMedium: ZenTypography.title.copyWith(color: colorScheme.onSurface),
+      headlineMedium: ZenTypography.display.copyWith(color: colorScheme.onSurface),
       labelLarge: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
     ),
 
@@ -324,7 +322,7 @@ ThemeData _buildTheme({required Brightness brightness}) {
     bottomSheetTheme: BottomSheetThemeData(
       backgroundColor: Colors.transparent,
       surfaceTintColor: Colors.transparent,
-      modalBackgroundColor: (isDark ? surfaceAltDark : ZenColors.surface).withOpacity(.92),
+      modalBackgroundColor: (isDark ? surfaceAltDark : ZenColors.surface).withValues(alpha: .92),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: ZenRadii.xl),
       ),
@@ -372,9 +370,9 @@ class ZenOverlays {
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
               colors: [
-                Colors.black.withOpacity(strength),
+                Colors.black.withValues(alpha: strength),
                 Colors.transparent,
-                Colors.black.withOpacity(.08),
+                Colors.black.withValues(alpha: .08),
               ],
               stops: const [0, .28, 1],
             ),
@@ -392,7 +390,7 @@ class ZenOverlays {
       gradient: RadialGradient(
         center: Alignment(center.dx, center.dy),
         radius: .9,
-        colors: [ZenColors.goldenMist.withOpacity(opacity), Colors.transparent],
+        colors: [ZenColors.goldenMist.withValues(alpha: opacity), Colors.transparent],
         stops: const [.0, 1],
       ),
     );
@@ -441,7 +439,7 @@ class ZenBackdrop extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    Widget _applySaturation(Widget child) {
+    Widget applySaturation(Widget child) {
       if (saturation >= 0.999) return child;
       return ColorFiltered(
         colorFilter: ColorFilter.matrix(_saturationMatrix(saturation)),
@@ -453,11 +451,11 @@ class ZenBackdrop extends StatelessWidget {
       const DecoratedBox(decoration: BoxDecoration(gradient: ZenGradients.screen)),
 
       // Blur-Fill als Unterfütterung
-      _applySaturation(
+      applySaturation(
         ImageFiltered(
           imageFilter: ui.ImageFilter.blur(sigmaX: 24, sigmaY: 24),
           child: ColorFiltered(
-            colorFilter: ColorFilter.mode(Colors.white.withOpacity(0.05), BlendMode.srcATop),
+            colorFilter: ColorFilter.mode(Colors.white.withValues(alpha: 0.05), BlendMode.srcATop),
             child: Image.asset(
               asset,
               fit: BoxFit.cover,
@@ -470,7 +468,7 @@ class ZenBackdrop extends StatelessWidget {
       ),
 
       // Hauptbild
-      _applySaturation(
+      applySaturation(
         fixedContain
             ? _ContainArtwork(
                 asset: asset,
@@ -487,7 +485,7 @@ class ZenBackdrop extends StatelessWidget {
               ),
       ),
 
-      if (wash > 0) IgnorePointer(child: Container(color: Colors.white.withOpacity(wash))),
+      if (wash > 0) IgnorePointer(child: Container(color: Colors.white.withValues(alpha: wash))),
 
       // Gold-Grün Glow
       IgnorePointer(
@@ -505,8 +503,8 @@ class ZenBackdrop extends StatelessWidget {
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 colors: [
-                  ZenColors.white.withOpacity(hazeStrength * 1.0),
-                  ZenColors.surfaceAlt.withOpacity(hazeStrength * 0.75),
+                  ZenColors.white.withValues(alpha: hazeStrength * 1.0),
+                  ZenColors.surfaceAlt.withValues(alpha: hazeStrength * 0.75),
                   Colors.transparent,
                 ],
                 stops: const [0.0, 0.45, 1.0],
@@ -522,7 +520,7 @@ class ZenBackdrop extends StatelessWidget {
             gradient: RadialGradient(
               center: Alignment.center,
               radius: 1.15,
-              colors: [Colors.transparent, Colors.black.withOpacity(vignette)],
+              colors: [Colors.transparent, Colors.black.withValues(alpha: vignette)],
               stops: const [0.78, 1.0],
             ),
           ),
@@ -539,7 +537,7 @@ class ZenBackdrop extends StatelessWidget {
                   begin: Alignment.centerRight,
                   end: Alignment.centerLeft,
                   colors: [
-                    Colors.black.withOpacity(dimRightStrength),
+                    Colors.black.withValues(alpha: dimRightStrength),
                     Colors.transparent,
                   ],
                   stops: const [0.0, 0.22],
@@ -671,13 +669,13 @@ class ZenGlassCard extends StatelessWidget {
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 colors: [
-                  ZenColors.surface.withOpacity(resolvedTopOpacity),
-                  ZenColors.surface.withOpacity(resolvedBottomOpacity),
+                  ZenColors.surface.withValues(alpha: resolvedTopOpacity),
+                  ZenColors.surface.withValues(alpha: resolvedBottomOpacity),
                 ],
               ),
               borderRadius: borderRadius,
               border: Border.all(
-                color: Colors.white.withOpacity(borderOpacity),
+                color: Colors.white.withValues(alpha: borderOpacity),
                 width: 1.0,
               ),
               boxShadow: const [
@@ -731,7 +729,7 @@ class ZenGlassInput extends StatelessWidget {
               ],
             ),
             borderRadius: borderRadius,
-            border: Border.all(color: Colors.white.withOpacity(0.16), width: 1.0),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.16), width: 1.0),
             boxShadow: const [ZenShadows.glow],
           ),
           child: child,
@@ -754,7 +752,7 @@ class ZenDivider extends StatelessWidget {
     return Divider(
       height: height,
       thickness: 1,
-      color: ZenColors.outline.withOpacity(opacity),
+      color: ZenColors.outline.withValues(alpha: opacity),
     );
   }
 }
@@ -774,9 +772,9 @@ class ZenBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 8),
       decoration: BoxDecoration(
-        color: ZenColors.mist.withOpacity(.80),
+        color: ZenColors.mist.withValues(alpha: .80),
         borderRadius: const BorderRadius.all(ZenRadii.s),
-        border: Border.all(color: ZenColors.jadeMid.withOpacity(.18)),
+        border: Border.all(color: ZenColors.jadeMid.withValues(alpha: .18)),
         boxShadow: const [BoxShadow(color: Color(0x14000000), blurRadius: 8)],
       ),
       child: Row(

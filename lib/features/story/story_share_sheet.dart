@@ -35,7 +35,7 @@ import '../../services/guidance_service.dart' show StoryResult;
 class StoryShareSheet extends StatefulWidget {
   final StoryResult story;
 
-  const StoryShareSheet({Key? key, required this.story}) : super(key: key);
+  const StoryShareSheet({super.key, required this.story});
 
   /// Komfort: Sheet anzeigen
   static Future<void> show(
@@ -71,7 +71,7 @@ class _StoryShareSheetState extends State<StoryShareSheet> {
         // Click-through overlay für soften Blur/Dim
         GestureDetector(
           onTap: () => Navigator.of(context).maybePop(),
-          child: Container(color: Colors.black.withOpacity(0.18)),
+          child: Container(color: Colors.black.withValues(alpha: 0.18)),
         ),
         DraggableScrollableSheet(
           initialChildSize: 0.52,
@@ -131,7 +131,7 @@ class _StoryShareSheetState extends State<StoryShareSheet> {
         width: 36,
         height: 4.5,
         decoration: BoxDecoration(
-          color: ZenColors.jadeMid.withOpacity(.45),
+          color: ZenColors.jadeMid.withValues(alpha: .45),
           borderRadius: BorderRadius.circular(999),
         ),
       ),
@@ -356,7 +356,7 @@ class _StoryShareSheetState extends State<StoryShareSheet> {
         final shortBase = base.substring(0, 60);
         name = '${shortBase}_$ext';
       } else {
-        name = '${name.substring(0, 70)}';
+        name = name.substring(0, 70);
       }
     }
     return name;
@@ -376,7 +376,7 @@ class _BusyOverlay extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: Colors.black.withOpacity(.07),
+      color: Colors.black.withValues(alpha: .07),
       child: const Center(
         child: SizedBox(
           width: 40,

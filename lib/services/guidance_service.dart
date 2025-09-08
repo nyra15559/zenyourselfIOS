@@ -313,7 +313,7 @@ class ApiService {
         question: errorHint,
         riskLevel: 'none',
       );
-      return AnalyzeResult(analysis: analysis, challenge: null);
+      return const AnalyzeResult(analysis: analysis, challenge: null);
     }
 
     final payload = <String, dynamic>{
@@ -358,7 +358,7 @@ class ApiService {
         question: errorHint,
         riskLevel: 'none',
       );
-      return AnalyzeResult(analysis: analysis, challenge: null);
+      return const AnalyzeResult(analysis: analysis, challenge: null);
     }
   }
 
@@ -682,7 +682,7 @@ class ApiService {
     if (_any(t, ['ruhig', 'entspannt', 'gelassen'])) score += 1;
     if (_any(t, ['glücklich', 'freu', 'dankbar', 'zufrieden', 'stolz'])) score += 2;
 
-    return (score.clamp(0, 4) as int);
+    return score.clamp(0, 4);
   }
 
   // =======================================================================
@@ -732,7 +732,7 @@ class ApiService {
 
   String _bestEffortContent(ReflectionEntry entry) {
     dynamic d = entry;
-    String pick(dynamic getter(dynamic x)) {
+    String pick(dynamic Function(dynamic x) getter) {
       try {
         final v = getter(d);
         if (v is String && v.trim().isNotEmpty) return v.trim();

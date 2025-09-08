@@ -148,7 +148,7 @@ class ReflectResponse {
       fromChoices,
       _asString(data['content']),
       _asString(data['raw']),
-    ].where((s) => s != null && s!.trim().isNotEmpty).toList();
+    ].where((s) => s != null && s.trim().isNotEmpty).toList();
 
     final primary = candidates.isNotEmpty ? candidates.first!.trim() : null;
 
@@ -355,8 +355,9 @@ List<String> _normalizeSchools(List<String> raw) {
       out.add(_schoolAliases[k]!);
       continue;
     }
-    if (k.contains('kvt') || k.contains('cognitive') || k.contains('behavior')) out.add('CBT/KVT');
-    else if (k.contains('act')) out.add('ACT');
+    if (k.contains('kvt') || k.contains('cognitive') || k.contains('behavior')) {
+      out.add('CBT/KVT');
+    } else if (k.contains('act')) out.add('ACT');
     else if (k.contains('dbt')) out.add('DBT');
     else if (k.contains('schema')) out.add('Schematherapie');
     else if (k.contains('system')) out.add('Systemisch');

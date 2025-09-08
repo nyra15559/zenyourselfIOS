@@ -65,7 +65,7 @@ class PersistenceSerializer {
     for (final item in list) {
       try {
         if (item is Map) {
-          final map = Map<String, dynamic>.from(item as Map);
+          final map = Map<String, dynamic>.from(item);
           out.add(jm.JournalEntry.fromMap(map));
         } else if (item is String) {
           final decoded = jsonDecode(item);

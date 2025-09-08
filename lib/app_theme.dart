@@ -19,12 +19,12 @@ class AppTheme {
 
     return t.copyWith(
       // Ruhigeres Feedback
-      splashColor: cs.primary.withOpacity(.08),
-      highlightColor: cs.primary.withOpacity(.06),
+      splashColor: cs.primary.withValues(alpha: .08),
+      highlightColor: cs.primary.withValues(alpha: .06),
 
       // Dezentere Default-Icons
       iconTheme: t.iconTheme.copyWith(
-        color: cs.onSurface.withOpacity(.92),
+        color: cs.onSurface.withValues(alpha: .92),
         size: 22,
       ),
 
@@ -32,9 +32,9 @@ class AppTheme {
       tooltipTheme: t.tooltipTheme.copyWith(
         waitDuration: const Duration(milliseconds: 600),
         decoration: BoxDecoration(
-          color: cs.surface.withOpacity(.96),
+          color: cs.surface.withValues(alpha: .96),
           borderRadius: const BorderRadius.all(zs.ZenRadii.s),
-          border: Border.all(color: cs.outline.withOpacity(.45)),
+          border: Border.all(color: cs.outline.withValues(alpha: .45)),
           boxShadow: const [
             BoxShadow(color: Color(0x14000000), blurRadius: 10, offset: Offset(0, 4)),
           ],
@@ -48,11 +48,11 @@ class AppTheme {
       // (Falls NavigationBar verwendet wird)
       navigationBarTheme: t.navigationBarTheme.copyWith(
         height: 64,
-        backgroundColor: cs.surface.withOpacity(.98),
+        backgroundColor: cs.surface.withValues(alpha: .98),
         elevation: 0,
-        indicatorColor: zs.ZenColors.goldenMist.withOpacity(.22),
+        indicatorColor: zs.ZenColors.goldenMist.withValues(alpha: .22),
         surfaceTintColor: Colors.transparent,
-        labelTextStyle: MaterialStatePropertyAll(
+        labelTextStyle: WidgetStatePropertyAll(
           t.textTheme.labelLarge?.copyWith(
             color: zs.ZenColors.deepSage,
             fontWeight: FontWeight.w700,
@@ -67,7 +67,7 @@ class AppTheme {
       ),
 
       // Divider global leicht weicher
-      dividerColor: t.dividerColor.withOpacity(.9),
+      dividerColor: t.dividerColor.withValues(alpha: .9),
     );
   }
 }

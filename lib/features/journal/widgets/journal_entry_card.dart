@@ -21,7 +21,7 @@ class JournalEntryCard extends StatefulWidget {
   final Widget? trailing;
 
   const JournalEntryCard({
-    Key? key,
+    super.key,
     required this.entry,
     this.onTap,
     this.onContinue,
@@ -29,7 +29,7 @@ class JournalEntryCard extends StatefulWidget {
     this.onHide,
     this.onDelete,
     this.trailing,
-  }) : super(key: key);
+  });
 
   @override
   State<JournalEntryCard> createState() => _JournalEntryCardState();
@@ -51,7 +51,7 @@ class _JournalEntryCardState extends State<JournalEntryCard> {
     // Datum + Uhrzeit + Typ (bewusst ausführlich, Header „Heute“ darf bleiben)
     final meta = _metaLine(e.createdAt, badge.label);
 
-    final cardBorder = Theme.of(context).dividerColor.withOpacity(0.14);
+    final cardBorder = Theme.of(context).dividerColor.withValues(alpha: 0.14);
 
     return Semantics(
       container: true,
@@ -112,7 +112,7 @@ class _JournalEntryCardState extends State<JournalEntryCard> {
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                               color: (Theme.of(context).textTheme.bodySmall?.color ??
                                       Theme.of(context).hintColor)
-                                  .withOpacity(0.70),
+                                  .withValues(alpha: 0.70),
                             ),
                       ),
 
@@ -254,9 +254,9 @@ class _TypeIcon extends StatelessWidget {
       height: 36,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(10),
-        color: c.withOpacity(0.07),
+        color: c.withValues(alpha: 0.07),
       ),
-      child: Icon(icon, size: 20, color: c.withOpacity(0.90)),
+      child: Icon(icon, size: 20, color: c.withValues(alpha: 0.90)),
     );
   }
 }
@@ -281,7 +281,7 @@ class _ExpandablePreview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final base = Theme.of(context).textTheme.bodyMedium ?? const TextStyle(fontSize: 14.5);
-    final green = Theme.of(context).colorScheme.primary.withOpacity(0.95);
+    final green = Theme.of(context).colorScheme.primary.withValues(alpha: 0.95);
     final textColor = Theme.of(context).textTheme.bodyMedium?.color ?? Colors.black87;
 
     InlineSpan span;
@@ -298,7 +298,7 @@ class _ExpandablePreview extends StatelessWidget {
               text: '„$q“ ',
               style: base.copyWith(
                 fontStyle: FontStyle.italic,
-                color: textColor.withOpacity(0.75),
+                color: textColor.withValues(alpha: 0.75),
               ),
             ),
           if (a.isNotEmpty)
@@ -389,7 +389,7 @@ class _ExpandableRichText extends StatelessWidget {
 class _TypeBadge extends StatelessWidget {
   final String label;
   final IconData icon;
-  const _TypeBadge({Key? key, required this.label, required this.icon}) : super(key: key);
+  const _TypeBadge({required this.label, required this.icon});
 
   @override
   Widget build(BuildContext context) {
@@ -397,9 +397,9 @@ class _TypeBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.08),
+        color: color.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withOpacity(0.18), width: 1),
+        border: Border.all(color: color.withValues(alpha: 0.18), width: 1),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -422,17 +422,17 @@ class _TypeBadge extends StatelessWidget {
 
 class _TagChip extends StatelessWidget {
   final String text;
-  const _TagChip({Key? key, required this.text}) : super(key: key);
+  const _TagChip({required this.text});
 
   @override
   Widget build(BuildContext context) {
-    final bg = Colors.black.withOpacity(.04);
+    final bg = Colors.black.withValues(alpha: .04);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.black.withOpacity(.08), width: 1),
+        border: Border.all(color: Colors.black.withValues(alpha: .08), width: 1),
       ),
       child: Text(
         text,
@@ -453,13 +453,12 @@ class _MenuButton extends StatelessWidget {
   final bool isReflection;
 
   const _MenuButton({
-    Key? key,
     this.onContinue,
     this.onEdit,
     this.onHide,
     this.onDelete,
     required this.isReflection,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -507,7 +506,7 @@ class _MenuButton extends StatelessWidget {
         child: Icon(
           Icons.more_horiz,
           size: 22,
-          color: Theme.of(context).iconTheme.color?.withOpacity(0.80),
+          color: Theme.of(context).iconTheme.color?.withValues(alpha: 0.80),
         ),
       ),
     );

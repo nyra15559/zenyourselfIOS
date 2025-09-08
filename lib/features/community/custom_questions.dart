@@ -198,7 +198,7 @@ class _CustomQuestionsScreenState extends State<CustomQuestionsScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 ZenBubble(
-                  color: accent.withOpacity(0.10),
+                  color: accent.withValues(alpha: 0.10),
                   margin: const EdgeInsets.only(bottom: 16),
                   child: Row(
                     children: [

@@ -14,10 +14,8 @@
 //   import '../../../shared/ui/zen_style.dart' (ZenColors, ZenRadii)
 //   Material 3 kompatibel
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:characters/characters.dart';
 
 import '../../../shared/ui/zen_style.dart' show ZenColors, ZenRadii;
 
@@ -75,18 +73,18 @@ class ReflectionInputBar extends StatelessWidget {
   Widget build(BuildContext context) {
     const jade = ZenColors.jade;
     final baseText = Theme.of(context).textTheme.bodyMedium!;
-    final hintStyle = baseText.copyWith(color: jade.withOpacity(0.55));
+    final hintStyle = baseText.copyWith(color: jade.withValues(alpha: 0.55));
 
     // sanfter „Pulse“ ohne AnimationController
     final List<BoxShadow> pulse = isRecording
         ? [
             BoxShadow(
-              color: Colors.black.withOpacity(0.10),
+              color: Colors.black.withValues(alpha: 0.10),
               blurRadius: 14,
               offset: const Offset(0, 4),
             ),
             BoxShadow(
-              color: jade.withOpacity(0.28),
+              color: jade.withValues(alpha: 0.28),
               blurRadius: 22,
               spreadRadius: 1.1,
             ),
@@ -123,7 +121,7 @@ class ReflectionInputBar extends StatelessWidget {
             decoration: BoxDecoration(
               color: ZenColors.surface,
               borderRadius: const BorderRadius.all(ZenRadii.l),
-              border: Border.all(color: jade.withOpacity(0.75), width: 2),
+              border: Border.all(color: jade.withValues(alpha: 0.75), width: 2),
               boxShadow: pulse,
             ),
             padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
@@ -142,7 +140,7 @@ class ReflectionInputBar extends StatelessWidget {
                       const _NewlineIntent(),
                 };
 
-                void _insertNewline() {
+                void insertNewline() {
                   final sel = controller.selection;
                   final t = controller.text;
                   if (!sel.isValid) {
@@ -171,7 +169,7 @@ class ReflectionInputBar extends StatelessWidget {
                       ),
                       _NewlineIntent: CallbackAction<_NewlineIntent>(
                         onInvoke: (intent) {
-                          _insertNewline();
+                          insertNewline();
                           return null;
                         },
                       ),
@@ -250,7 +248,7 @@ class ReflectionInputBar extends StatelessWidget {
                                     icon: Icons.send_rounded,
                                     color: sendEnabled
                                         ? jade
-                                        : jade.withOpacity(0.45),
+                                        : jade.withValues(alpha: 0.45),
                                     onPressed: sendEnabled ? onSend : null,
                                   ),
                                 ],

@@ -49,7 +49,7 @@ class MiniCoachCard extends StatelessWidget {
       child: ZenCard(
         elevation: 8,
         borderRadius: ZenRadii.xl,
-        color: ZenColors.white.withOpacity(0.97),
+        color: ZenColors.white.withValues(alpha: 0.97),
         padding: const EdgeInsets.symmetric(vertical: ZenSpacing.m, horizontal: ZenSpacing.m),
         showWatermark: false,
         child: Column(
@@ -85,7 +85,7 @@ class MiniCoachCard extends StatelessWidget {
                 shadows: [
                   Shadow(
                     blurRadius: 9,
-                    color: accentColor.withOpacity(0.13),
+                    color: accentColor.withValues(alpha: 0.13),
                     offset: const Offset(0, 2),
                   ),
                 ],
@@ -109,7 +109,7 @@ class MiniCoachCard extends StatelessWidget {
             // Audio (optional)
             if (audioAsset != null && audioAsset!.isNotEmpty) ...[
               const SizedBox(height: 16),
-              _ZenHairlineDivider(color: accentColor.withOpacity(0.22)),
+              _ZenHairlineDivider(color: accentColor.withValues(alpha: 0.22)),
               const SizedBox(height: 10),
               Semantics(
                 button: true,
@@ -129,7 +129,7 @@ class MiniCoachCard extends StatelessWidget {
               textAlign: TextAlign.center,
               style: theme.textTheme.bodySmall?.copyWith(
                 fontSize: 12.5,
-                color: ZenColors.jadeMid.withOpacity(0.72),
+                color: ZenColors.jadeMid.withValues(alpha: 0.72),
                 fontStyle: FontStyle.italic,
               ),
             ),

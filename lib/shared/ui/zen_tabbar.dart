@@ -29,7 +29,7 @@ class ZenTabBar extends StatelessWidget {
     final cs      = theme.colorScheme;
     final isDark  = theme.brightness == Brightness.dark;
 
-    final barColor   = (isDark ? cs.surface : ZenColors.surfaceAlt).withOpacity(.98);
+    final barColor   = (isDark ? cs.surface : ZenColors.surfaceAlt).withValues(alpha: .98);
     final borderColor = theme.dividerColor;
 
     return Padding(
@@ -75,7 +75,7 @@ class ZenTabBar extends StatelessWidget {
                       boxShadow: isSelected
                           ? [
                               BoxShadow(
-                                color: Colors.black.withOpacity(.08),
+                                color: Colors.black.withValues(alpha: .08),
                                 blurRadius: 12,
                                 offset: const Offset(0, 4),
                               ),
@@ -86,9 +86,9 @@ class ZenTabBar extends StatelessWidget {
                       color: Colors.transparent,
                       child: InkWell(
                         borderRadius: const BorderRadius.all(ZenRadii.l),
-                        splashColor: ZenColors.goldenMist.withOpacity(.14),
-                        hoverColor: ZenColors.focus.withOpacity(.06),
-                        focusColor: ZenColors.focus.withOpacity(.10),
+                        splashColor: ZenColors.goldenMist.withValues(alpha: .14),
+                        hoverColor: ZenColors.focus.withValues(alpha: .06),
+                        focusColor: ZenColors.focus.withValues(alpha: .10),
                         highlightColor: Colors.transparent,
                         onTap: () {
                           if (i == currentIndex) return;
@@ -119,7 +119,7 @@ class ZenTabBar extends StatelessWidget {
                                           size: isSelected ? 26 : 22,
                                           color: isSelected
                                               ? ZenColors.deepSage
-                                              : ZenColors.sage.withOpacity(.55),
+                                              : ZenColors.sage.withValues(alpha: .55),
                                           semanticLabel: item.label,
                                         ),
                                         if ((item.badgeCount ?? 0) > 0 || item.showDot)

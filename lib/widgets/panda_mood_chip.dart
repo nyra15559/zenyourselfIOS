@@ -21,11 +21,11 @@ class PandaMoodChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final bg = selected
-        ? theme.colorScheme.primary.withOpacity(.12)
-        : theme.colorScheme.surfaceVariant.withOpacity(.45);
+        ? theme.colorScheme.primary.withValues(alpha: .12)
+        : theme.colorScheme.surfaceContainerHighest.withValues(alpha: .45);
     final border = selected
         ? theme.colorScheme.primary
-        : theme.colorScheme.outlineVariant.withOpacity(.6);
+        : theme.colorScheme.outlineVariant.withValues(alpha: .6);
 
     return Semantics(
       button: true,

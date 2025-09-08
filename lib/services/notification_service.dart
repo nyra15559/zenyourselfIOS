@@ -284,7 +284,7 @@ class NotificationService {
       if (list is List) {
         return list
             .whereType<Map>()
-            .map((e) => Map<String, dynamic>.from(e as Map))
+            .map((e) => Map<String, dynamic>.from(e))
             .toList(growable: false);
       }
       return const <Map<String, dynamic>>[];

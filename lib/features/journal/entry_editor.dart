@@ -344,7 +344,7 @@ class _EntryEditorState extends State<EntryEditor> {
                                       label: const Text('Als Reflexion speichern'),
                                       style: OutlinedButton.styleFrom(
                                         side: BorderSide(
-                                          color: zs.ZenColors.jade.withOpacity(.75),
+                                          color: zs.ZenColors.jade.withValues(alpha: .75),
                                           width: 1.1,
                                         ),
                                         foregroundColor: zs.ZenColors.jade,
@@ -388,7 +388,7 @@ class _ToolButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: Colors.black.withOpacity(0.04),
+      color: Colors.black.withValues(alpha: 0.04),
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
@@ -451,9 +451,9 @@ class _MoodRow extends StatelessWidget {
           onSelected: (_) => onSelect(m),
           visualDensity: compact ? VisualDensity.compact : VisualDensity.standard,
           materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          selectedColor: zs.ZenColors.jade.withOpacity(.10),
+          selectedColor: zs.ZenColors.jade.withValues(alpha: .10),
           side: BorderSide(
-            color: isSel ? zs.ZenColors.jade.withOpacity(.55) : zs.ZenColors.jade.withOpacity(.22),
+            color: isSel ? zs.ZenColors.jade.withValues(alpha: .55) : zs.ZenColors.jade.withValues(alpha: .22),
           ),
           shape: const StadiumBorder(),
         );
@@ -474,16 +474,16 @@ class _CenteredSavingOverlay extends StatelessWidget {
       child: IgnorePointer(
         ignoring: true,
         child: Container(
-          color: Colors.black.withOpacity(0.08),
+          color: Colors.black.withValues(alpha: 0.08),
           padding: EdgeInsets.only(top: topPad),
           child: Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(minWidth: 280, maxWidth: 360),
-              child: zw.ZenGlassCard(
-                padding: const EdgeInsets.fromLTRB(22, 18, 22, 18),
+              child: const zw.ZenGlassCard(
+                padding: EdgeInsets.fromLTRB(22, 18, 22, 18),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
-                  children: const [
+                  children: [
                     SizedBox(
                       width: 20,
                       height: 20,

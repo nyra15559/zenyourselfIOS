@@ -23,7 +23,7 @@ import '../../services/local_storage.dart';
 import '../../shared/zen_style.dart';
 
 class ReminderSettingsSection extends StatefulWidget {
-  const ReminderSettingsSection({Key? key}) : super(key: key);
+  const ReminderSettingsSection({super.key});
 
   @override
   State<ReminderSettingsSection> createState() => _ReminderSettingsSectionState();
@@ -102,9 +102,9 @@ class _ReminderSettingsSectionState extends State<ReminderSettingsSection> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return _SectionCard(
+      return const _SectionCard(
         title: 'Erinnerungen',
-        child: const Padding(
+        child: Padding(
           padding: EdgeInsets.all(16),
           child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
         ),
@@ -129,7 +129,7 @@ class _ReminderSettingsSectionState extends State<ReminderSettingsSection> {
               SwitchListTile.adaptive(
                 value: _dailyEnabled,
                 title: const Text('Tägliche Erinnerung'),
-                subtitle: Text('Zur gewählten Uhrzeit jeden Tag'),
+                subtitle: const Text('Zur gewählten Uhrzeit jeden Tag'),
                 activeColor: ZenColors.cta,
                 onChanged: (v) async {
                   await _toggleDaily(v);
@@ -171,7 +171,7 @@ class _ReminderSettingsSectionState extends State<ReminderSettingsSection> {
               SwitchListTile.adaptive(
                 value: _weeklyEnabled,
                 title: const Text('Wöchentliche Zusammenfassung'),
-                subtitle: Text('Einmal pro Woche zum gewählten Zeitpunkt'),
+                subtitle: const Text('Einmal pro Woche zum gewählten Zeitpunkt'),
                 activeColor: ZenColors.cta,
                 onChanged: (v) async {
                   await _toggleWeekly(v);
@@ -335,7 +335,7 @@ class _ReminderSettingsSectionState extends State<ReminderSettingsSection> {
   }
 
   Future<void> _scheduleWeekly() async {
-    final id = NotificationService.idFrom('reminder.weekly.${_weeklyWeekday}');
+    final id = NotificationService.idFrom('reminder.weekly.$_weeklyWeekday');
     await _ns.scheduleWeekly(
       id: id,
       weekday: _weeklyWeekday,
@@ -347,7 +347,7 @@ class _ReminderSettingsSectionState extends State<ReminderSettingsSection> {
   }
 
   Future<void> _cancelWeekly() async {
-    final id = NotificationService.idFrom('reminder.weekly.${_weeklyWeekday}');
+    final id = NotificationService.idFrom('reminder.weekly.$_weeklyWeekday');
     await _ns.cancel(id);
   }
 
@@ -410,7 +410,7 @@ class _ReminderSettingsSectionState extends State<ReminderSettingsSection> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('Geplante Benachrichtigungen', style: ZenTextStyles.title),
+              const Text('Geplante Benachrichtigungen', style: ZenTextStyles.title),
               const SizedBox(height: 12),
               ...list.map((e) {
                 final title = (e['title'] ?? '').toString();
@@ -463,11 +463,10 @@ class _SectionCard extends StatelessWidget {
   final Widget child;
 
   const _SectionCard({
-    Key? key,
     required this.title,
     this.subtitle,
     required this.child,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -501,10 +500,9 @@ class _PermissionBanner extends StatelessWidget {
   final Future<void> Function() onOpenSettings;
 
   const _PermissionBanner({
-    Key? key,
     required this.onRequest,
     required this.onOpenSettings,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -514,8 +512,8 @@ class _PermissionBanner extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color: Colors.orange.withOpacity(.12),
-          border: Border.all(color: Colors.orange.withOpacity(.35)),
+          color: Colors.orange.withValues(alpha: .12),
+          border: Border.all(color: Colors.orange.withValues(alpha: .35)),
           borderRadius: BorderRadius.circular(12),
         ),
         child: Row(
@@ -547,13 +545,12 @@ class _RowTile extends StatelessWidget {
   final VoidCallback? onTap;
 
   const _RowTile({
-    Key? key,
     required this.enabled,
     required this.icon,
     required this.label,
     required this.value,
     this.onTap,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -564,7 +561,7 @@ class _RowTile extends StatelessWidget {
       trailing: Text(
         value,
         style: ZenTextStyles.caption.copyWith(
-          color: enabled ? ZenColors.inkStrong : ZenColors.ink.withOpacity(.6),
+          color: enabled ? ZenColors.inkStrong : ZenColors.ink.withValues(alpha: .6),
         ),
       ),
     );
@@ -588,12 +585,11 @@ class _EditableTextRow extends StatelessWidget {
   final Future<void> Function(String) onChanged;
 
   const _EditableTextRow({
-    Key? key,
     required this.enabled,
     required this.label,
     required this.value,
     required this.onChanged,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -621,11 +617,10 @@ class _WeekdayPicker extends StatelessWidget {
   final ValueChanged<int> onChanged;
 
   const _WeekdayPicker({
-    Key? key,
     required this.enabled,
     required this.value,
     required this.onChanged,
-  }) : super(key: key);
+  });
 
   static const _labels = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
 
@@ -641,7 +636,7 @@ class _WeekdayPicker extends StatelessWidget {
           label: Text(_labels[i]),
           selected: selected,
           onSelected: enabled ? (_) => onChanged(idx) : null,
-          selectedColor: ZenColors.sage.withOpacity(.25),
+          selectedColor: ZenColors.sage.withValues(alpha: .25),
           labelStyle: TextStyle(
             fontWeight: FontWeight.w700,
             color: selected ? ZenColors.jade : ZenColors.ink,

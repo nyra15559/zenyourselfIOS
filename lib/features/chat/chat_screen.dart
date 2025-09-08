@@ -16,7 +16,6 @@ import 'package:lottie/lottie.dart';
 import 'package:provider/provider.dart';
 
 import '../../shared/zen_style.dart';
-import '../../shared/ui/zen_widgets.dart';
 import '../voice/voice_input.dart';
 
 // Domain-Model + Provider
@@ -96,7 +95,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         // 2) Sanfter Schleier (für Lesbarkeit)
         Positioned.fill(
           child: IgnorePointer(
-            child: Container(color: ZenColors.white.withOpacity(0.42)),
+            child: Container(color: ZenColors.white.withValues(alpha: 0.42)),
           ),
         ),
 
@@ -104,7 +103,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         Scaffold(
           backgroundColor: Colors.transparent,
           appBar: AppBar(
-            backgroundColor: ZenColors.white.withOpacity(0.95),
+            backgroundColor: ZenColors.white.withValues(alpha: 0.95),
             foregroundColor: ZenColors.jade,
             elevation: 0,
             centerTitle: true,
@@ -164,8 +163,8 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                                   label: isUser ? 'Deine Nachricht' : 'Zen Panda',
                                   child: ZenBubble(
                                     color: isUser
-                                        ? ZenColors.white.withOpacity(0.96)
-                                        : ZenColors.sand.withOpacity(0.38),
+                                        ? ZenColors.white.withValues(alpha: 0.96)
+                                        : ZenColors.sand.withValues(alpha: 0.38),
                                     borderRadius: isUser
                                         ? const BorderRadius.only(
                                             topLeft: Radius.circular(21),
@@ -196,7 +195,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                                           _fmtTime(msg.timestamp),
                                           style: ZenTextStyles.caption.copyWith(
                                             fontSize: 12.4,
-                                            color: ZenColors.jadeMid.withOpacity(0.62),
+                                            color: ZenColors.jadeMid.withValues(alpha: 0.62),
                                           ),
                                         ),
                                       ],
@@ -236,7 +235,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
             const SizedBox(height: 9),
             Text(
               "Sprich oder tippe deine Gedanken.\nDeine Reflexion bleibt privat.",
-              style: ZenTextStyles.caption.copyWith(color: ZenColors.jadeMid.withOpacity(0.83)),
+              style: ZenTextStyles.caption.copyWith(color: ZenColors.jadeMid.withValues(alpha: 0.83)),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 15),
@@ -300,7 +299,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(color: ZenColors.outline.withOpacity(0.8)),
+                        borderSide: BorderSide(color: ZenColors.outline.withValues(alpha: 0.8)),
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),

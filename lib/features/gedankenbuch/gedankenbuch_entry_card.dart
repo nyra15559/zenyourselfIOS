@@ -38,13 +38,13 @@ class GedankenbuchEntryCard extends StatefulWidget {
   final EntryType entryType;
 
   const GedankenbuchEntryCard({
-    Key? key,
+    super.key,
     this.onSave,
     this.initialText,
     this.initialMood,
     this.aiQuestion,
     this.entryType = EntryType.journal,
-  }) : super(key: key);
+  });
 
   @override
   State<GedankenbuchEntryCard> createState() => _GedankenbuchEntryCardState();
@@ -410,9 +410,9 @@ class _GedankenbuchEntryCardState extends State<GedankenbuchEntryCard>
                 // Inputzeile (Mic + Text)
                 Container(
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(.55),
+                    color: Colors.white.withValues(alpha: .55),
                     border: Border.all(
-                      color: zs.ZenColors.jadeMid.withOpacity(.20),
+                      color: zs.ZenColors.jadeMid.withValues(alpha: .20),
                     ),
                     borderRadius: const BorderRadius.all(zs.ZenRadii.l),
                     boxShadow: const [
@@ -440,8 +440,8 @@ class _GedankenbuchEntryCardState extends State<GedankenbuchEntryCard>
                               final glow = 18 + (28 - 18) * _glowCtrl.value;
                               final borderColor = _micEnabled
                                   ? _green
-                                      .withOpacity(_isListening ? 0.00 : 0.40)
-                                  : Colors.grey.withOpacity(0.35);
+                                      .withValues(alpha: _isListening ? 0.00 : 0.40)
+                                  : Colors.grey.withValues(alpha: 0.35);
                               return Opacity(
                                 opacity: _micEnabled ? 1.0 : 0.5,
                                 child: Container(
@@ -547,18 +547,18 @@ class _GedankenbuchEntryCardState extends State<GedankenbuchEntryCard>
                             vertical: 6, horizontal: 12),
                         decoration: BoxDecoration(
                           color: selected
-                              ? _green.withOpacity(0.10)
-                              : zs.ZenColors.white.withOpacity(0.14),
+                              ? _green.withValues(alpha: 0.10)
+                              : zs.ZenColors.white.withValues(alpha: 0.14),
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
                             color:
-                                selected ? _green.withOpacity(0.55) : Colors.transparent,
+                                selected ? _green.withValues(alpha: 0.55) : Colors.transparent,
                             width: 1.2,
                           ),
                           boxShadow: selected
                               ? [
                                   BoxShadow(
-                                    color: Colors.black.withOpacity(0.06),
+                                    color: Colors.black.withValues(alpha: 0.06),
                                     blurRadius: 6,
                                   )
                                 ]
@@ -650,8 +650,8 @@ class _GedankenbuchEntryCardState extends State<GedankenbuchEntryCard>
                     // Material 3 (caption → bodySmall)
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: isNearingLimit
-                              ? Colors.redAccent.withOpacity(0.85)
-                              : _green.withOpacity(0.52),
+                              ? Colors.redAccent.withValues(alpha: 0.85)
+                              : _green.withValues(alpha: 0.52),
                         ),
                   ),
                 ),

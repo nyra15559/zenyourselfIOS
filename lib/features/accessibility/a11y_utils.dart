@@ -8,7 +8,7 @@
 // • Defensive Defaults für sensible Zielgruppen
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // <- nötig für SemanticsService.announce
+// <- nötig für SemanticsService.announce
 import 'package:flutter/semantics.dart'; // <-- für SemanticsService.announce
 import 'dart:math' as math;
 
@@ -51,7 +51,7 @@ class ZenA11yPalette {
 
   Color get error => const Color(0xFFD7263D);
 
-  Color get border => isHighContrast ? Colors.black : _zenJadeLight.withOpacity(0.14);
+  Color get border => isHighContrast ? Colors.black : _zenJadeLight.withValues(alpha: 0.14);
 
   /// Kontrastfreundliche Textfarbe zu einem Hintergrund bestimmen.
   static Color onColor(Color bg) => _relativeLuminance(bg) > 0.58 ? Colors.black : Colors.white;
@@ -144,8 +144,8 @@ class _ZenA11yPaletteProvider extends InheritedWidget {
   final ZenA11yPalette palette;
   const _ZenA11yPaletteProvider({
     required this.palette,
-    required Widget child,
-  }) : super(child: child);
+    required super.child,
+  });
 
   @override
   bool updateShouldNotify(_ZenA11yPaletteProvider oldWidget) =>
@@ -198,7 +198,7 @@ class A11yText extends StatelessWidget {
       fontWeight: fontWeight ?? (bold ? FontWeight.w600 : FontWeight.normal),
       height: 1.22,
       shadows: animatedFocus
-          ? [Shadow(blurRadius: 10, color: palette.accent.withOpacity(0.12), offset: const Offset(0, 2))]
+          ? [Shadow(blurRadius: 10, color: palette.accent.withValues(alpha: 0.12), offset: const Offset(0, 2))]
           : const [],
     );
 
@@ -343,7 +343,7 @@ class A11yContrastDemo extends StatelessWidget {
         A11yText(
           "Kontrast: ${contrastRatio(chipFg, chipBg).toStringAsFixed(2)}",
           fontSize: 12.5,
-          color: Colors.black.withOpacity(0.6),
+          color: Colors.black.withValues(alpha: 0.6),
         ),
       ],
     );

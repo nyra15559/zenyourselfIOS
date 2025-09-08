@@ -15,7 +15,6 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../shared/zen_style.dart';
-import '../../shared/ui/zen_widgets.dart';
 
 import '../../services/local_storage.dart';
 import '../../services/guidance_service.dart';
@@ -27,7 +26,7 @@ import '../../models/app_settings.dart';
 class SettingsScreen extends StatefulWidget {
   static const routeName = '/settings';
 
-  const SettingsScreen({Key? key}) : super(key: key);
+  const SettingsScreen({super.key});
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -586,7 +585,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         const SizedBox(width: 12),
         Expanded(
           child: DropdownButtonFormField<Locale>(
-            value: locales.firstWhere(
+            initialValue: locales.firstWhere(
               (l) =>
                   l.languageCode == settings.locale.languageCode &&
                   (l.countryCode == null ||
@@ -712,7 +711,7 @@ class _BusyOverlay extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: Colors.black.withOpacity(.06),
+      color: Colors.black.withValues(alpha: .06),
       child: const Center(
         child: SizedBox(
           width: 40,

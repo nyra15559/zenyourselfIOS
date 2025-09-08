@@ -29,7 +29,7 @@ class JournalDayScreen extends StatefulWidget {
   /// Lokaler Tagesstart (nur Datum zählt).
   final DateTime dayLocal;
 
-  const JournalDayScreen({Key? key, required this.dayLocal}) : super(key: key);
+  const JournalDayScreen({super.key, required this.dayLocal});
 
   /// Komfort: Screen aus YYYYMMDD-Schlüssel.
   factory JournalDayScreen.forDayKey(int dayKey) => JournalDayScreen(
@@ -205,7 +205,7 @@ class _JournalDayScreenState extends State<JournalDayScreen>
     return Container(
       alignment: Alignment.centerRight,
       padding: const EdgeInsets.symmetric(horizontal: 20),
-      color: Colors.redAccent.withOpacity(.14),
+      color: Colors.redAccent.withValues(alpha: .14),
       child: const Icon(Icons.delete_forever, color: Colors.redAccent, size: 28),
     );
   }
@@ -311,7 +311,7 @@ class _JournalDayScreenState extends State<JournalDayScreen>
   }
 
   String _first(String s, int n) =>
-      s.length <= n ? s : (s.substring(0, n).trimRight() + '…');
+      s.length <= n ? s : ('${s.substring(0, n).trimRight()}…');
 }
 
 // ---------- Header ----------
@@ -320,8 +320,7 @@ class _HeaderCard extends StatelessWidget {
   final DateTime day;
   final _DayMetrics metrics;
 
-  const _HeaderCard({Key? key, required this.day, required this.metrics})
-      : super(key: key);
+  const _HeaderCard({required this.day, required this.metrics});
 
   @override
   Widget build(BuildContext context) {
@@ -404,12 +403,10 @@ class _StatBadge extends StatelessWidget {
   final Color? color;
 
   const _StatBadge(
-      {Key? key,
-      required this.icon,
+      {required this.icon,
       required this.label,
       required this.value,
-      this.color})
-      : super(key: key);
+      this.color});
 
   @override
   Widget build(BuildContext context) {
@@ -417,7 +414,7 @@ class _StatBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
       decoration: BoxDecoration(
-        color: ZenColors.white.withOpacity(.72),
+        color: ZenColors.white.withValues(alpha: .72),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: ZenColors.border),
         boxShadow: ZenShadows.card,
@@ -443,8 +440,7 @@ class _FilterChips extends StatelessWidget {
   final _EntryFilter filter;
   final ValueChanged<_EntryFilter> onChanged;
 
-  const _FilterChips({Key? key, required this.filter, required this.onChanged})
-      : super(key: key);
+  const _FilterChips({required this.filter, required this.onChanged});
 
   @override
   Widget build(BuildContext context) {
@@ -465,10 +461,10 @@ class _FilterChips extends StatelessWidget {
         onSelected: (_) => onChanged(f),
         materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
         visualDensity: VisualDensity.compact,
-        selectedColor: ZenColors.jade.withOpacity(.10),
+        selectedColor: ZenColors.jade.withValues(alpha: .10),
         side: BorderSide(
             color:
-                selected ? ZenColors.jade.withOpacity(.55) : ZenColors.outline),
+                selected ? ZenColors.jade.withValues(alpha: .55) : ZenColors.outline),
         shape: const StadiumBorder(),
       );
     }
@@ -491,7 +487,7 @@ class _FilterChips extends StatelessWidget {
 // ---------- Empty ----------
 
 class _EmptyDay extends StatelessWidget {
-  const _EmptyDay({Key? key}) : super(key: key);
+  const _EmptyDay();
 
   @override
   Widget build(BuildContext context) {
@@ -527,7 +523,7 @@ class _EmptyDay extends StatelessWidget {
 
 class _Sparkline extends StatelessWidget {
   final List<double> values; // erwarteter Bereich ~ −2..+2
-  const _Sparkline({Key? key, required this.values}) : super(key: key);
+  const _Sparkline({required this.values});
 
   @override
   Widget build(BuildContext context) {
@@ -588,7 +584,7 @@ class _SparklinePainter extends CustomPainter {
 
     final paintFill = Paint()
       ..shader = LinearGradient(
-        colors: [ZenColors.jadeMid.withOpacity(.22), Colors.transparent],
+        colors: [ZenColors.jadeMid.withValues(alpha: .22), Colors.transparent],
         begin: Alignment.topCenter,
         end: Alignment.bottomCenter,
       ).createShader(Rect.fromLTWH(0, 0, w, h));
@@ -689,7 +685,7 @@ class _EntryBottomSheet extends StatelessWidget {
       margin: const EdgeInsets.all(14),
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(.96),
+        color: Colors.white.withValues(alpha: .96),
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: ZenColors.border),
         boxShadow: ZenShadows.card,

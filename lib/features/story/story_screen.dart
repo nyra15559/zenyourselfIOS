@@ -442,7 +442,9 @@ class _DezenterCtaButton extends StatelessWidget {
   final VoidCallback? onPressed;
   final IconData? icon;
 
-  const _DezenterCtaButton({required this.label, this.onPressed}) : icon = null;
+  const _DezenterCtaButton({super.key, required this.label})
+      : icon = null,
+        onPressed = null;
   const _DezenterCtaButton.icon({required this.icon, required this.label, this.onPressed});
 
   @override
@@ -472,7 +474,7 @@ class _DezenterCtaButton extends StatelessWidget {
     return OutlinedButton(
       onPressed: onPressed,
       style: OutlinedButton.styleFrom(
-        side: BorderSide(color: zs.ZenColors.jade.withOpacity(.75), width: 1.1),
+        side: BorderSide(color: zs.ZenColors.jade.withValues(alpha: .75), width: 1.1),
         foregroundColor: zs.ZenColors.jade,
         minimumSize: const Size(0, 52),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -505,18 +507,18 @@ class _CapsuleProgress extends StatelessWidget {
             margin: EdgeInsets.only(right: i == total - 1 ? 0 : 8),
             decoration: BoxDecoration(
               color: filled[i]
-                  ? zs.ZenColors.jade.withOpacity(.22)
+                  ? zs.ZenColors.jade.withValues(alpha: .22)
                   : zs.ZenColors.surfaceAlt,
               borderRadius: BorderRadius.circular(999),
               border: Border.all(
                 color: filled[i]
-                    ? zs.ZenColors.jade.withOpacity(.55)
+                    ? zs.ZenColors.jade.withValues(alpha: .55)
                     : zs.ZenColors.outline,
               ),
               boxShadow: filled[i]
                   ? [
                       BoxShadow(
-                        color: Colors.black.withOpacity(.06),
+                        color: Colors.black.withValues(alpha: .06),
                         blurRadius: 6,
                         offset: const Offset(0, 2),
                       ),

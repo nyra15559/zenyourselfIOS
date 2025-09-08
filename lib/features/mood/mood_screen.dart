@@ -204,7 +204,7 @@ class _MoodScreenState extends State<MoodScreen> {
                               'Tippe deine Stimmung. Eine Notiz ist optional.',
                               textAlign: TextAlign.center,
                               style: ZenTextStyles.caption.copyWith(
-                                color: ZenColors.jadeMid.withOpacity(0.75),
+                                color: ZenColors.jadeMid.withValues(alpha: 0.75),
                               ),
                             ),
                             const SizedBox(height: 16),
@@ -231,15 +231,15 @@ class _MoodScreenState extends State<MoodScreen> {
                                       padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
                                       decoration: BoxDecoration(
                                         color: selected
-                                            ? m.color.withOpacity(0.18)
-                                            : ZenColors.white.withOpacity(0.12),
+                                            ? m.color.withValues(alpha: 0.18)
+                                            : ZenColors.white.withValues(alpha: 0.12),
                                         borderRadius: BorderRadius.circular(16),
                                         border: Border.all(
-                                          color: selected ? m.color : ZenColors.jade.withOpacity(0.10),
+                                          color: selected ? m.color : ZenColors.jade.withValues(alpha: 0.10),
                                           width: selected ? 2 : 1.1,
                                         ),
                                         boxShadow: selected
-                                            ? [BoxShadow(color: m.color.withOpacity(0.11), blurRadius: 8)]
+                                            ? [BoxShadow(color: m.color.withValues(alpha: 0.11), blurRadius: 8)]
                                             : const [BoxShadow(color: Color(0x14000000), blurRadius: 8)],
                                       ),
                                       child: Row(
@@ -285,7 +285,7 @@ class _MoodScreenState extends State<MoodScreen> {
                                     counterText: '',
                                     hintText: 'Optional: kurze Notiz (z. B. „Spaziergang tat gut“)…',
                                     hintStyle: ZenTextStyles.caption.copyWith(
-                                      color: ZenColors.jadeMid.withOpacity(0.45),
+                                      color: ZenColors.jadeMid.withValues(alpha: 0.45),
                                       fontSize: 14.8,
                                     ),
                                     border: InputBorder.none,
@@ -334,13 +334,13 @@ class _MoodScreenState extends State<MoodScreen> {
                                 SizedBox(
                                   height: 46,
                                   child: TextButton(
-                                    child: const Text('Abbrechen'),
                                     style: TextButton.styleFrom(
                                       foregroundColor: ZenColors.jadeMid,
                                       minimumSize: const Size(120, 46),
                                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                                     ),
                                     onPressed: () => Navigator.of(context).maybePop(),
+                                    child: const Text('Abbrechen'),
                                   ),
                                 ),
                               ],
@@ -350,7 +350,7 @@ class _MoodScreenState extends State<MoodScreen> {
                             Text(
                               'Shortcut: Cmd/Ctrl + Enter',
                               style: ZenTextStyles.caption.copyWith(
-                                color: ZenColors.jade.withOpacity(0.55),
+                                color: ZenColors.jade.withValues(alpha: 0.55),
                                 fontStyle: FontStyle.italic,
                               ),
                             ),

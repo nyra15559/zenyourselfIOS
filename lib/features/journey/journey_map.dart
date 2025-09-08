@@ -2,7 +2,6 @@
 //
 // JourneyMapScreen — v7 Oxford (Therapeuten-Tile, Privacy-Footer, Safe-Nav)
 
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -35,10 +34,10 @@ class JourneyMapScreen extends StatefulWidget {
   final List<ReflectionEntry> reflections; // Legacy-Param (Fallback)
 
   const JourneyMapScreen({
-    Key? key,
+    super.key,
     required this.moodEntries,
     required this.reflections,
-  }) : super(key: key);
+  });
 
   @override
   State<JourneyMapScreen> createState() => _JourneyMapScreenState();
@@ -132,10 +131,10 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
             const PositionedFillBackdrop(),
 
             // Back-Button
-            SafeArea(
+            const SafeArea(
               child: Padding(
-                padding: const EdgeInsets.only(top: zs.ZenSpacing.l, left: zs.ZenSpacing.l),
-                child: const _BackButton(),
+                padding: EdgeInsets.only(top: zs.ZenSpacing.l, left: zs.ZenSpacing.l),
+                child: _BackButton(),
               ),
             ),
 
@@ -170,7 +169,7 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
                                 shadows: [
                                   Shadow(
                                     blurRadius: 8,
-                                    color: Colors.black.withOpacity(.08),
+                                    color: Colors.black.withValues(alpha: .08),
                                     offset: const Offset(0, 2),
                                   ),
                                 ],
@@ -314,7 +313,7 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
                         'Privacy first · Lokaler Modus: Deine Daten bleiben auf deinem Gerät.',
                         textAlign: TextAlign.center,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: zs.ZenColors.deepSage.withOpacity(.82),
+                              color: zs.ZenColors.deepSage.withValues(alpha: .82),
                             ),
                       ),
                     ],
@@ -377,10 +376,10 @@ class _BackButton extends StatelessWidget {
             width: 46,
             height: 46,
             decoration: BoxDecoration(
-              color: zs.ZenColors.surface.withOpacity(.49),
+              color: zs.ZenColors.surface.withValues(alpha: .49),
               shape: BoxShape.circle,
               boxShadow: zs.ZenShadows.card,
-              border: Border.all(color: zs.ZenColors.sage.withOpacity(.18), width: 1.2),
+              border: Border.all(color: zs.ZenColors.sage.withValues(alpha: .18), width: 1.2),
             ),
             child: const Icon(Icons.arrow_back_rounded, color: zs.ZenColors.deepSage, size: 26),
           ),
@@ -427,9 +426,9 @@ class _OptionTile extends StatelessWidget {
               width: 42,
               height: 42,
               decoration: BoxDecoration(
-                color: zs.ZenColors.cta.withOpacity(.12),
+                color: zs.ZenColors.cta.withValues(alpha: .12),
                 shape: BoxShape.circle,
-                border: Border.all(color: zs.ZenColors.cta.withOpacity(.35)),
+                border: Border.all(color: zs.ZenColors.cta.withValues(alpha: .35)),
               ),
               child: Icon(icon, color: zs.ZenColors.cta, size: 22),
             ),
@@ -456,7 +455,7 @@ class _OptionTile extends StatelessWidget {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: tt.bodyMedium!.copyWith(
-                      color: zs.ZenColors.cta.withOpacity(.82),
+                      color: zs.ZenColors.cta.withValues(alpha: .82),
                       fontStyle: FontStyle.italic,
                       fontSize: 13,
                       height: 1.15,
@@ -480,8 +479,8 @@ class _OptionTile extends StatelessWidget {
         color: Colors.transparent,
         child: InkWell(
           borderRadius: const BorderRadius.all(zs.ZenRadii.xl),
-          splashColor: zs.ZenColors.cta.withOpacity(.12),
-          highlightColor: zs.ZenColors.cta.withOpacity(.06),
+          splashColor: zs.ZenColors.cta.withValues(alpha: .12),
+          highlightColor: zs.ZenColors.cta.withValues(alpha: .06),
           onTap: () {
             if (locked) {
               HapticFeedback.selectionClick();

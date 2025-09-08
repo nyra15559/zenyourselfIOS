@@ -78,12 +78,12 @@ class GedankenbuchTimelineScreen extends StatefulWidget {
   final void Function(int idx) onDelete;
 
   const GedankenbuchTimelineScreen({
-    Key? key,
+    super.key,
     required this.entries,
     required this.onAdd,
     required this.onEdit,
     required this.onDelete,
-  }) : super(key: key);
+  });
 
   @override
   State<GedankenbuchTimelineScreen> createState() =>
@@ -156,7 +156,7 @@ class _EntryView {
     final isRefl = j.kind == jm.EntryKind.reflection;
     final isStory = j.kind == jm.EntryKind.story;
 
-    String _moodFromTags(List<String> tags) {
+    String moodFromTags(List<String> tags) {
       for (final t in tags) {
         final s = t.trim();
         if (s.startsWith('mood:')) return s.substring(5);
@@ -182,7 +182,7 @@ class _EntryView {
       return '';
     }
 
-    final moodLabel = _moodFromTags(j.tags);
+    final moodLabel = moodFromTags(j.tags);
 
     final String textForList = () {
       if (isStory) {
@@ -705,7 +705,7 @@ class _GedankenbuchTimelineScreenState extends State<GedankenbuchTimelineScreen>
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      barrierColor: Colors.black.withOpacity(.25),
+      barrierColor: Colors.black.withValues(alpha: .25),
       builder: (ctx) {
         return FractionallySizedBox(
           heightFactor: 0.94,
@@ -821,11 +821,11 @@ class _GedankenbuchTimelineScreenState extends State<GedankenbuchTimelineScreen>
     if (mounted) {
       setState(() {});
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Alle lokalen Einträge gelöscht.'),
+        const SnackBar(
+          content: Text('Alle lokalen Einträge gelöscht.'),
           backgroundColor: zs.ZenColors.deepSage,
           behavior: SnackBarBehavior.floating,
-          shape: const RoundedRectangleBorder(
+          shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.all(zs.ZenRadii.m),
           ),
         ),
@@ -862,12 +862,12 @@ class _GedankenbuchTimelineScreenState extends State<GedankenbuchTimelineScreen>
       if (mounted) {
         setState(() {});
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text(
+          const SnackBar(
+            content: Text(
                 'Provider-Löschen nicht verfügbar – Einträge ausgeblendet.'),
             backgroundColor: zs.ZenColors.deepSage,
             behavior: SnackBarBehavior.floating,
-            shape: const RoundedRectangleBorder(
+            shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.all(zs.ZenRadii.m),
             ),
           ),
@@ -961,8 +961,8 @@ class _FilterHeader extends StatelessWidget {
               Text('$label (${_countFor(f)})'),
             ],
           ),
-          selectedColor: zs.ZenColors.sage.withOpacity(.22),
-          backgroundColor: zs.ZenColors.white.withOpacity(.18),
+          selectedColor: zs.ZenColors.sage.withValues(alpha: .22),
+          backgroundColor: zs.ZenColors.white.withValues(alpha: .18),
           showCheckmark: false,
           labelStyle: Theme.of(context).textTheme.labelMedium?.copyWith(
                 color: selected ? zs.ZenColors.deepSage : zs.ZenColors.jadeMid,
@@ -971,7 +971,7 @@ class _FilterHeader extends StatelessWidget {
           side: BorderSide(
             color: selected
                 ? zs.ZenColors.deepSage
-                : zs.ZenColors.jadeMid.withOpacity(.22),
+                : zs.ZenColors.jadeMid.withValues(alpha: .22),
           ),
           shape: const StadiumBorder(),
         ),
@@ -1016,10 +1016,10 @@ class _DayHeader extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 10),
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(.66),
+            color: Colors.white.withValues(alpha: .66),
             borderRadius: const BorderRadius.all(zs.ZenRadii.m),
             border: Border.all(
-              color: zs.ZenColors.jadeMid.withOpacity(0.14),
+              color: zs.ZenColors.jadeMid.withValues(alpha: 0.14),
               width: 1,
             ),
             boxShadow: const [BoxShadow(color: Color(0x14000000), blurRadius: 8)],
@@ -1085,9 +1085,9 @@ class _RailPainter extends CustomPainter {
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [
-            zs.ZenColors.sage.withOpacity(.18),
-            zs.ZenColors.deepSage.withOpacity(.26),
-            zs.ZenColors.sage.withOpacity(.18),
+            zs.ZenColors.sage.withValues(alpha: .18),
+            zs.ZenColors.deepSage.withValues(alpha: .26),
+            zs.ZenColors.sage.withValues(alpha: .18),
           ],
         ).createShader(Rect.fromPoints(from, to));
 
@@ -1103,7 +1103,7 @@ class _RailPainter extends CustomPainter {
     }
 
     final dotPaint = Paint()
-      ..color = zs.ZenColors.deepSage.withOpacity(.28)
+      ..color = zs.ZenColors.deepSage.withValues(alpha: .28)
       ..style = PaintingStyle.fill
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 1.2);
     canvas.drawCircle(Offset(centerX, dotY), 4.8, dotPaint);
@@ -1125,12 +1125,12 @@ class _GlassEntryCard extends StatefulWidget {
   final VoidCallback onHide; // „Verbergen“ (Provider)
 
   const _GlassEntryCard({
-    Key? key,
+    super.key,
     required this.view,
     required this.onOpen,
     required this.onContinueReflection,
     required this.onHide,
-  }) : super(key: key);
+  });
 
   @override
   State<_GlassEntryCard> createState() => _GlassEntryCardState();
@@ -1255,7 +1255,7 @@ class _GlassEntryCardState extends State<_GlassEntryCard>
                               Text(
                                 _formatDate(v.date),
                                 style: zs.ZenTextStyles.caption.copyWith(
-                                  color: Colors.black.withOpacity(.55),
+                                  color: Colors.black.withValues(alpha: .55),
                                 ),
                               ),
                               if (!v.isStory && v.mood.trim().isNotEmpty) ...[
@@ -1369,9 +1369,9 @@ class _Badge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 8),
       decoration: BoxDecoration(
-        color: zs.ZenColors.mist.withOpacity(0.80),
+        color: zs.ZenColors.mist.withValues(alpha: 0.80),
         borderRadius: const BorderRadius.all(zs.ZenRadii.s),
-        border: Border.all(color: zs.ZenColors.jadeMid.withOpacity(0.18)),
+        border: Border.all(color: zs.ZenColors.jadeMid.withValues(alpha: 0.18)),
       ),
       child: Row(
         children: [
@@ -1399,12 +1399,11 @@ class _ReflectionPreview extends StatelessWidget {
   final bool expanded;
 
   const _ReflectionPreview({
-    Key? key,
     required this.question,
     required this.answer,
     required this.thought,
     required this.expanded,
-  }) : super(key: key);
+  });
 
   TextStyle get _userStyle => const TextStyle(
         fontFamily: 'ZenKalligrafie',
@@ -1422,7 +1421,7 @@ class _ReflectionPreview extends StatelessWidget {
 
   TextStyle _questionStyle(BuildContext c) =>
       Theme.of(c).textTheme.bodySmall!.copyWith(
-            color: zs.ZenColors.inkStrong.withOpacity(.90),
+            color: zs.ZenColors.inkStrong.withValues(alpha: .90),
             fontStyle: FontStyle.italic,
             fontWeight: FontWeight.w600,
           );
@@ -1474,11 +1473,10 @@ class _StoryPreview extends StatelessWidget {
   final String teaser;
   final bool expanded;
   const _StoryPreview({
-    Key? key,
     required this.title,
     required this.teaser,
     required this.expanded,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1520,14 +1518,13 @@ class _MoreMenu extends StatelessWidget {
   final VoidCallback? onHide;
 
   const _MoreMenu({
-    Key? key,
     required this.hasLocalEdit,
     required this.hasLocalDelete,
     required this.canHide,
     this.onEdit,
     this.onDelete,
     this.onHide,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1561,10 +1558,10 @@ class _MoreMenu extends StatelessWidget {
 
         if (hasLocalDelete) {
           items.add(
-            PopupMenuItem(
+            const PopupMenuItem(
               value: 'delete',
               child: Row(
-                children: const [
+                children: [
                   Icon(Icons.delete_outline_rounded,
                       size: 18, color: Colors.redAccent),
                   SizedBox(width: 10),
@@ -1642,11 +1639,9 @@ class _StaggerFadeSlide extends StatefulWidget {
   final Duration duration;
 
   const _StaggerFadeSlide({
-    Key? key,
     required this.child,
     this.delay = const Duration(milliseconds: 0),
-    this.duration = const Duration(milliseconds: 280),
-  }) : super(key: key);
+  });
 
   @override
   State<_StaggerFadeSlide> createState() => _StaggerFadeSlideState();

@@ -46,7 +46,7 @@ class UserProfileProvider with ChangeNotifier {
 
   /// Anzeigename (Fallback: "Gast")
   String get displayName {
-    final name = _user?.displayName?.trim();
+    final name = _user?.displayName.trim();
     return (name != null && name.isNotEmpty) ? name : 'Gast';
   }
 
@@ -76,7 +76,7 @@ class UserProfileProvider with ChangeNotifier {
     if (_loadUserFn == null) return;
     _setLoading(true);
     try {
-      final loaded = await _loadUserFn!.call();
+      final loaded = await _loadUserFn.call();
       if (loaded != null) {
         _user = loaded;
         _lastUpdate = DateTime.now();
@@ -99,7 +99,7 @@ class UserProfileProvider with ChangeNotifier {
   Future<void> setUserAsync(ZenUser user, {bool notify = true}) async {
     setUser(user, notify: false);
     if (_saveUserFn != null) {
-      await _saveUserFn!(user);
+      await _saveUserFn(user);
     }
     if (notify) notifyListeners();
   }
@@ -133,7 +133,7 @@ class UserProfileProvider with ChangeNotifier {
   Future<void> clearUserAsync({bool notify = true}) async {
     clearUser(notify: false);
     if (_clearUserFn != null) {
-      await _clearUserFn!.call();
+      await _clearUserFn.call();
     }
     if (notify) notifyListeners();
   }

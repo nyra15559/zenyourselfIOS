@@ -84,7 +84,7 @@ class _AnonExportWidgetState extends State<AnonExportWidget> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Exportiere deine Daten', style: ZenTextStyles.title),
+              const Text('Exportiere deine Daten', style: ZenTextStyles.title),
               const SizedBox(height: 10),
 
               // Auswahl Exportart
@@ -101,11 +101,11 @@ class _AnonExportWidgetState extends State<AnonExportWidget> {
                   children: [
                     Switch(
                       value: _includeReflections,
-                      activeColor: ZenColors.jade,
+                      activeThumbColor: ZenColors.jade,
                       onChanged: (v) => setState(() => _includeReflections = v),
                     ),
                     const SizedBox(width: 6),
-                    Expanded(
+                    const Expanded(
                       child: Text(
                         'Reflexionen einbeziehen',
                         style: ZenTextStyles.body,
@@ -143,13 +143,13 @@ class _AnonExportWidgetState extends State<AnonExportWidget> {
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
                     color: _exportMsg!.startsWith('Fehler')
-                        ? Colors.red.withOpacity(0.08)
-                        : ZenColors.bamboo.withOpacity(0.08),
+                        ? Colors.red.withValues(alpha: 0.08)
+                        : ZenColors.bamboo.withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
                       color: _exportMsg!.startsWith('Fehler')
-                          ? Colors.red.withOpacity(0.32)
-                          : ZenColors.bamboo.withOpacity(0.25),
+                          ? Colors.red.withValues(alpha: 0.32)
+                          : ZenColors.bamboo.withValues(alpha: 0.25),
                     ),
                   ),
                   child: Text(
@@ -265,7 +265,7 @@ class _AnonExportWidgetState extends State<AnonExportWidget> {
     final hh = now.hour.toString().padLeft(2, '0');
     final mm = now.minute.toString().padLeft(2, '0');
     final ss = now.second.toString().padLeft(2, '0');
-    return '${base}_${y}${m}${d}_$hh$mm$ss.$ext';
+    return '${base}_$y$m${d}_$hh$mm$ss.$ext';
   }
 
   /// CSV robust quoten (RFC4180-ish): " -> "", Feld in Anführungszeichen.
@@ -370,10 +370,10 @@ class _ExportSelector extends StatelessWidget {
         if (s.isNotEmpty) onChanged(s.first);
       },
       style: ButtonStyle(
-        backgroundColor: MaterialStateProperty.resolveWith(
+        backgroundColor: WidgetStateProperty.resolveWith(
           (states) => ZenColors.surface, // kein surfaceAlt → build-safe
         ),
-        foregroundColor: MaterialStateProperty.all(ZenColors.inkStrong),
+        foregroundColor: WidgetStateProperty.all(ZenColors.inkStrong),
       ),
     );
   }

@@ -7,7 +7,7 @@ import 'gedankenbuch_timeline.dart';
 /// Schlanker Wrapper, damit die Timeline ohne lokale Fallback-Liste läuft.
 /// Er reicht Provider-Aktionen sauber durch (Add/Edit/Delete greifen auf den Provider).
 class GedankenbuchRoute extends StatelessWidget {
-  const GedankenbuchRoute({Key? key}) : super(key: key);
+  const GedankenbuchRoute({super.key});
 
   @override
   Widget build(BuildContext context) {

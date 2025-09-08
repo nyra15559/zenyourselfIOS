@@ -9,11 +9,9 @@
 // - Worker-Schnittstelle vorbereitet: _loadFromWorker()
 // - Fehlerfreie Build: Ticker-Import, nur vorhandene Styles/Farben
 
-import 'dart:math' as math;
 import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter/scheduler.dart'; // ✅ für Ticker
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
@@ -66,9 +64,9 @@ class BreathPattern {
 
   static BreathPattern fourSevenEight({int cycles = 4}) => BreathPattern(
         phases: [
-          _Phase('Einatmen', 4),
-          _Phase('Halten', 7),
-          _Phase('Ausatmen', 8),
+          const _Phase('Einatmen', 4),
+          const _Phase('Halten', 7),
+          const _Phase('Ausatmen', 8),
         ],
         cycles: cycles,
       );
@@ -104,7 +102,7 @@ class _ImpulseScreenState extends State<ImpulseScreen>
   AudioPlayer? _fallbackPlayer;
 
   // Lokale Basis-Impulse (Mood-Assets eingebaut)
-  late List<ZenImpulse> _all = [
+  late final List<ZenImpulse> _all = [
     ZenImpulse(
       kind: ImpulseKind.breath,
       title: '4-7-8 Atem',
@@ -121,21 +119,21 @@ class _ImpulseScreenState extends State<ImpulseScreen>
       audio: 'assets/audio/clouds_ambience.mp3',
       breath: BreathPattern.box(),
     ),
-    ZenImpulse(
+    const ZenImpulse(
       kind: ImpulseKind.meditation,
       title: 'Der innere Garten',
       text: 'Stell dir deinen Geist als Garten vor.',
       image: 'assets/panda_moods/mood_sun.png',
       audio: 'assets/audio/birds_garden.mp3',
     ),
-    ZenImpulse(
+    const ZenImpulse(
       kind: ImpulseKind.pmr,
       title: 'Schultern lockern',
       text: 'Heb die Schultern, halte kurz, lass sinken.',
       image: 'assets/panda_moods/mood_rain.png',
       audio: 'assets/audio/neutral_flow.mp3',
     ),
-    ZenImpulse(
+    const ZenImpulse(
       kind: ImpulseKind.micro,
       title: 'Kleine Freundlichkeit',
       text: 'Wem — oder dir selbst — schenkst du heute eine winzige Freundlichkeit?',

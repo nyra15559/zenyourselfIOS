@@ -93,7 +93,7 @@ class LargeTextModeSwitcher extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Tooltip(
+        const Tooltip(
           message:
               "Aktiviere große Schrift, um Texte leichter zu lesen.\n"
               "Wir respektieren immer deine System-Einstellungen.",
@@ -133,7 +133,7 @@ class LargeTextModeSwitcher extends StatelessWidget {
       label: "Textgröße $label${isActive ? ' (aktiv)' : ''}",
       child: OutlinedButton(
         style: OutlinedButton.styleFrom(
-          backgroundColor: isActive ? accent.withOpacity(0.14) : null,
+          backgroundColor: isActive ? accent.withValues(alpha: 0.14) : null,
           side: BorderSide(color: isActive ? accent : Colors.grey.shade300),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         ),
@@ -177,7 +177,7 @@ class LargeTextProvider extends StatelessWidget {
     );
 
     return MediaQuery(
-      data: media.copyWith(textScaleFactor: effective),
+      data: media.copyWith(textScaler: TextScaler.linear(effective)),
       child: child,
     );
   }

@@ -145,7 +145,7 @@ class ColorBlindModeSwitcher extends StatelessWidget {
                 "Optimierte Farben mit hohem Kontrast – zusätzlich nutzen wir Symbole, nicht nur Farbe.",
                 style: TextStyle(
                   fontSize: 13.5,
-                  color: Colors.black.withOpacity(0.6),
+                  color: Colors.black.withValues(alpha: 0.6),
                 ),
               ),
             ),
@@ -210,10 +210,10 @@ class _SignalChip extends StatelessWidget {
         decoration: BoxDecoration(
           color: bg,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.black.withOpacity(0.06)),
+          border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.06),
+              color: Colors.black.withValues(alpha: 0.06),
               blurRadius: 8,
               offset: const Offset(0, 2),
             ),

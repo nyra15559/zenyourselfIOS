@@ -17,10 +17,9 @@ import 'package:provider/provider.dart';
 import '../../models/journal_entries_provider.dart';
 import '../../data/journal_entry.dart';
 import '../../shared/zen_style.dart';
-import '../../shared/ui/zen_widgets.dart';
 
 class SearchScreen extends StatefulWidget {
-  const SearchScreen({Key? key}) : super(key: key);
+  const SearchScreen({super.key});
 
   @override
   State<SearchScreen> createState() => _SearchScreenState();
@@ -180,7 +179,7 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
         },
         avatar: Icon(icon, size: 18),
         label: Text(label),
-        selectedColor: ZenColors.sage.withOpacity(.18),
+        selectedColor: ZenColors.sage.withValues(alpha: .18),
         side: BorderSide(color: selected ? ZenColors.jade : ZenColors.border),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       );
@@ -220,7 +219,7 @@ class _SearchScreenState extends State<SearchScreen> with TickerProviderStateMix
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(isEmpty ? Icons.search_rounded : Icons.find_in_page_outlined,
-                size: 56, color: ZenColors.jadeMid.withOpacity(.6)),
+                size: 56, color: ZenColors.jadeMid.withValues(alpha: .6)),
             const SizedBox(height: 12),
             Text(
               isEmpty ? 'Suche starten' : 'Keine Treffer',
@@ -261,11 +260,10 @@ class _SearchResultTile extends StatelessWidget {
   final VoidCallback onOpenDay;
 
   const _SearchResultTile({
-    Key? key,
     required this.entry,
     required this.query,
     required this.onOpenDay,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -276,7 +274,7 @@ class _SearchResultTile extends StatelessWidget {
     return ListTile(
       onTap: onOpenDay,
       leading: CircleAvatar(
-        backgroundColor: accent.withOpacity(.12),
+        backgroundColor: accent.withValues(alpha: .12),
         foregroundColor: accent,
         child: Icon(icon),
       ),
@@ -290,12 +288,12 @@ class _SearchResultTile extends StatelessWidget {
           const SizedBox(height: 4),
           Row(
             children: [
-              Icon(Icons.schedule_rounded, size: 14, color: ZenColors.jadeMid),
+              const Icon(Icons.schedule_rounded, size: 14, color: ZenColors.jadeMid),
               const SizedBox(width: 4),
               Text(when, style: ZenTextStyles.caption.copyWith(color: ZenColors.jadeMid)),
               const SizedBox(width: 10),
               if (entry.moodLabel != null) ...[
-                Icon(Icons.emoji_emotions_rounded, size: 14, color: ZenColors.jadeMid),
+                const Icon(Icons.emoji_emotions_rounded, size: 14, color: ZenColors.jadeMid),
                 const SizedBox(width: 4),
                 Text(entry.moodLabel!, style: ZenTextStyles.caption.copyWith(color: ZenColors.jadeMid)),
               ],
@@ -373,7 +371,7 @@ class _SearchResultTile extends StatelessWidget {
       spans.add(TextSpan(
         text: text.substring(hit, hit + q.length),
         style: (style ?? const TextStyle()).copyWith(
-          backgroundColor: ZenColors.jade.withOpacity(.18),
+          backgroundColor: ZenColors.jade.withValues(alpha: .18),
           fontWeight: FontWeight.w700,
         ),
       ));

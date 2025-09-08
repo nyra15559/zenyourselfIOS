@@ -48,7 +48,7 @@ class TherapistDashboard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _TherapistHeadline('Reflexions-Dashboard'),
+            const _TherapistHeadline('Reflexions-Dashboard'),
             const SizedBox(height: 20),
 
             // --- Stat-Kacheln (responsiv per Wrap) ---
@@ -91,9 +91,9 @@ class TherapistDashboard extends StatelessWidget {
                             'Sobald Einträge vorhanden sind, erscheint hier deine 7-Tage-Heatmap.',
                         icon: Icons.calendar_month_outlined,
                       )
-                    : Column(
+                    : const Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
-                        children: const [
+                        children: [
                           _SectionTitle('Mood Heatmap (7 Tage)'),
                           SizedBox(height: 14),
                           // Hinweis: MoodHeatmap nutzt die gefilterten last7Days
@@ -282,8 +282,8 @@ class _StatCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bg = color.withOpacity(0.08);
-    final border = color.withOpacity(0.18);
+    final bg = color.withValues(alpha: 0.08);
+    final border = color.withValues(alpha: 0.18);
 
     return Semantics(
       label: '$label: $value',
@@ -298,7 +298,7 @@ class _StatCard extends StatelessWidget {
           children: [
             CircleAvatar(
               radius: 18,
-              backgroundColor: color.withOpacity(0.12),
+              backgroundColor: color.withValues(alpha: 0.12),
               child: Icon(icon, color: color, size: 22),
             ),
             const SizedBox(width: 12),
@@ -314,7 +314,7 @@ class _StatCard extends StatelessWidget {
                   const SizedBox(height: 2),
                   Text(label,
                       style: ZenTextStyles.caption.copyWith(
-                        color: color.withOpacity(0.8),
+                        color: color.withValues(alpha: 0.8),
                       )),
                 ],
               ),

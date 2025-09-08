@@ -239,7 +239,7 @@ class SoundscapeVolumeWidget extends StatelessWidget {
             child: Slider(
               min: 0,
               max: 1,
-              value: manager.volume.clamp(0.0, 1.0) as double, // cast für Analyzer
+              value: manager.volume.clamp(0.0, 1.0), // cast für Analyzer
               onChanged: (v) {
                 // bewusst ohne await – UI soll nicht blocken
                 manager.setVolume(v, duration: 0.25);
@@ -257,15 +257,15 @@ class SoundscapeVolumeWidget extends StatelessWidget {
           AnimatedContainer(
             duration: const Duration(milliseconds: 220),
             width: 24,
-            height: 10 + (manager.volume.clamp(0.0, 1.0) as double) * 18,
+            height: 10 + (manager.volume.clamp(0.0, 1.0)) * 18,
             margin: const EdgeInsets.only(left: 8),
             decoration: BoxDecoration(
-              color: accent.withOpacity(0.38),
+              color: accent.withValues(alpha: 0.38),
               borderRadius: BorderRadius.circular(7),
               boxShadow: [
                 if (manager.volume > 0.01)
                   BoxShadow(
-                    color: ink.withOpacity(0.17 + manager.volume * 0.2),
+                    color: ink.withValues(alpha: 0.17 + manager.volume * 0.2),
                     blurRadius: 4 + manager.volume * 8,
                   ),
               ],

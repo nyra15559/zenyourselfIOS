@@ -56,8 +56,11 @@ extension RiskLevelX on RiskLevel {
 /// Leichte Parse-Exception mit Feldhinweis.
 @immutable
 class ReflectionParseException implements FormatException {
+  @override
   final String message;
+  @override
   final dynamic source;
+  @override
   final int? offset;
 
   const ReflectionParseException(this.message, [this.source, this.offset]);
@@ -166,7 +169,7 @@ class MirrorQuestion {
       {bool sanitize = true, int wordLimit = defaultQuestionWordLimit}) {
     if (json.isEmpty) return MirrorQuestion.empty();
 
-    String _pickString(List<String> keys) {
+    String pickString(List<String> keys) {
       for (final k in keys) {
         final v = json[k];
         if (v is String && v.trim().isNotEmpty) return v;
@@ -174,7 +177,7 @@ class MirrorQuestion {
       return '';
     }
 
-    List<String> _pickStringList(List<String> keys) {
+    List<String> pickStringList(List<String> keys) {
       for (final k in keys) {
         final v = json[k];
         if (v is List) {
@@ -187,21 +190,21 @@ class MirrorQuestion {
       return const [];
     }
 
-    Map<String, dynamic>? _pickMap(String key) {
+    Map<String, dynamic>? pickMap(String key) {
       final v = json[key];
       if (v is Map) return Map<String, dynamic>.from(v);
       return null;
     }
 
     // Mirror, Frage, Followups
-    final rawMirror = _pickString(const ['mirror', 'reflect_mirror', 'out_mirror']);
-    String rawQuestion = _pickString(const ['question', 'outputText', 'output_text']);
-    final questionsList = _pickStringList(const ['questions']);
+    final rawMirror = pickString(const ['mirror', 'reflect_mirror', 'out_mirror']);
+    String rawQuestion = pickString(const ['question', 'outputText', 'output_text']);
+    final questionsList = pickStringList(const ['questions']);
     if (rawQuestion.isEmpty && questionsList.isNotEmpty) {
       rawQuestion = questionsList.first;
     }
 
-    final rawFollowups = _pickStringList(const [
+    final rawFollowups = pickStringList(const [
       'followups',
       'follow_up',
       'followup',
@@ -210,14 +213,14 @@ class MirrorQuestion {
     ]);
 
     // Talk, Tags, Risk
-    final rawTalk = _pickStringList(const ['talk', 'smalltalk', 'warm_talk']);
+    final rawTalk = pickStringList(const ['talk', 'smalltalk', 'warm_talk']);
     final rawTags =
-        _pickStringList(const ['tags', 'labels', 'topics', 'categories', 'intents']);
+        pickStringList(const ['tags', 'labels', 'topics', 'categories', 'intents']);
 
     final rawRiskBool = json['risk'];
-    final rawRiskLevel = _pickString(const ['risk_level', 'riskLevel', 'severity']);
+    final rawRiskLevel = pickString(const ['risk_level', 'riskLevel', 'severity']);
 
-    final flow = _pickMap('flow');
+    final flow = pickMap('flow');
     final session = json['session'];
 
     // Sanitization

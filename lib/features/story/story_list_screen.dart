@@ -26,7 +26,7 @@ import '../../services/guidance_service.dart';
 import 'story_view_screen.dart';
 
 class StoryListScreen extends StatefulWidget {
-  const StoryListScreen({Key? key}) : super(key: key);
+  const StoryListScreen({super.key});
 
   @override
   State<StoryListScreen> createState() => _StoryListScreenState();
@@ -80,7 +80,7 @@ class _StoryListScreenState extends State<StoryListScreen> {
       context: context,
       isScrollControlled: false,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => _PickCountSheet(),
+      builder: (ctx) => const _PickCountSheet(),
     );
 
     if (n == null) return;
@@ -250,7 +250,7 @@ class _StoryListScreenState extends State<StoryListScreen> {
             alignment: Alignment.centerRight,
             padding: const EdgeInsets.symmetric(horizontal: 18),
             decoration: BoxDecoration(
-              color: Colors.redAccent.withOpacity(0.10),
+              color: Colors.redAccent.withValues(alpha: 0.10),
               borderRadius: BorderRadius.circular(14),
             ),
             child: const Icon(Icons.delete_outline, color: Colors.redAccent),
@@ -330,7 +330,7 @@ class _StoryListScreenState extends State<StoryListScreen> {
 class _PickCountSheet extends StatelessWidget {
   final List<int> _choices = const [3, 5, 7];
 
-  _PickCountSheet({Key? key}) : super(key: key);
+  const _PickCountSheet();
 
   @override
   Widget build(BuildContext context) {
@@ -351,7 +351,7 @@ class _PickCountSheet extends StatelessWidget {
               width: 42,
               height: 4,
               decoration: BoxDecoration(
-                color: ZenColors.jadeMid.withOpacity(0.4),
+                color: ZenColors.jadeMid.withValues(alpha: 0.4),
                 borderRadius: BorderRadius.circular(2),
               ),
             ),

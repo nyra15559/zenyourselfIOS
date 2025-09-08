@@ -272,7 +272,7 @@ class GedankenbuchEntry {
   String preview([int max = 160]) {
     final t = text.trim().replaceAll(RegExp(r'\s+'), ' ');
     if (t.length <= max) return t;
-    return t.substring(0, max).trimRight() + '…';
+    return '${t.substring(0, max).trimRight()}…';
   }
 
   int compareTo(GedankenbuchEntry other) => other.date.compareTo(date);

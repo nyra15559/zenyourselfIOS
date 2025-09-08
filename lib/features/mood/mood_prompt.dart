@@ -154,8 +154,9 @@ class _MoodScaleState extends State<_MoodScale> {
 
     // Ziffern 1..5 → 0..4
     if (e.logicalKey == LogicalKeyboardKey.digit1 ||
-        e.logicalKey == LogicalKeyboardKey.numpad1) next = 0;
-    else if (e.logicalKey == LogicalKeyboardKey.digit2 ||
+        e.logicalKey == LogicalKeyboardKey.numpad1) {
+      next = 0;
+    } else if (e.logicalKey == LogicalKeyboardKey.digit2 ||
              e.logicalKey == LogicalKeyboardKey.numpad2) next = 1;
     else if (e.logicalKey == LogicalKeyboardKey.digit3 ||
              e.logicalKey == LogicalKeyboardKey.numpad3) next = 2;
@@ -279,10 +280,10 @@ class _MoodChip extends StatelessWidget {
   Widget build(BuildContext context) {
     const jade = ZenColors.jade;
     final base = Theme.of(context).textTheme.bodyMedium!;
-    final bg = selected ? jade.withOpacity(.10) : ZenColors.surface;
-    final border = selected ? jade.withOpacity(.80) : jade.withOpacity(.50);
+    final bg = selected ? jade.withValues(alpha: .10) : ZenColors.surface;
+    final border = selected ? jade.withValues(alpha: .80) : jade.withValues(alpha: .50);
     final txt = base.copyWith(
-      color: enabled ? jade : jade.withOpacity(.45),
+      color: enabled ? jade : jade.withValues(alpha: .45),
       fontWeight: FontWeight.w700,
     );
 
@@ -343,7 +344,7 @@ class _MoodBadge extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 6),
-        Icon(Icons.check_circle_rounded, size: 18, color: jade),
+        const Icon(Icons.check_circle_rounded, size: 18, color: jade),
       ],
     );
   }

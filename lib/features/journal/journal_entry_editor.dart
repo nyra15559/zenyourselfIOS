@@ -51,12 +51,12 @@ class JournalEntryEditor extends StatefulWidget {
   final VoidCallback? onSaved;
 
   const JournalEntryEditor({
-    Key? key,
+    super.key,
     this.existing,
     this.initialText,
     this.title,
     this.onSaved,
-  }) : super(key: key);
+  });
 
   @override
   State<JournalEntryEditor> createState() => _JournalEntryEditorState();
@@ -376,7 +376,7 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
                         opacity: _fadeCtrl.drive(Tween(begin: 0.0, end: 1.0)),
                         child: ListView(
                           controller: _scroll,
-                          padding: EdgeInsets.fromLTRB(
+                          padding: const EdgeInsets.fromLTRB(
                             zs.ZenSpacing.m, 0, zs.ZenSpacing.m, zs.ZenSpacing.s,
                           ),
                           children: [
@@ -430,7 +430,7 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
                                 Tooltip(
                                   message: 'Tipp: Ctrl/Cmd+S speichert',
                                   child: Icon(Icons.info_outline,
-                                      size: 18, color: Colors.black.withOpacity(.45)),
+                                      size: 18, color: Colors.black.withValues(alpha: .45)),
                                 ),
                               ],
                             ),
@@ -442,7 +442,7 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
 
                     // Bottom-Input (Mic + Text → anfügen)
                     Padding(
-                      padding: EdgeInsets.fromLTRB(
+                      padding: const EdgeInsets.fromLTRB(
                         zs.ZenSpacing.m, 0, zs.ZenSpacing.m, zs.ZenSpacing.s,
                       ),
                       child: _QuickAppendBar(
@@ -489,11 +489,10 @@ class _EditorTextField extends StatelessWidget {
   final String hint;
 
   const _EditorTextField({
-    Key? key,
     required this.controller,
     this.focusNode,
     required this.hint,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -517,7 +516,7 @@ class _EditorTextField extends StatelessWidget {
       decoration: InputDecoration(
         hintText: hint,
         hintStyle: base.copyWith(
-          color: zs.ZenColors.jade.withOpacity(.55),
+          color: zs.ZenColors.jade.withValues(alpha: .55),
           fontWeight: FontWeight.w500,
         ),
         border: InputBorder.none,
@@ -535,24 +534,23 @@ class _QuickAppendBar extends StatelessWidget {
   final bool isRecording;
 
   const _QuickAppendBar({
-    Key? key,
     required this.controller,
     this.focusNode,
     required this.onSend,
     required this.onMicToggle,
     required this.isRecording,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
     const jade = zs.ZenColors.jade;
     final baseText = Theme.of(context).textTheme.bodyMedium!;
-    final hintStyle = baseText.copyWith(color: jade.withOpacity(0.55));
+    final hintStyle = baseText.copyWith(color: jade.withValues(alpha: 0.55));
 
     final List<BoxShadow> pulse = isRecording
         ? [
-            BoxShadow(color: Colors.black.withOpacity(0.10), blurRadius: 14, offset: const Offset(0, 4)),
-            BoxShadow(color: jade.withOpacity(0.30), blurRadius: 22, spreadRadius: 1.2),
+            BoxShadow(color: Colors.black.withValues(alpha: 0.10), blurRadius: 14, offset: const Offset(0, 4)),
+            BoxShadow(color: jade.withValues(alpha: 0.30), blurRadius: 22, spreadRadius: 1.2),
           ]
         : [
             const BoxShadow(color: Color(0x14000000), blurRadius: 18, offset: Offset(0, 6)),
@@ -562,7 +560,7 @@ class _QuickAppendBar extends StatelessWidget {
       decoration: BoxDecoration(
         color: zs.ZenColors.white,
         borderRadius: const BorderRadius.all(zs.ZenRadii.l),
-        border: Border.all(color: jade.withOpacity(0.75), width: 2),
+        border: Border.all(color: jade.withValues(alpha: 0.75), width: 2),
         boxShadow: pulse,
       ),
       padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
@@ -608,7 +606,7 @@ class _QuickAppendBar extends StatelessWidget {
                       onPressed: hasText ? onSend : null,
                       icon: Icon(
                         Icons.keyboard_return_rounded,
-                        color: hasText ? jade : jade.withOpacity(.45),
+                        color: hasText ? jade : jade.withValues(alpha: .45),
                       ),
                     ),
                   ),

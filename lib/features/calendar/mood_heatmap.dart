@@ -63,16 +63,16 @@ class MoodHeatmap extends StatelessWidget {
           ),
         Container(
           decoration: BoxDecoration(
-            color: sandBeige.withOpacity(0.96),
+            color: sandBeige.withValues(alpha: 0.96),
             borderRadius: BorderRadius.circular(23),
             boxShadow: [
               BoxShadow(
-                color: zenGreen.withOpacity(0.07),
+                color: zenGreen.withValues(alpha: 0.07),
                 blurRadius: 15,
                 offset: const Offset(0, 6),
               ),
             ],
-            border: Border.all(color: zenGreen.withOpacity(0.065), width: 1.2),
+            border: Border.all(color: zenGreen.withValues(alpha: 0.065), width: 1.2),
           ),
           padding: EdgeInsets.symmetric(
             vertical: isMini ? 9 : 19,
@@ -100,7 +100,7 @@ class MoodHeatmap extends StatelessWidget {
                   final isEmpty = entry == null || (entry.moodScore ?? -1) < 0;
                   final score = entry?.moodScore ?? -1;
                   final moodColor =
-                      isEmpty ? zenGrey.withOpacity(0.22) : _zenMoodColor(score).withOpacity(0.93);
+                      isEmpty ? zenGrey.withValues(alpha: 0.22) : _zenMoodColor(score).withValues(alpha: 0.93);
                   final emoji = isEmpty ? "…" : _emojiForScore(score);
                   final isToday = _isSameDay(date, now);
 
@@ -118,13 +118,13 @@ class MoodHeatmap extends StatelessWidget {
                 }),
               ),
               if (!isMini)
-                Padding(
-                  padding: const EdgeInsets.only(top: 13.0),
+                const Padding(
+                  padding: EdgeInsets.only(top: 13.0),
                   child: Opacity(
                     opacity: 0.88,
                     child: Text(
                       "*Tippe für Details, lang halten für Zitat*",
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: zenGreen,
                         fontSize: 12.7,
                         fontStyle: FontStyle.italic,
@@ -268,7 +268,7 @@ class _ZenDayMoodBubbleState extends State<_ZenDayMoodBubble> {
                       '"${widget.entry!.aiSummary}"',
                       style: const TextStyle(fontSize: 15, fontStyle: FontStyle.italic),
                     ),
-                    backgroundColor: zenGreen.withOpacity(0.90),
+                    backgroundColor: zenGreen.withValues(alpha: 0.90),
                     behavior: SnackBarBehavior.floating,
                     duration: const Duration(seconds: 3),
                   ),
@@ -288,7 +288,7 @@ class _ZenDayMoodBubbleState extends State<_ZenDayMoodBubble> {
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       border: Border.all(
-                        color: zenGreen.withOpacity(0.22),
+                        color: zenGreen.withValues(alpha: 0.22),
                         width: 2.0,
                       ),
                     ),
@@ -303,7 +303,7 @@ class _ZenDayMoodBubbleState extends State<_ZenDayMoodBubble> {
                     boxShadow: [
                       if (widget.highlight)
                         BoxShadow(
-                          color: zenGreen.withOpacity(0.15),
+                          color: zenGreen.withValues(alpha: 0.15),
                           blurRadius: 12,
                           offset: const Offset(0, 2),
                         ),
@@ -330,11 +330,11 @@ class _ZenDayMoodBubbleState extends State<_ZenDayMoodBubble> {
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                         decoration: BoxDecoration(
-                          color: zenGreen.withOpacity(0.93),
+                          color: zenGreen.withValues(alpha: 0.93),
                           borderRadius: BorderRadius.circular(9),
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black.withOpacity(0.11),
+                              color: Colors.black.withValues(alpha: 0.11),
                               blurRadius: 7,
                             ),
                           ],

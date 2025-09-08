@@ -51,7 +51,7 @@ class JournalEntryView extends StatelessWidget {
   final VoidCallback? onEdit;
 
   const JournalEntryView({
-    Key? key,
+    super.key,
     required this.kind,
     required this.createdAt,
     this.journalText,
@@ -63,7 +63,7 @@ class JournalEntryView extends StatelessWidget {
     this.storyBody,
     this.moodLabel,
     this.onEdit,
-  }) : super(key: key);
+  });
 
   // ─────────────────────────────── Styles ───────────────────────────────
 
@@ -83,7 +83,7 @@ class JournalEntryView extends StatelessWidget {
   TextStyle _questionStyle(BuildContext c) =>
       (Theme.of(c).textTheme.bodyMedium ?? const TextStyle(fontSize: 14))
           .copyWith(
-            color: zs.ZenColors.inkStrong.withOpacity(.96),
+            color: zs.ZenColors.inkStrong.withValues(alpha: .96),
             fontStyle: FontStyle.italic,
             fontWeight: FontWeight.w600,
             height: 1.28,
@@ -91,7 +91,7 @@ class JournalEntryView extends StatelessWidget {
 
   TextStyle _captionStyle(BuildContext c) =>
       (Theme.of(c).textTheme.labelSmall ?? const TextStyle(fontSize: 12))
-          .copyWith(color: Colors.black.withOpacity(.55));
+          .copyWith(color: Colors.black.withValues(alpha: .55));
 
   // Überschrift (grün) wie bei Story
   TextStyle _greenTitleStyle(BuildContext c) =>
@@ -106,7 +106,7 @@ class JournalEntryView extends StatelessWidget {
   TextStyle _bodyInkStyle(BuildContext c) =>
       (Theme.of(c).textTheme.bodyMedium ?? const TextStyle(fontSize: 14.5))
           .copyWith(
-            color: zs.ZenColors.inkStrong.withOpacity(.96),
+            color: zs.ZenColors.inkStrong.withValues(alpha: .96),
             height: 1.30,
           );
 
@@ -158,7 +158,7 @@ class JournalEntryView extends StatelessWidget {
           SafeArea(
             child: SingleChildScrollView(
               physics: const BouncingScrollPhysics(),
-              padding: EdgeInsets.fromLTRB(
+              padding: const EdgeInsets.fromLTRB(
                 zs.ZenSpacing.m, 20, zs.ZenSpacing.m, zs.ZenSpacing.l,
               ),
               child: Align(
@@ -222,7 +222,7 @@ class JournalEntryView extends StatelessWidget {
                 width: 48,
                 margin: const EdgeInsets.only(bottom: 12, top: 2),
                 decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(.10),
+                  color: Colors.black.withValues(alpha: .10),
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -235,9 +235,9 @@ class JournalEntryView extends StatelessWidget {
                 child: Container(
                   padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 8),
                   decoration: BoxDecoration(
-                    color: zs.ZenColors.mist.withOpacity(0.80),
+                    color: zs.ZenColors.mist.withValues(alpha: 0.80),
                     borderRadius: const BorderRadius.all(zs.ZenRadii.s),
-                    border: Border.all(color: zs.ZenColors.jadeMid.withOpacity(0.18)),
+                    border: Border.all(color: zs.ZenColors.jadeMid.withValues(alpha: 0.18)),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,

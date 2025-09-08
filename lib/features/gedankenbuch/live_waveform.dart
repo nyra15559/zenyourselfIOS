@@ -105,7 +105,7 @@ class _LiveWaveformState extends State<LiveWaveform>
   }
 
   bool get _shouldBlur =>
-      widget.isActive || (widget.amplitude.clamp(0.0, 1.0) as double) > 0.05;
+      widget.isActive || widget.amplitude.clamp(0.0, 1.0) > 0.05;
 
   @override
   Widget build(BuildContext context) {
@@ -129,9 +129,9 @@ class _LiveWaveformState extends State<LiveWaveform>
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         colors: [
-                          c.withOpacity(0.16),
-                          ZenColors.white.withOpacity(0.17),
-                          c.withOpacity(0.12),
+                          c.withValues(alpha: 0.16),
+                          ZenColors.white.withValues(alpha: 0.17),
+                          c.withValues(alpha: 0.12),
                         ],
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
@@ -224,7 +224,7 @@ class _WaveformPainter extends CustomPainter {
       ..strokeWidth = thickness * 0.75
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round
-      ..color = color.withOpacity(0.35);
+      ..color = color.withValues(alpha: 0.35);
     canvas.drawPath(underPath, underPaint);
 
     // Hauptwelle (Gradient über die Breite)
@@ -247,9 +247,9 @@ class _WaveformPainter extends CustomPainter {
 
     final grad = LinearGradient(
       colors: [
-        color.withOpacity(active ? 0.90 : 0.75),
-        color.withOpacity(active ? 0.65 : 0.55),
-        color.withOpacity(active ? 0.90 : 0.75),
+        color.withValues(alpha: active ? 0.90 : 0.75),
+        color.withValues(alpha: active ? 0.65 : 0.55),
+        color.withValues(alpha: active ? 0.90 : 0.75),
       ],
       stops: const [0.0, 0.5, 1.0],
     ).createShader(Offset.zero & size);
@@ -262,7 +262,7 @@ class _WaveformPainter extends CustomPainter {
       ..shader = grad;
 
     // Leichter Schatten unter der Welle
-    canvas.drawShadow(mainPath, color.withOpacity(0.12), 6.0, false);
+    canvas.drawShadow(mainPath, color.withValues(alpha: 0.12), 6.0, false);
     canvas.drawPath(mainPath, mainPaint);
 
     // Glow-Dot am rechten Rand
@@ -277,11 +277,11 @@ class _WaveformPainter extends CustomPainter {
               0.42;
 
       final glow = Paint()
-        ..color = color.withOpacity(0.20)
+        ..color = color.withValues(alpha: 0.20)
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
       canvas.drawCircle(Offset(size.width * t, dotY), 5.5, glow);
 
-      final core = Paint()..color = color.withOpacity(0.75);
+      final core = Paint()..color = color.withValues(alpha: 0.75);
       canvas.drawCircle(Offset(size.width * t, dotY), 3.0, core);
     }
   }

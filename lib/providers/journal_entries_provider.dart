@@ -862,7 +862,7 @@ class JournalEntriesProvider with ChangeNotifier {
   static String _cleanStr(String? v) => (v ?? '').trim().isEmpty ? '' : v!.trim();
 
   static String _firstChars(String s, int n) =>
-      s.length <= n ? s : (s.substring(0, n).trimRight() + '…');
+      s.length <= n ? s : ('${s.substring(0, n).trimRight()}…');
 
   static String _compactOneLine(String s, {int limit = 120}) {
     var t = s.replaceAll(RegExp(r'\s+'), ' ').trim();
