@@ -9,7 +9,7 @@
 // • ⚠️ Kompatibilität für Journey: static kGhostMode + static instance (KVStore)
 
 import '../models/journal_entry.dart' as jm;
-import '../models/journal_entries_provider.dart';
+import '../providers/journal_entries_provider.dart';
 import 'local_storage.dart';
 import 'persistence_serializer.dart';
 import 'persistence_file_stub.dart'

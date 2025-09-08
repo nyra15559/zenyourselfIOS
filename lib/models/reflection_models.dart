@@ -17,7 +17,7 @@
 // Lizenz: Internal / ZenYourself.
 
 import 'dart:collection';
-import 'package:meta/meta.dart';
+import 'package:flutter/foundation.dart'; // statt: package:meta/meta.dart
 
 /// Risiko-Level (vom Worker optional geliefert).
 enum RiskLevel { none, low, medium, high }
@@ -158,15 +158,20 @@ class MirrorQuestion {
       riskLevel: riskLevel,
       tags: cleaned.tags,
       talk: cleaned.talk,
-      flow: flow == null ? null : Map<String, dynamic>.unmodifiable(Map<String, dynamic>.from(flow)),
+      flow: flow == null
+          ? null
+          : Map<String, dynamic>.unmodifiable(Map<String, dynamic>.from(flow)),
       session: session,
       extra: const {},
     );
   }
 
   /// Tolerantes JSON-Parsing aus `/reflect_full`.
-  factory MirrorQuestion.fromJson(Map<String, dynamic> json,
-      {bool sanitize = true, int wordLimit = defaultQuestionWordLimit}) {
+  factory MirrorQuestion.fromJson(
+    Map<String, dynamic> json, {
+    bool sanitize = true,
+    int wordLimit = defaultQuestionWordLimit,
+  }) {
     if (json.isEmpty) return MirrorQuestion.empty();
 
     String pickString(List<String> keys) {
@@ -197,8 +202,10 @@ class MirrorQuestion {
     }
 
     // Mirror, Frage, Followups
-    final rawMirror = pickString(const ['mirror', 'reflect_mirror', 'out_mirror']);
-    String rawQuestion = pickString(const ['question', 'outputText', 'output_text']);
+    final rawMirror =
+        pickString(const ['mirror', 'reflect_mirror', 'out_mirror']);
+    String rawQuestion =
+        pickString(const ['question', 'outputText', 'output_text']);
     final questionsList = pickStringList(const ['questions']);
     if (rawQuestion.isEmpty && questionsList.isNotEmpty) {
       rawQuestion = questionsList.first;
@@ -214,11 +221,12 @@ class MirrorQuestion {
 
     // Talk, Tags, Risk
     final rawTalk = pickStringList(const ['talk', 'smalltalk', 'warm_talk']);
-    final rawTags =
-        pickStringList(const ['tags', 'labels', 'topics', 'categories', 'intents']);
+    final rawTags = pickStringList(
+        const ['tags', 'labels', 'topics', 'categories', 'intents']);
 
     final rawRiskBool = json['risk'];
-    final rawRiskLevel = pickString(const ['risk_level', 'riskLevel', 'severity']);
+    final rawRiskLevel =
+        pickString(const ['risk_level', 'riskLevel', 'severity']);
 
     final flow = pickMap('flow');
     final session = json['session'];
@@ -243,7 +251,8 @@ class MirrorQuestion {
 
     // Risk ableiten
     final level = RiskLevelX.parse(rawRiskLevel);
-    final bool risk = (rawRiskBool is bool && rawRiskBool) || level == RiskLevel.high;
+    final bool risk =
+        (rawRiskBool is bool && rawRiskBool) || level == RiskLevel.high;
 
     // Extras (Forward-Compat)
     final known = <String>{
@@ -290,7 +299,9 @@ class MirrorQuestion {
       talk: normalized.talk,
       flow: flow == null ? null : Map<String, dynamic>.unmodifiable(flow),
       session: session,
-      extra: extras.isEmpty ? const {} : Map<String, dynamic>.unmodifiable(extras),
+      extra: extras.isEmpty
+          ? const {}
+          : Map<String, dynamic>.unmodifiable(extras),
     );
   }
 
@@ -427,8 +438,10 @@ class ReflectQuestionOnly {
   final String question;
   const ReflectQuestionOnly(this.question);
 
-  factory ReflectQuestionOnly.fromPlainText(String raw,
-      {int wordLimit = MirrorQuestion.defaultQuestionWordLimit}) {
+  factory ReflectQuestionOnly.fromPlainText(
+    String raw, {
+    int wordLimit = MirrorQuestion.defaultQuestionWordLimit,
+  }) {
     final q = _Sanitizer._sanitizeQuestion(raw, wordLimit: wordLimit);
     return ReflectQuestionOnly(q);
   }

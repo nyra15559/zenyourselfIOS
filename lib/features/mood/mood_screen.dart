@@ -16,7 +16,7 @@ import 'package:provider/provider.dart';
 
 import '../../shared/zen_style.dart';
 import '../../shared/ui/zen_widgets.dart' hide ZenBackdrop, ZenGlassCard, ZenGlassInput;
-import '../../models/journal_entries_provider.dart' show JournalEntriesProvider;
+import '../../providers/journal_entries_provider.dart' show JournalEntriesProvider;
 
 class MoodScreen extends StatefulWidget {
   /// Optionaler Callback (falls kein Provider vorhanden oder für Custom-Flows)

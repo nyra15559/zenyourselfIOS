@@ -15,3 +15,5 @@ patches/*.rej
 # dumps & backups
 *.csv
 *.zip
+
+legacy_backup/

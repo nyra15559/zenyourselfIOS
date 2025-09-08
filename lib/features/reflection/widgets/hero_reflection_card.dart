@@ -26,7 +26,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../shared/zen_style.dart' hide ZenBackdrop, ZenGlassCard, ZenAppBar;
-import '../../../shared/ui/zen_widgets.dart' show ZenGlassCard, PandaHeader;
+import '../../../shared/zen_widgets.dart' show ZenGlassCard, PandaHeader;
 
 /// Öffentliche Hero-Karte für die Reflexion.
 /// 

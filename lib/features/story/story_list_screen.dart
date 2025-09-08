@@ -20,7 +20,7 @@ import 'package:provider/provider.dart';
 
 import '../../shared/zen_style.dart';
 import '../../shared/ui/zen_widgets.dart';
-import '../../models/journal_entries_provider.dart';
+import '../../providers/journal_entries_provider.dart';
 import '../../data/journal_entry.dart';
 import '../../services/guidance_service.dart';
 import 'story_view_screen.dart';
