@@ -1,4 +1,4 @@
-import 'features/journal/journal_screen.dart';
+import 'features/story/story_screen.dart';
 // lib/main.dart
 //
 // ZenYourself — App Bootstrap (Oxford-Zen, Pro-Level, 2025-08)
@@ -220,7 +220,7 @@ class _ZenYourselfMaterialApp extends StatelessWidget {
 
           // Routen (NEU): benannte Route fürs Gedankenbuch
           routes: {
-            '/gedankenbuch': (_) => JournalScreen(),
+            '/gedankenbuch': (_) => StoryScreen(),
           },
 
           // Start
