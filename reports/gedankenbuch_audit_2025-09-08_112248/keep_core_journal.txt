@@ -1,0 +1,9 @@
+./lib/features/journal/entry_editor.dart
+./lib/features/journal/journal_day_screen.dart
+./lib/features/journal/journal_entry_editor.dart
+./lib/features/journal/journal_entry_view.dart
+./lib/features/journal/journal_screen.dart
+./lib/features/journal/widgets/journal_entry_card.dart
+./lib/features/journal/widgets/journal_entry_card.dart
+./lib/models/journal_entry.dart
+./lib/providers/journal_entries_provider.dart

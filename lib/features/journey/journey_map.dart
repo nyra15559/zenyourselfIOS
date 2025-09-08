@@ -1,6 +1,6 @@
 // lib/features/journey/journey_map.dart
 //
-// JourneyMapScreen — v7 Oxford (Therapeuten-Modus, Safe-Nav, Glass-UI)
+// JourneyMapScreen — v7 Oxford (Therapeuten-Tile, Privacy-Footer, Safe-Nav)
 
 import 'dart:ui';
 import 'package:flutter/material.dart';
@@ -50,7 +50,6 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
   late final AnimationController _tilesCtrl;
 
   bool _navLocked = false;
-  bool _therapistEnabled = false;
 
   @override
   void initState() {
@@ -112,7 +111,7 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
     final maxGridWidth = size.width < _tabletMaxWidth ? 480.0 : 720.0;
     final tt = Theme.of(context).textTheme;
 
-    // 🔧 WICHTIG: Reflexions-Zähler jetzt aus dem JournalEntriesProvider.
+    // Reflexions-Zähler aus dem JournalEntriesProvider.
     final prov = context.watch<JournalEntriesProvider?>();
     final reflectionsCount =
         (prov?.reflections.length ?? widget.reflections.length);
@@ -179,92 +178,6 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
                             ),
                           ),
                         ),
-
-                        // Lokaler Modus – Info
-                        ZenGlassCard(
-                          padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
-                          child: Row(
-                            children: [
-                              Container(
-                                width: 42,
-                                height: 42,
-                                decoration: BoxDecoration(
-                                  color: zs.ZenColors.jade.withOpacity(.12),
-                                  shape: BoxShape.circle,
-                                  border: Border.all(color: zs.ZenColors.jade.withOpacity(.35)),
-                                ),
-                                child: const Icon(Icons.lock_rounded,
-                                    color: zs.ZenColors.jade, size: 22),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Text(
-                                  'Lokaler Modus – alles bleibt auf deinem Gerät.',
-                                  style: tt.titleMedium!.copyWith(
-                                    color: zs.ZenColors.deepSage,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-
-                        const SizedBox(height: 8),
-
-                        // Therapeuten-Modus (UI-Toggle; Persistenz in Drop F)
-                        ZenGlassCard(
-                          padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              SwitchListTile.adaptive(
-                                contentPadding: EdgeInsets.zero,
-                                title: Text(
-                                  'Therapeuten-Modus',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.w700,
-                                    color: zs.ZenColors.deepSage,
-                                  ),
-                                ),
-                                subtitle: const Text(
-                                  'Teile Inhalte gezielt mit deinem*deiner Therapeut*in. '
-                                  'Aktivierung und Freigabe steuerst du selbst.',
-                                ),
-                                value: _therapistEnabled,
-                                onChanged: (v) {
-                                  HapticFeedback.selectionClick();
-                                  setState(() => _therapistEnabled = v);
-                                  ZenToast.show(
-                                    context,
-                                    v
-                                        ? 'Therapeuten-Modus bereit (wird in Einstellungen verankert).'
-                                        : 'Therapeuten-Modus deaktiviert.',
-                                  );
-                                },
-                              ),
-                              if (_therapistEnabled)
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 4, left: 2),
-                                  child: ZenInfoBar(
-                                    message: 'Aktiv: In Drop F kannst du einen Code hinterlegen.',
-                                    actionLabel: 'Einstellungen',
-                                    onAction: () => _pushLocked(
-                                      MaterialPageRoute(
-                                        builder: (_) => ProScreen(
-                                          moodEntries: widget.moodEntries,
-                                          reflectionEntries: widget.reflections,
-                                        ),
-                                      ),
-                                    ),
-                                    color: zs.ZenColors.jade.withOpacity(.10),
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-
-                        const SizedBox(height: 12),
 
                         // Grid
                         FadeTransition(
@@ -340,6 +253,23 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
                                       );
                                     },
                                   ),
+                                  // NEU: Therapeuten-Modus als eigener Tile
+                                  _OptionTile(
+                                    icon: Icons.verified_user_rounded,
+                                    label: 'Therapeuten-Modus',
+                                    subtitle: 'Code eingeben & teilen',
+                                    onTap: () {
+                                      HapticFeedback.selectionClick();
+                                      _pushLocked(
+                                        MaterialPageRoute(
+                                          builder: (_) => ProScreen(
+                                            moodEntries: widget.moodEntries,
+                                            reflectionEntries: widget.reflections,
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  ),
                                 ],
                               );
                             },
@@ -352,7 +282,7 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
               ),
             ),
 
-            // Footer-Zitat
+            // Footer: Zitat + Privacy-Hinweis (dezent)
             Positioned(
               left: 0,
               right: 0,
@@ -360,21 +290,34 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
               child: SafeArea(
                 top: false,
                 child: Center(
-                  child: AnimatedSwitcher(
-                    duration: zs.animShort,
-                    child: Text(
-                      _randomQuote(reflectionsCount),
-                      key: ValueKey(reflectionsCount % 7),
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.titleMedium!.copyWith(
-                            color: zs.ZenColors.deepSage,
-                            fontStyle: FontStyle.italic,
-                            fontSize: 16.0,
-                            shadows: const [
-                              Shadow(blurRadius: 6, color: Colors.black26, offset: Offset(0, 2)),
-                            ],
-                          ),
-                    ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      AnimatedSwitcher(
+                        duration: zs.animShort,
+                        child: Text(
+                          _randomQuote(reflectionsCount),
+                          key: ValueKey(reflectionsCount % 7),
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.titleMedium!.copyWith(
+                                color: zs.ZenColors.deepSage,
+                                fontStyle: FontStyle.italic,
+                                fontSize: 16.0,
+                                shadows: const [
+                                  Shadow(blurRadius: 6, color: Colors.black26, offset: Offset(0, 2)),
+                                ],
+                              ),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Privacy first · Lokaler Modus: Deine Daten bleiben auf deinem Gerät.',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: zs.ZenColors.deepSage.withOpacity(.82),
+                            ),
+                      ),
+                    ],
                   ),
                 ),
               ),

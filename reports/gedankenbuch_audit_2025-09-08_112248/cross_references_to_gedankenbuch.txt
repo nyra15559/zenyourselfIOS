@@ -1,0 +1,11 @@
+./lib/features/gedankenbuch/gedankenbuch_entry_card.dart:1:// lib/features/gedankenbuch/gedankenbuch_entry_card.dart
+./lib/features/gedankenbuch/gedankenbuch_entry_screen.dart:1:// lib/features/gedankenbuch/gedankenbuch_entry_screen.dart
+./lib/features/gedankenbuch/gedankenbuch_route.dart:5:import 'gedankenbuch_timeline.dart';
+./lib/features/gedankenbuch/gedankenbuch_timeline.dart:1:// lib/features/gedankenbuch/gedankenbuch_timeline.dart
+./lib/features/gedankenbuch/gedankenbuch_timeline.dart:32:import 'gedankenbuch_entry_screen.dart' show GedankenbuchEntryScreen;
+./lib/features/gedankenbuch/gedankenbuch_timeline.dart:35:import 'gedankenbuch_entry_card.dart' show GedankenbuchEntryCard, EntryType;
+./lib/features/gedankenbuch/gedankenbuch_timeline.dart:41:import '../../models/gedankenbuch_entry.dart' show GedankenbuchEntry;
+./lib/features/gedankenbuch/live_waveform.dart:1:// lib/features/gedankenbuch/live_waveform.dart
+./lib/main.dart:48:import 'features/gedankenbuch/gedankenbuch_route.dart';
+./lib/main.dart:223:            '/gedankenbuch': (_) => const GedankenbuchRoute(),
+./lib/models/gedankenbuch_entry.dart:1:// lib/models/gedankenbuch_entry.dart

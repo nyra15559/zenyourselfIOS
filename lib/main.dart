@@ -44,6 +44,9 @@ import 'features/start/start_screen.dart';
 // --- Env Defaults / Fallback ---
 import 'env_config.dart';
 
+// --- Gedankenbuch-Route (NEU) ---
+import 'features/gedankenbuch/gedankenbuch_route.dart';
+
 /// Compile-Time Konfiguration (per --dart-define)
 const String _kApiUrl = String.fromEnvironment('ZEN_API_URL', defaultValue: '');
 const bool _kApiEnabled =
@@ -214,6 +217,11 @@ class _ZenYourselfMaterialApp extends StatelessWidget {
 
           // UX-Verhalten
           scrollBehavior: const _ZenScrollBehavior(),
+
+          // Routen (NEU): benannte Route fürs Gedankenbuch
+          routes: {
+            '/gedankenbuch': (_) => const GedankenbuchRoute(),
+          },
 
           // Start
           home: const StartScreen(),

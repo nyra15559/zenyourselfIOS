@@ -1,0 +1,13 @@
+# Dry-Run Migration Plan (nur Vorschläge – prüfe manuell!)
+# Ziel: Legacy ins _legacy_ verschieben und Journal als Kanon behalten.
+
+mkdir -p "./lib/features/_legacy_gedankenbuch" "./lib/models/_legacy"
+mv "./lib/features/gedankenbuch/_legacy_exports.dart" "./lib/features/_legacy_gedankenbuch/"
+mv "./lib/features/gedankenbuch/emotion_detection.dart" "./lib/features/_legacy_gedankenbuch/"
+mv "./lib/features/gedankenbuch/gedankenbuch_entry_card.dart" "./lib/features/_legacy_gedankenbuch/"
+mv "./lib/features/gedankenbuch/gedankenbuch_entry_screen.dart" "./lib/features/_legacy_gedankenbuch/"
+mv "./lib/features/gedankenbuch/gedankenbuch_route.dart" "./lib/features/_legacy_gedankenbuch/"
+mv "./lib/features/gedankenbuch/gedankenbuch_timeline.dart" "./lib/features/_legacy_gedankenbuch/"
+mv "./lib/features/gedankenbuch/journal_entry_view.dart" "./lib/features/_legacy_gedankenbuch/"
+mv "./lib/features/gedankenbuch/live_waveform.dart" "./lib/features/_legacy_gedankenbuch/"
+mv "./lib/models/gedankenbuch_entry.dart" "./lib/models/_legacy/"

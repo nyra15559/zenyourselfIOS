@@ -1,0 +1,16 @@
+Gedankenbuch/Journal Audit – 2025-09-08_112248
+
+Gesamt-Treffer:         47
+Kern (behalten):        9   -> keep_core_journal.txt
+Legacy (migrieren):     9    -> legacy_gedankenbuch.txt
+Duplikate (Basename):   3    -> duplicate_basenames.txt / duplicate_files_expanded.txt
+Services/Storage:                  -> indirect_services.txt
+Feature-Consumer:                   -> consumers_features.txt
+Cross-Refs -> Gedankenbuch:        -> cross_references_to_gedankenbuch.txt
+Migrationsplan (Dry-Run):          -> migration_plan_dry_run.txt
+
+Nächste Schritte:
+1) Prüfe Duplikate und Cross-Refs.
+2) Migriere Legacy-Screens schrittweise auf Journal-Widgets.
+3) Vereinheitliche Provider (nur providers/journal_entries_provider.dart als Kanon).
+4) Erst wenn alles grün: Legacy-Ordner wirklich verschieben/löschen.

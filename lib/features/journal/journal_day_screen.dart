@@ -1,12 +1,13 @@
 // lib/features/journal/journal_day_screen.dart
 //
-// JournalDayScreen — Zen v6.28 · 2025-09-04 (Future-Vision)
+// JournalDayScreen — Zen v6.28 · aktualisiert auf das aktuelle Model/Provider
 // --------------------------------------------------------------------
-// • Tages-Detailansicht im Oxford-Zen-Look (Backdrop + PandaHeader).
-// • Header-Karte als Glas-Bubble: Datum, Kennzahlen, 7-Tage-Sparkline.
+// • Tages-Detailansicht (Backdrop + PandaHeader).
+// • Header-Karte: Datum, Kennzahlen, 7-Tage-Sparkline.
 // • Filter-Chips (Alle / Notizen / Reflexionen / Kurzgeschichten).
 // • Einträge als Mini-Story-Karten (JournalEntryCard) inkl. Aktionen.
-// • A11y/Haptics, sanfte Abstände, iOS-ähnliches Bouncing.
+// • Aktuelles Datenmodell: models/journal_entry.dart (jm.EntryKind, Felder …)
+// • Aktueller Provider: providers/journal_entries_provider.dart
 //
 
 import 'dart:math' as math;
@@ -14,13 +15,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
-import '../../data/journal_entry.dart';
-import '../../models/journal_entries_provider.dart';
+import '../../models/journal_entry.dart' as jm;
+import '../../providers/journal_entries_provider.dart' as jp;
+
 import '../../shared/zen_style.dart'
     show ZenColors, ZenTextStyles, ZenShadows, ZenSpacing, ZenRadii;
 import '../../shared/ui/zen_widgets.dart' as zw;
 
-import './journal_entry_card.dart';
+import 'widgets/journal_entry_card.dart';
 import '../reflection/reflection_screen.dart';
 
 class JournalDayScreen extends StatefulWidget {
@@ -52,7 +54,7 @@ class _JournalDayScreenState extends State<JournalDayScreen>
 
   @override
   Widget build(BuildContext context) {
-    final provider = context.watch<JournalEntriesProvider>();
+    final provider = context.watch<jp.JournalEntriesProvider>();
     final entries = provider.entriesForLocalDay(widget.dayLocal);
     final filtered = _applyFilter(entries, _filter);
     final metrics = _DayMetrics.fromEntries(entries);
@@ -65,7 +67,7 @@ class _JournalDayScreenState extends State<JournalDayScreen>
       extendBodyBehindAppBar: true,
       backgroundColor: Colors.transparent,
       appBar: zw.ZenAppBar(
-        title: null, // Titel über PandaHeader → kein Doppel
+        title: null,
         showBack: canPop,
         actions: [
           IconButton(
@@ -105,7 +107,7 @@ class _JournalDayScreenState extends State<JournalDayScreen>
               physics: const BouncingScrollPhysics(
                   parent: AlwaysScrollableScrollPhysics()),
               slivers: [
-                // PandaHeader (ruhige Überschrift)
+                // PandaHeader
                 SliverToBoxAdapter(
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(16, 70, 16, 10),
@@ -152,24 +154,23 @@ class _JournalDayScreenState extends State<JournalDayScreen>
                         background: _deleteBg(),
                         confirmDismiss: (_) => _confirmDeleteDialog(ctx),
                         onDismissed: (_) =>
-                            ctx.read<JournalEntriesProvider>().remove(e.id),
+                            ctx.read<jp.JournalEntriesProvider>().remove(e.id),
                         child: Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 12),
                           child: JournalEntryCard(
                             entry: e,
-                            maxWidth: 640,
                             onTap: () => _showEntrySheet(ctx, e),
-                            onContinueReflection: e.type == JournalType.reflection
+                            onContinue: e.kind == jm.EntryKind.reflection
                                 ? () => _continueReflection(ctx, e)
                                 : null,
-                            onEdit: () => _editEntry(ctx, e),
-                            onShare: () => _shareEntry(ctx, e),
+                            onEdit: null,
+                            onHide: null,
                             onDelete: () async {
                               final ok =
                                   await _confirmDeleteDialog(ctx) ?? false;
                               if (!ok) return;
                               // ignore: use_build_context_synchronously
-                              ctx.read<JournalEntriesProvider>().remove(e.id);
+                              ctx.read<jp.JournalEntriesProvider>().remove(e.id);
                             },
                           ),
                         ),
@@ -187,16 +188,16 @@ class _JournalDayScreenState extends State<JournalDayScreen>
 
   // ---- List helpers ---------------------------------------------------------
 
-  List<JournalEntry> _applyFilter(List<JournalEntry> all, _EntryFilter f) {
+  List<jm.JournalEntry> _applyFilter(List<jm.JournalEntry> all, _EntryFilter f) {
     switch (f) {
       case _EntryFilter.all:
         return all;
       case _EntryFilter.notes:
-        return all.where((e) => e.type == JournalType.note).toList();
+        return all.where((e) => e.kind == jm.EntryKind.journal).toList();
       case _EntryFilter.reflections:
-        return all.where((e) => e.type == JournalType.reflection).toList();
+        return all.where((e) => e.kind == jm.EntryKind.reflection).toList();
       case _EntryFilter.stories:
-        return all.where((e) => e.type == JournalType.story).toList();
+        return all.where((e) => e.kind == jm.EntryKind.story).toList();
     }
   }
 
@@ -230,7 +231,7 @@ class _JournalDayScreenState extends State<JournalDayScreen>
     );
   }
 
-  Future<void> _showEntrySheet(BuildContext context, JournalEntry e) async {
+  Future<void> _showEntrySheet(BuildContext context, jm.JournalEntry e) async {
     await showModalBottomSheet(
       context: context,
       useSafeArea: true,
@@ -240,35 +241,20 @@ class _JournalDayScreenState extends State<JournalDayScreen>
     );
   }
 
-  void _continueReflection(BuildContext context, JournalEntry e) {
-    final seed =
-        (e.text.isNotEmpty ? e.text : (e.analysis?.mirror ?? e.label)).trim();
+  void _continueReflection(BuildContext context, jm.JournalEntry e) {
+    final seed = (() {
+      if ((e.thoughtText ?? '').trim().isNotEmpty) return e.thoughtText!.trim();
+      if ((e.userAnswer ?? '').trim().isNotEmpty) return e.userAnswer!.trim();
+      if ((e.aiQuestion ?? '').trim().isNotEmpty) return e.aiQuestion!.trim();
+      return e.computedTitle;
+    })();
+
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => ReflectionScreen(
-          initialUserText: seed.isEmpty ? e.label : seed,
+          initialUserText: seed,
         ),
       ),
-    );
-  }
-
-  void _editEntry(BuildContext context, JournalEntry e) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Bearbeiten – kommt gleich 🙂')),
-    );
-  }
-
-  Future<void> _shareEntry(BuildContext context, JournalEntry e) async {
-    final dd = e.createdAtLocal.day.toString().padLeft(2, '0');
-    final mm = e.createdAtLocal.month.toString().padLeft(2, '0');
-    final hh = e.createdAtLocal.hour.toString().padLeft(2, '0');
-    final mi = e.createdAtLocal.minute.toString().padLeft(2, '0');
-    final meta = '$dd.$mm.${e.createdAtLocal.year}, $hh:$mi';
-    final text = '${e.label}\n\n${e.text}\n\n— $meta';
-    await Clipboard.setData(ClipboardData(text: text.trim()));
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('In Zwischenablage kopiert')),
     );
   }
 
@@ -293,23 +279,39 @@ class _JournalDayScreenState extends State<JournalDayScreen>
   }
 
   String _shareTextForDay(
-      DateTime day, List<JournalEntry> entries, _DayMetrics m) {
+      DateTime day, List<jm.JournalEntry> entries, _DayMetrics m) {
     final dd = day.day.toString().padLeft(2, '0');
     final mm = day.month.toString().padLeft(2, '0');
     final head =
         'Journal — $dd.$mm.${day.year} · ${entries.length} Einträge · Ø-Mood ${m.avgMood.toStringAsFixed(2)}';
     final lines = <String>[head, ''];
     for (final e in entries) {
-      final t = e.createdAtLocal;
+      final t = e.createdAt.toLocal();
       final hh = t.hour.toString().padLeft(2, '0');
       final min = t.minute.toString().padLeft(2, '0');
-      final typ = e.type == JournalType.reflection
+      final typ = e.kind == jm.EntryKind.reflection
           ? 'Reflexion'
-          : (e.type == JournalType.story ? 'Story' : 'Notiz');
-      lines.add('[$hh:$min] $typ ${e.moodEmoji} — ${e.preview(120)}');
+          : (e.kind == jm.EntryKind.story ? 'Story' : 'Notiz');
+      final preview = (() {
+        if (e.kind == jm.EntryKind.journal) return (e.thoughtText ?? '').trim();
+        if (e.kind == jm.EntryKind.reflection) {
+          final a = (e.userAnswer ?? '').trim();
+          if (a.isNotEmpty) return a;
+          final q = (e.aiQuestion ?? '').trim();
+          if (q.isNotEmpty) return q;
+          return (e.thoughtText ?? '').trim();
+        }
+        // story
+        final s = (e.storyTeaser ?? '').trim();
+        return s.isNotEmpty ? s : (e.storyTitle ?? '').trim();
+      })();
+      lines.add('[$hh:$min] $typ — ${_first(preview, 120)}');
     }
     return lines.join('\n');
   }
+
+  String _first(String s, int n) =>
+      s.length <= n ? s : (s.substring(0, n).trimRight() + '…');
 }
 
 // ---------- Header ----------
@@ -323,7 +325,7 @@ class _HeaderCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final provider = context.watch<JournalEntriesProvider>();
+    final provider = context.watch<jp.JournalEntriesProvider>();
     final spark = provider.moodSparkline(days: 7); // ältestes -> neuestes
 
     final dd = day.day.toString().padLeft(2, '0');
@@ -624,14 +626,15 @@ class _DayMetrics {
     'Glücklich': 2.0,
   };
 
-  static _DayMetrics fromEntries(List<JournalEntry> entries) {
+  static _DayMetrics fromEntries(List<jm.JournalEntry> entries) {
     final n = entries.length;
     final refs =
-        entries.where((e) => e.type == JournalType.reflection).length;
+        entries.where((e) => e.kind == jm.EntryKind.reflection).length;
     double sum = 0;
     int m = 0;
     for (final e in entries) {
-      final score = _moodMap[e.moodLabel ?? ''];
+      final label = e.moodLabel; // vom Model aus Tags abgeleitet
+      final score = _moodMap[label] ;
       if (score != null) {
         sum += score;
         m++;
@@ -642,14 +645,46 @@ class _DayMetrics {
   }
 }
 
-/// ---- Detail-BottomSheet (ruhige Mini-Reader-Ansicht) -----------------------
+/// ---- Detail-BottomSheet ----------------------------------------------------
 
 class _EntryBottomSheet extends StatelessWidget {
-  final JournalEntry entry;
+  final jm.JournalEntry entry;
   const _EntryBottomSheet({required this.entry});
 
   @override
   Widget build(BuildContext context) {
+    final local = entry.createdAt.toLocal();
+    final kindLabel = entry.kind == jm.EntryKind.reflection
+        ? 'Reflexion'
+        : (entry.kind == jm.EntryKind.story ? 'Kurzgeschichte' : 'Tagebuch');
+
+    final icon = entry.kind == jm.EntryKind.reflection
+        ? Icons.psychology_alt
+        : (entry.kind == jm.EntryKind.story
+            ? Icons.auto_stories
+            : Icons.edit_note);
+
+    final mainText = (() {
+      if (entry.kind == jm.EntryKind.journal) {
+        return (entry.thoughtText ?? '').trim();
+      } else if (entry.kind == jm.EntryKind.reflection) {
+        final a = (entry.userAnswer ?? '').trim();
+        if (a.isNotEmpty) return a;
+        final q = (entry.aiQuestion ?? '').trim();
+        if (q.isNotEmpty) return q;
+        return (entry.thoughtText ?? '').trim();
+      } else {
+        // story
+        final teaser = (entry.storyTeaser ?? '').trim();
+        if (teaser.isNotEmpty) return teaser;
+        return (entry.storyTitle ?? '').trim();
+      }
+    })();
+
+    final auxQuestion = entry.kind == jm.EntryKind.reflection
+        ? (entry.aiQuestion ?? '').trim()
+        : '';
+
     return Container(
       margin: const EdgeInsets.all(14),
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
@@ -665,47 +700,35 @@ class _EntryBottomSheet extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(
-                entry.type == JournalType.reflection
-                    ? Icons.psychology_alt
-                    : (entry.type == JournalType.story
-                        ? Icons.auto_stories
-                        : Icons.edit_note),
-                color: entry.type == JournalType.reflection
-                    ? ZenColors.jadeMid
-                    : (entry.type == JournalType.story
-                        ? ZenColors.cta
-                        : ZenColors.deepSage),
-              ),
+              Icon(icon,
+                  color: entry.kind == jm.EntryKind.reflection
+                      ? ZenColors.jadeMid
+                      : (entry.kind == jm.EntryKind.story
+                          ? ZenColors.cta
+                          : ZenColors.deepSage)),
               const SizedBox(width: 8),
               Text(
-                entry.type == JournalType.reflection
-                    ? 'Reflexion'
-                    : (entry.type == JournalType.story
-                        ? 'Kurzgeschichte'
-                        : 'Tagebuch'),
+                kindLabel,
                 style:
                     ZenTextStyles.subtitle.copyWith(fontWeight: FontWeight.w700),
               ),
               const Spacer(),
               Text(
-                _formatTime(entry.createdAtLocal),
+                _formatTime(local),
                 style: ZenTextStyles.caption.copyWith(color: ZenColors.jadeMid),
               ),
             ],
           ),
           const SizedBox(height: 10),
           Text(
-            entry.text.isNotEmpty ? entry.text : (entry.analysis?.mirror ?? ''),
+            mainText,
             style: ZenTextStyles.body.copyWith(fontSize: 16.5, height: 1.38),
           ),
-          if (((entry.aiQuestion ?? entry.analysis?.question) ?? '')
-              .trim()
-              .isNotEmpty)
+          if (auxQuestion.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 10),
               child: Text(
-                'Frage: ${(entry.aiQuestion ?? entry.analysis?.question)!.trim()}',
+                'Frage: $auxQuestion',
                 style: ZenTextStyles.caption.copyWith(
                   fontStyle: FontStyle.italic,
                   color: ZenColors.jadeMid,
@@ -715,13 +738,8 @@ class _EntryBottomSheet extends StatelessWidget {
           const SizedBox(height: 12),
           Row(
             children: [
-              Text(entry.moodEmoji.isNotEmpty ? entry.moodEmoji : '📝',
-                  style: const TextStyle(fontSize: 22)),
-              const SizedBox(width: 8),
-              Text(
-                entry.moodLabel ?? entry.mood?.note ?? '—',
-                style: ZenTextStyles.caption.copyWith(color: ZenColors.ink),
-              ),
+              Text(entry.moodLabel.isNotEmpty ? entry.moodLabel : '—',
+                  style: ZenTextStyles.caption.copyWith(color: ZenColors.ink)),
               const Spacer(),
               TextButton.icon(
                 icon: const Icon(Icons.delete_outline),
@@ -729,12 +747,12 @@ class _EntryBottomSheet extends StatelessWidget {
                 style:
                     TextButton.styleFrom(foregroundColor: Colors.redAccent),
                 onPressed: () async {
-                  final ok = await _JournalDayScreenState
-                          ._confirmDeleteDialog(context) ??
-                      false;
+                  final ok =
+                      await _JournalDayScreenState._confirmDeleteDialog(context) ??
+                          false;
                   if (!ok) return;
                   // ignore: use_build_context_synchronously
-                  context.read<JournalEntriesProvider>().remove(entry.id);
+                  context.read<jp.JournalEntriesProvider>().remove(entry.id);
                   // ignore: use_build_context_synchronously
                   Navigator.of(context).pop();
                 },

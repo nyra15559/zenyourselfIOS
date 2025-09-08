@@ -1,0 +1,9 @@
+./lib/features/gedankenbuch/_legacy_exports.dart
+./lib/features/gedankenbuch/emotion_detection.dart
+./lib/features/gedankenbuch/gedankenbuch_entry_card.dart
+./lib/features/gedankenbuch/gedankenbuch_entry_screen.dart
+./lib/features/gedankenbuch/gedankenbuch_route.dart
+./lib/features/gedankenbuch/gedankenbuch_timeline.dart
+./lib/features/gedankenbuch/journal_entry_view.dart
+./lib/features/gedankenbuch/live_waveform.dart
+./lib/models/gedankenbuch_entry.dart

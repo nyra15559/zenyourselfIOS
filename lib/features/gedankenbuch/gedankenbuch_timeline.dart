@@ -1,13 +1,13 @@
 // lib/features/gedankenbuch/gedankenbuch_timeline.dart
 //
-// GedankenbuchTimelineScreen — Oxford-Zen v8.1 (Calm Glass Timeline + Stories + Bulk Delete)
+// GedankenbuchTimelineScreen — Oxford-Zen v8.2 (Calm Glass Timeline + Stories + Bulk Delete)
 // -----------------------------------------------------------------------------------------
 // Highlights
 // • Eine ruhige, einheitliche Timeline für Journal, Reflexion **und** Kurzgeschichte.
 // • Glas-Karten, sanfter Stagger, performante Rail via CustomPaint.
 // • Filterchips: Alle · Tagebuch · Reflexion · Kurzgeschichte  — mit Zähler (auch 0).
 // • „Alle löschen“ in der App-Bar: löscht lokale Items; versucht Provider-Clear, sonst blendet aus.
-// • Tap: Journal/Reflexion → Vollbild-Viewer; Story → freundlicher Hinweis (Platzhalter).
+// • Tap: Journal/Reflexion/Story → Vollbild-Viewer (Story-Viewer aktiv).
 // • Lokale Edit/Löschen via BottomSheet (ALT) bleiben erhalten.
 //
 // Abhängigkeiten (im Projekt vorhanden):
@@ -150,7 +150,7 @@ class _EntryView {
       onEdit: onEdit,
       onDelete: onDelete,
     );
-  }
+    }
 
   factory _EntryView.fromJournal(jm.JournalEntry j) {
     final isRefl = j.kind == jm.EntryKind.reflection;
@@ -383,12 +383,12 @@ class _GedankenbuchTimelineScreenState extends State<GedankenbuchTimelineScreen>
             child: zw.ZenBackdrop(
               asset: 'assets/schoen.png',
               alignment: Alignment.center,
-              glow: .40,
-              vignette: .16,
-              enableHaze: true,
-              hazeStrength: .16,
-              saturation: .92,
-              wash: .12,
+              glow: .28,
+              vignette: .12,
+              enableHaze: false,
+              hazeStrength: .12,
+              saturation: .95,
+              wash: .06,
             ),
           ),
           Align(
@@ -446,9 +446,9 @@ class _GedankenbuchTimelineScreenState extends State<GedankenbuchTimelineScreen>
           zw.ZenGlassCard(
             padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
             borderRadius: const BorderRadius.all(zs.ZenRadii.xl),
-            topOpacity: .26,
+            topOpacity: .24,
             bottomOpacity: .10,
-            borderOpacity: .18,
+            borderOpacity: .14,
             child: Column(
               children: [
                 Text(
@@ -513,9 +513,9 @@ class _GedankenbuchTimelineScreenState extends State<GedankenbuchTimelineScreen>
               borderRadius: const BorderRadius.all(zs.ZenRadii.l),
               padding:
                   const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              topOpacity: .26,
+              topOpacity: .24,
               bottomOpacity: .10,
-              borderOpacity: .18,
+              borderOpacity: .14,
               child: _FilterHeader(
                 current: _filter,
                 counts: counts,
@@ -662,31 +662,25 @@ class _GedankenbuchTimelineScreenState extends State<GedankenbuchTimelineScreen>
 
   Future<void> _openViewer(BuildContext context, _EntryView v) async {
     HapticFeedback.selectionClick();
-    if (v.isStory) {
-      // Platzhalter bis Story-Viewer bereit ist
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Kurzgeschichte anzeigen – folgt bald.'),
-          backgroundColor: zs.ZenColors.deepSage,
-          behavior: SnackBarBehavior.floating,
-          shape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(zs.ZenRadii.m),
-          ),
-        ),
-      );
-      return;
-    }
 
+    // Ab jetzt: Story wird regulär angezeigt (kein Platzhalter).
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => jv.JournalEntryView(
-          kind: v.isReflection ? jv.EntryKind.reflection : jv.EntryKind.journal,
+          kind: v.isStory
+              ? jv.EntryKind.story
+              : (v.isReflection ? jv.EntryKind.reflection : jv.EntryKind.journal),
           createdAt: v.date,
-          journalText: v.isReflection ? null : v.text,
+          // Journal
+          journalText: v.isReflection || v.isStory ? null : v.text,
+          // Reflexion
           userThought: v.isReflection ? v.thought : null,
           aiQuestion: v.isReflection ? v.aiQuestion : null,
           userAnswer: v.isReflection ? v.text : null,
+          // Story
+          storyTitle: v.isStory ? v.storyTitle : null,
+          storyTeaser: v.isStory ? v.storyTeaser : null,
+          // storyBody derzeit nicht im View; Teaser wird im Viewer genutzt.
           onEdit: v.onEdit, // lokale Items: ALT-Editor
         ),
       ),
@@ -1172,9 +1166,9 @@ class _GlassEntryCardState extends State<_GlassEntryCard>
         margin: const EdgeInsets.symmetric(vertical: zs.ZenSpacing.s),
         padding: const EdgeInsets.fromLTRB(18, 18, 12, 14),
         borderRadius: const BorderRadius.all(zs.ZenRadii.xl),
-        topOpacity: .22,
-        bottomOpacity: .08,
-        borderOpacity: .12,
+        topOpacity: .24,
+        bottomOpacity: .10,
+        borderOpacity: .14,
         child: InkWell(
           borderRadius: const BorderRadius.all(zs.ZenRadii.xl),
           onTap: widget.onOpen,

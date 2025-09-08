@@ -1,22 +1,12 @@
 // lib/features/journal/widgets/journal_entry_card.dart
 //
-// JournalEntryCard — Oxford-Zen v9.0 (Batch 2 / Card v1)
+// JournalEntryCard — Oxford-Zen v9.2
 // -----------------------------------------------------------------------------
-// Vereinheitlichte Karte für Reflection / Journal / Story (Model: JournalEntry).
 // • Header: Titel (farblich je Typ) + kleiner Typ-Chip + Menü (…)
-// • Meta: „Do., 04.09., 18:05 — <Typ>“ (+ optionale Tags)
+// • Meta: „Do., 07.09., 19:05 — <Typ>“
 // • Body-Preview: max. 3 Zeilen; bei Reflection: Frage kursiv, Antwort ruhig grün
-// • Sichtbarer CTA nur bei Reflexion: „Erneut reflektieren“ (rechts unten)
-// • A11y: Semantics-Container; fokussierbare Aktionen
-//
-// Erwartete Abhängigkeiten:
-//   - ../../../models/journal_entry.dart  (liefert u.a. kind, createdAt, badge, computedTitle,
-//                                          aiQuestion, userAnswer, previewText(), tags)
-//
-// Design-Notizen:
-//   - Ruhige Optik: dezente Ränder, 16dp Radius, 14–16sp Typo.
-//   - Keine lauten Farben; Grün = primary aus Theme.
-//   - Menüeinträge: Erneut reflektieren (nur Reflection), Bearbeiten, Ausblenden, Löschen.
+// • CTA nur bei Reflexion: „Erneut reflektieren“
+// • A11y: Semantics-Container
 
 import 'package:flutter/material.dart';
 import '../../../models/journal_entry.dart';
@@ -46,7 +36,7 @@ class JournalEntryCard extends StatefulWidget {
 }
 
 class _JournalEntryCardState extends State<JournalEntryCard> {
-  bool _expanded = false; // für Mehr/Weniger bei langen Previews
+  bool _expanded = false;
 
   bool get _isReflection => widget.entry.kind == EntryKind.reflection;
   bool get _isStory => widget.entry.kind == EntryKind.story;
@@ -57,6 +47,8 @@ class _JournalEntryCardState extends State<JournalEntryCard> {
     final e = widget.entry;
     final badge = e.badge; // {label, icon}
     final title = e.computedTitle;
+
+    // Datum + Uhrzeit + Typ (bewusst ausführlich, Header „Heute“ darf bleiben)
     final meta = _metaLine(e.createdAt, badge.label);
 
     final cardBorder = Theme.of(context).dividerColor.withOpacity(0.14);
@@ -124,7 +116,7 @@ class _JournalEntryCardState extends State<JournalEntryCard> {
                             ),
                       ),
 
-                      // Tags (dezent, max. 3, ohne interne mood-Tags)
+                      // Tags (dezent, max. 3, ohne interne/technische Tags)
                       finalTags(e.tags),
 
                       const SizedBox(height: 8),
@@ -164,8 +156,6 @@ class _JournalEntryCardState extends State<JournalEntryCard> {
 
   // ─────────────────────────── helpers ───────────────────────────
 
-  Text _spacer6() => const Text('');
-
   Widget finalTags(List<String> tags) {
     final chips = _tagChips(tags);
     if (chips.isEmpty) return const SizedBox.shrink();
@@ -190,17 +180,33 @@ class _JournalEntryCardState extends State<JournalEntryCard> {
     return base.copyWith(fontWeight: FontWeight.w700); // Journal neutral
   }
 
+  /// Filtert Debug-/Meta-/System-Tags raus (z. B. „reflection“, „input:text“,
+  /// „type:*“, „ai:*“, „mood:*“, „emotion:*“) und zeigt max. 3 Stück.
   List<Widget> _tagChips(List<String> tags) {
     if (tags.isEmpty) return const [];
+    const bannedKeys = <String>{
+      'mood', 'moodscore', 'emotion',
+      'input', 'answer', 'user', 'ai', 'ai_question', 'question',
+      'type', 'kind', 'source', 'sourceref'
+    };
+    const bannedFlat = <String>{'reflection', 'reflexion', 'journal', 'story'};
+
     final filtered = tags.where((t) {
-      final s = t.trim().toLowerCase();
-      return !(s.startsWith('mood:') ||
-          s.startsWith('moodscore:') ||
-          s.startsWith('emotion:'));
+      final s = t.trim();
+      if (s.isEmpty) return false;
+      final sl = s.toLowerCase();
+      if (bannedFlat.contains(sl)) return false;
+      if (sl.contains(':')) {
+        final key = sl.split(':').first.trim();
+        if (bannedKeys.contains(key)) return false;
+      }
+      return true;
     }).take(3);
+
     return filtered.map((t) => _TagChip(text: t)).toList(growable: false);
   }
 
+  /// Wochentag + Datum + Uhrzeit + Typ
   String _metaLine(DateTime ts, String typeLabel) {
     final wd = _weekdayShort(ts.weekday);
     final dd = _two(ts.day);
@@ -344,33 +350,37 @@ class _ExpandableRichText extends StatelessWidget {
 
       final overflow = tp.didExceedMaxLines;
 
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text.rich(
-            span,
-            maxLines: expanded ? null : collapsedMaxLines,
-            overflow: expanded ? TextOverflow.visible : TextOverflow.ellipsis,
-          ),
-          if (overflow)
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: GestureDetector(
-                onTap: onToggle,
-                behavior: HitTestBehavior.opaque,
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: Text(
-                    expanded ? 'Weniger' : 'Mehr anzeigen',
-                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                          color: Theme.of(context).colorScheme.primary,
-                          fontWeight: FontWeight.w600,
-                        ),
+      return AnimatedSize(
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOutCubic,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text.rich(
+              span,
+              maxLines: expanded ? null : collapsedMaxLines,
+              overflow: expanded ? TextOverflow.visible : TextOverflow.ellipsis,
+            ),
+            if (overflow)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: GestureDetector(
+                  onTap: onToggle,
+                  behavior: HitTestBehavior.opaque,
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: Text(
+                      expanded ? 'Weniger' : 'Mehr anzeigen',
+                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                            color: Theme.of(context).colorScheme.primary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                    ),
                   ),
                 ),
               ),
-            ),
-        ],
+          ],
+        ),
       );
     });
   }

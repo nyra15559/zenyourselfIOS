@@ -1,0 +1,15 @@
+./lib/features/impulse/impulse_screen.dart
+./lib/features/journey/journey_map.dart
+./lib/features/mood/mood_prompt.dart
+./lib/features/mood/mood_screen.dart
+./lib/features/reflection/reflection_screen.dart
+./lib/features/reflection/widgets/hero_reflection_card.dart
+./lib/features/reflection/widgets/reflection_gate.dart
+./lib/features/reflection/widgets/reflection_input_bar.dart
+./lib/features/search/search_screen.dart
+./lib/features/story/story_list_screen.dart
+./lib/features/story/story_screen.dart
+./lib/features/story/story_share_sheet.dart
+./lib/features/story/story_view_screen.dart
+./lib/features/therapist/anon_export.dart
+./lib/features/therapist/dashboard.dart

@@ -1,0 +1,12 @@
+### journal_entries_provider.dart
+./lib/models/journal_entries_provider.dart
+./lib/providers/journal_entries_provider.dart
+
+### journal_entry.dart
+./lib/data/journal_entry.dart
+./lib/models/journal_entry.dart
+
+### journal_entry_view.dart
+./lib/features/gedankenbuch/journal_entry_view.dart
+./lib/features/journal/journal_entry_view.dart
+

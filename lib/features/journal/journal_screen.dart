@@ -1,6 +1,6 @@
 // lib/features/journal/journal_screen.dart
 //
-// JournalScreen — Oxford-Zen Timeline (Phase 2.6, stabil mit FAB)
+// JournalScreen — Oxford-Zen Timeline (Phase 2.6, stabil mit kontext-FAB)
 // ---------------------------------------------------------------------------
 // • Nutzt JournalEntriesProvider (Filter + Soft-Hide) und JournalEntry.
 // • Tages-Gruppierung (lokale Zeit) + ruhige Timeline mit Panda-Header.
@@ -8,7 +8,7 @@
 // • Card: features/journal/widgets/journal_entry_card.dart
 // • Aktionen: Öffnen, Erneut reflektieren (nur Reflexion), Ausblenden, Löschen.
 // • Crash-Fix: KEIN IntrinsicHeight mehr (Timeline-Reihe via Stack/Align).
-// • FAB („+“) immer sichtbar → startet Reflexion.
+// • FAB („+“) jetzt **kontextsensitiv** je aktivem Tab.
 //
 // Abhängigkeiten:
 //   zen_style.dart als `zs`, zen_widgets.dart als `zw`
@@ -73,7 +73,7 @@ class JournalScreen extends StatelessWidget {
       floatingActionButton: FloatingActionButton(
         heroTag: 'journal-add',
         tooltip: 'Neuen Eintrag',
-        onPressed: () => _startNewEntry(context, provider.filterKind),
+        onPressed: () => _startNewEntry(context, provider),
         child: const Icon(Icons.add_rounded),
       ),
       body: Stack(
@@ -97,7 +97,7 @@ class JournalScreen extends StatelessWidget {
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: _maxContentWidth),
                 child: isEmpty
-                    ? _buildEmptyState(context, isMobile, provider.filterKind)
+                    ? _buildEmptyState(context, isMobile, provider)
                     : _buildTimelineList(
                         context,
                         provider: provider,
@@ -121,9 +121,10 @@ class JournalScreen extends StatelessWidget {
   Widget _buildEmptyState(
     BuildContext context,
     bool isMobile,
-    jp.JournalFilterKind activeFilter,
+    jp.JournalEntriesProvider provider,
   ) {
     final pandaSize = MediaQuery.of(context).size.width < 470 ? 88.0 : 112.0;
+    final activeFilter = provider.filterKind;
 
     // Klarer CTA zusätzlich zum FAB (gerade wenn Nutzer das FAB übersieht)
     return ListView(
@@ -165,7 +166,7 @@ class JournalScreen extends StatelessWidget {
               OutlinedButton.icon(
                 icon: const Icon(Icons.add_rounded),
                 label: Text(_ctaLabelFor(activeFilter)),
-                onPressed: () => _startNewEntry(context, activeFilter),
+                onPressed: () => _startNewEntry(context, provider),
               ),
             ],
           ),
@@ -333,11 +334,194 @@ class JournalScreen extends StatelessWidget {
     );
   }
 
-  void _startNewEntry(BuildContext context, jp.JournalFilterKind activeFilter) {
-    // Für jetzt starten wir immer eine Reflexion.
-    // (Optional: später Routing je nach Filter unterscheiden)
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const ReflectionScreen()),
+  void _startNewEntry(BuildContext context, jp.JournalEntriesProvider provider) {
+    final active = provider.filterKind;
+
+    switch (active) {
+      case jp.JournalFilterKind.journal:
+        _showNewDiarySheet(context, provider);
+        return;
+      case jp.JournalFilterKind.reflection:
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const ReflectionScreen()),
+        );
+        return;
+      case jp.JournalFilterKind.story:
+        _showStoryStartSheet(context);
+        return;
+      case jp.JournalFilterKind.all:
+        _showNewEntryChooser(context, provider);
+        return;
+    }
+  }
+
+  // ─────────────────────────── Bottom Sheets ───────────────────────────
+
+  void _showNewDiarySheet(
+      BuildContext context, jp.JournalEntriesProvider provider) {
+    final ctrl = TextEditingController();
+    showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return Padding(
+          padding: EdgeInsets.only(
+            left: 16,
+            right: 16,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
+            top: 8,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Neuen Gedanken notieren',
+                style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: zs.ZenColors.deepSage,
+                    ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: ctrl,
+                maxLines: 5,
+                minLines: 3,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  hintText: 'Was möchtest du festhalten?',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('Abbrechen'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      icon: const Icon(Icons.save_rounded),
+                      label: const Text('Speichern'),
+                      onPressed: () {
+                        final t = ctrl.text.trim();
+                        if (t.isEmpty) return;
+                        provider.addDiary(text: t);
+                        Navigator.pop(ctx);
+                        HapticFeedback.selectionClick();
+                        zw.ZenToast.show(context, 'Tagebuch-Eintrag gespeichert');
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showNewEntryChooser(
+      BuildContext context, jp.JournalEntriesProvider provider) {
+    showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.menu_book_rounded),
+              title: const Text('Neuen Tagebuch-Eintrag'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _showNewDiarySheet(context, provider);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.psychology_alt_rounded),
+              title: const Text('Neue Reflexion'),
+              onTap: () {
+                Navigator.pop(ctx);
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const ReflectionScreen()),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.auto_stories_rounded),
+              title: const Text('Neue Kurzgeschichte'),
+              subtitle: const Text('Aus deinen Reflexionen generieren'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _showStoryStartSheet(context);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showStoryStartSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Kurzgeschichte starten',
+                style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: zs.ZenColors.deepSage,
+                    ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Kurzgeschichten entstehen aus deinen Reflexionen. '
+                'Du kannst jetzt eine neue Reflexion beginnen; '
+                'die Geschichte erscheint danach im Gedankenbuch.',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('Später'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      icon: const Icon(Icons.play_arrow_rounded),
+                      label: const Text('Reflexion starten'),
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                              builder: (_) => const ReflectionScreen()),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
