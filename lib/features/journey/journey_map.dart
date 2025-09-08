@@ -199,7 +199,7 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
                                     subtitle: 'Lass deine Gedanken los',
                                     onTap: () {
                                       HapticFeedback.selectionClick();
-                                      _pushLocked(MaterialPageRoute(builder: (_) => const JournalScreen()));
+                                      _pushLocked(MaterialPageRoute(builder: (_) => JournalScreen()));
                                     },
                                   ),
                                   _OptionTile(
@@ -233,7 +233,7 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
                                     subtitle: 'Atem & Mini-Reset',
                                     onTap: () {
                                       HapticFeedback.selectionClick();
-                                      _pushLocked(MaterialPageRoute(builder: (_) => const ImpulseScreen()));
+                                      _pushLocked(MaterialPageRoute(builder: (_) => ImpulseScreen()));
                                     },
                                   ),
                                   _OptionTile(
