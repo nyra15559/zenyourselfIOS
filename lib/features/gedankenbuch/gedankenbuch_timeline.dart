@@ -1,4 +1,4 @@
-// lib/features/gedankenbuch/gedankenbuch_timeline.dart
+// lib/features/_legacy_gedankenbuch/gedankenbuch_timeline.dart
 //
 // GedankenbuchTimelineScreen — Oxford-Zen v8.2 (Calm Glass Timeline + Stories + Bulk Delete)
 // -----------------------------------------------------------------------------------------
@@ -38,7 +38,7 @@ import 'gedankenbuch_entry_card.dart' show GedankenbuchEntryCard, EntryType;
 import '../journal/journal_entry_view.dart' as jv show JournalEntryView, EntryKind;
 
 // Legacy-lokales Model (für Übergangsliste)
-import '../../models/gedankenbuch_entry.dart' show GedankenbuchEntry;
+import '../../models/_legacy/gedankenbuch_entry.dart' show GedankenbuchEntry;
 
 // Globales Journal / Provider (KANON)
 import '../../providers/journal_entries_provider.dart';

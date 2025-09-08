@@ -1,4 +1,4 @@
-// lib/features/gedankenbuch/gedankenbuch_entry_screen.dart
+// lib/features/_legacy_gedankenbuch/gedankenbuch_entry_screen.dart
 //
 // GedankenbuchEntryScreen — Oxford-Zen Composer v7.4 (Calm Single-Sheet)
 // ----------------------------------------------------------------------

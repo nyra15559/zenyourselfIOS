@@ -45,7 +45,7 @@ import 'features/start/start_screen.dart';
 import 'env_config.dart';
 
 // --- Gedankenbuch-Route (NEU) ---
-import 'features/gedankenbuch/gedankenbuch_route.dart';
+import 'features/_legacy_gedankenbuch/gedankenbuch_route.dart';
 
 /// Compile-Time Konfiguration (per --dart-define)
 const String _kApiUrl = String.fromEnvironment('ZEN_API_URL', defaultValue: '');

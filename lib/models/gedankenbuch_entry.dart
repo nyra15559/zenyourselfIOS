@@ -1,4 +1,4 @@
-// lib/models/gedankenbuch_entry.dart
+// lib/models/_legacy/gedankenbuch_entry.dart
 //
 // GedankenbuchEntry — Kompatibilitäts-Shim über dem neuen JournalEntry
 // -------------------------------------------------------------------

@@ -1,4 +1,4 @@
-// lib/features/gedankenbuch/gedankenbuch_entry_card.dart
+// lib/features/_legacy_gedankenbuch/gedankenbuch_entry_card.dart
 //
 // GedankenbuchEntryCard — Glasige Entry-Karte (ruhig, wertig, fokussiert)
 // -----------------------------------------------------------------------

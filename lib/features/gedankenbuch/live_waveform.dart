@@ -1,4 +1,4 @@
-// lib/features/gedankenbuch/live_waveform.dart
+// lib/features/_legacy_gedankenbuch/live_waveform.dart
 //
 // LiveWaveform — Oxford Zen Edition
 // ---------------------------------
