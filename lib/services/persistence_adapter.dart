@@ -1,21 +1,30 @@
 // lib/services/persistence_adapter.dart
 //
-// PersistenceAdapter — Oxford–Zen v6.1 (web-safe, KV-Wrapper kompatibel)
-// --------------------------------------------------------------------
-// • LocalStoragePersistenceAdapter (Web & IO)
-// • File-Adapter via conditional import (nur IO) – Fabrik: filePersistenceAdapterFromPath()
+// PersistenceAdapter — Oxford–Zen v7 (web-safe, no LocalStorageService dependency)
+// ------------------------------------------------------------------------------
+// • LocalStoragePersistenceAdapter (Web & IO)  → SharedPreferences-Backend
+// • File-Adapter via conditional import (nur IO) → filePersistenceAdapterFromPath()
 // • Functions-/Memory-Adapter
 // • Öffentlicher Serializer: PersistenceSerializer (separate Datei)
-// • ⚠️ Kompatibilität für Journey: static kGhostMode + static instance (KVStore)
+// • ⚠️ Journey-Kompat: static kGhostMode + static instance (KVStore)
+
+import 'dart:convert';
+
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/journal_entry.dart' as jm;
 import '../providers/journal_entries_provider.dart';
-import 'local_storage.dart';
 import 'persistence_serializer.dart';
 import 'persistence_file_stub.dart'
-  if (dart.library.io) 'persistence_file_io.dart' as file_impl;
+    if (dart.library.io) 'persistence_file_io.dart' as file_impl;
 
-/// Abstrakte Basis + statische Kompatibilitäts-Hooks für Journey
+/// Speicher-Schlüssel (Namespace)
+class _Keys {
+  static const entries = 'persist::journal_entries.v1';
+  static String ns(String key) => 'persist::$key';
+}
+
+/// Abstrakte Basis + Journey-Kompat-Hooks
 abstract class PersistenceAdapter {
   const PersistenceAdapter();
 
@@ -29,52 +38,63 @@ abstract class PersistenceAdapter {
   static final KVStore instance = KVStore();
 }
 
-/// Schlanker Key-Value-Wrapper mit den erwarteten Methoden
+/// Schlanker Key-Value-Wrapper (SharedPreferences-basiert)
 class KVStore {
-  final LocalStorageService _ls = LocalStorageService();
+  bool _inited = false;
 
-  Future<void> init() => _ls.init();
+  Future<void> init() async {
+    if (_inited) return;
+    // SharedPreferences initialisiert sich lazy; wir halten nur die Semantik ein.
+    _inited = true;
+  }
 
-  // LocalStorageService v2 hat keine setBool/getBool-Shortcuts mehr.
-  // Wir nutzen saveJson/loadJson, die JSON-sicher und namespaced sind.
   Future<void> setBool(String key, bool value) async {
-    await _ls.saveJson(key, value);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_Keys.ns(key), value);
   }
 
   Future<bool?> getBool(String key) async {
-    return _ls.loadJson<bool>(key, null);
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_Keys.ns(key));
   }
 
   Future<void> setString(String key, String value) async {
-    await _ls.setString(key, value);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_Keys.ns(key), value);
   }
 
-  Future<String?> getString(String key) => _ls.getString(key);
+  Future<String?> getString(String key) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_Keys.ns(key));
+  }
 
   Future<void> remove(String key) async {
-    await _ls.remove(key);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_Keys.ns(key));
   }
 }
 
-/// ---------------- LocalStorage (Web & IO) ----------------
+/// ---------------- LocalStorage (Web & IO via SharedPreferences) ----------------
+/// Speichert die komplette Journal-Liste als JSON unter einem Namespaced-Key.
+/// Serializer: `PersistenceSerializer` (encode/decode)
 class LocalStoragePersistenceAdapter extends PersistenceAdapter {
-  final LocalStorageService _store;
+  final bool pretty;
 
-  LocalStoragePersistenceAdapter([LocalStorageService? store])
-      : _store = store ?? LocalStorageService();
+  const LocalStoragePersistenceAdapter({this.pretty = true});
 
   @override
   Future<List<jm.JournalEntry>> load() async {
-    await _store.init();
-    // KANONISCHES Modell laden (models/journal_entry.dart)
-    return _store.loadJournalEntries<jm.JournalEntry>(jm.JournalEntry.fromMap);
+    final prefs = await SharedPreferences.getInstance();
+    final jsonStr = prefs.getString(_Keys.entries);
+    // Tolerant decodieren: null/invalid → leere Liste
+    return PersistenceSerializer.decode(jsonStr);
   }
 
   @override
   Future<void> save(List<jm.JournalEntry> entries) async {
-    await _store.init();
-    // LocalStorageService erwartet hier keine Typargumente
-    await _store.saveJournalEntries(entries);
+    final prefs = await SharedPreferences.getInstance();
+    final jsonStr = PersistenceSerializer.encode(entries, pretty: pretty);
+    await prefs.setString(_Keys.entries, jsonStr);
   }
 }
 
@@ -105,7 +125,9 @@ class FunctionsPersistenceAdapter extends PersistenceAdapter {
     try {
       final jsonStr = PersistenceSerializer.encode(entries, pretty: pretty);
       await write(jsonStr);
-    } catch (_) {/* best effort */}
+    } catch (_) {
+      // best effort
+    }
   }
 }
 
@@ -113,11 +135,13 @@ class FunctionsPersistenceAdapter extends PersistenceAdapter {
 class MemoryPersistenceAdapter extends PersistenceAdapter {
   List<jm.JournalEntry> _entries;
   MemoryPersistenceAdapter([Iterable<jm.JournalEntry>? seed])
-      : _entries = List<jm.JournalEntry>.from(seed ?? const <jm.JournalEntry>[]);
+      : _entries =
+            List<jm.JournalEntry>.from(seed ?? const <jm.JournalEntry>[]);
 
   @override
   Future<List<jm.JournalEntry>> load() async =>
-      List<jm.JournalEntry>.from(_entries)..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      List<jm.JournalEntry>.from(_entries)
+        ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
 
   @override
   Future<void> save(List<jm.JournalEntry> entries) async {
@@ -126,6 +150,7 @@ class MemoryPersistenceAdapter extends PersistenceAdapter {
 }
 
 /// ---------------- File (nur IO-Targets) ----------------
+/// Achtung: Auf Web nicht verfügbar – dort bitte LocalStorage/Functions verwenden.
 PersistenceAdapter filePersistenceAdapterFromPath(
   String path, {
   bool pretty = true,
