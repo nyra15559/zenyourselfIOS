@@ -1,11 +1,16 @@
 // lib/features/_legacy_gedankenbuch/live_waveform.dart
 //
-// LiveWaveform — Oxford Zen Edition
-// ---------------------------------
+// LiveWaveform — Oxford Zen Edition (refined)
+// ------------------------------------------
 // • Sanfte, performante Echtzeit-Wellenform für Mic/Voice-UI
 // • Design-DNA: Glas, Soft-Glow, runde Caps, Zen-Farben
 // • A11y-Semantics, Amplituden-Clamp, FPS-freundlich
 // • Konfigurierbar: Frequenz, Speed, Thickness, Glow, Blur
+// • Technische Verfeinerungen:
+//   - Ticker-basiertes, kontinuierliches Animations-Loop (ohne künstliche Perioden)
+//   - Weicher „Schatten“-Stroke statt harter drawShadow
+//   - Subtilerer Glow-Dot
+//   - Theme-Fallback für Farbe
 
 import 'dart:math' as math;
 import 'dart:ui';
@@ -19,7 +24,7 @@ class LiveWaveform extends StatefulWidget {
   /// 0.0–1.0 — relative Ausschlagstärke der Welle.
   final double amplitude;
 
-  /// Primärfarbe der Welle; Default: Zen Jade Mid.
+  /// Primärfarbe der Welle; Default: Theme.primary → Zen DeepSage.
   final Color? color;
 
   /// Zeichenfläche (px).
@@ -59,7 +64,7 @@ class LiveWaveform extends StatefulWidget {
     this.thickness = 3.3,
     this.backgroundBlurSigma = 14,
     this.showGlow = true,
-    this.cornerRadius = 20,
+    this.cornerRadius = 20, // entspricht in etwa ZenRadii.l
     this.semanticsLabel,
   });
 
@@ -69,38 +74,38 @@ class LiveWaveform extends StatefulWidget {
 
 class _LiveWaveformState extends State<LiveWaveform>
     with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
+  late final Ticker _ticker;
   double _phase = 0.0;
 
   @override
   void initState() {
     super.initState();
-    // 1 s Loop; wir benutzen den Ticker nur als Frame-Callback.
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1000),
-    )..addListener(() {
-        setState(() {
-          _phase = (_phase + widget.speed) % (math.pi * 2);
-        });
+    // Kontinuierliches, fps-geregeltes Phase-Update:
+    _ticker = createTicker((_) {
+      // Ein einfacher, konstanter Schritt je Frame ist hier ausreichend
+      // (die resultierende Geschwindigkeit hängt leicht von der fps ab,
+      // was im UI-Kontext gewollt und natürlich wirkt).
+      setState(() {
+        _phase = (_phase + widget.speed) % (math.pi * 2);
       });
+    });
 
-    if (widget.isActive) _controller.repeat();
+    if (widget.isActive) _ticker.start();
   }
 
   @override
   void didUpdateWidget(LiveWaveform oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.isActive && !_controller.isAnimating) {
-      _controller.repeat();
-    } else if (!widget.isActive && _controller.isAnimating) {
-      _controller.stop();
+    if (widget.isActive && !_ticker.isActive) {
+      _ticker.start();
+    } else if (!widget.isActive && _ticker.isActive) {
+      _ticker.stop();
     }
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    _ticker.dispose();
     super.dispose();
   }
 
@@ -109,12 +114,16 @@ class _LiveWaveformState extends State<LiveWaveform>
 
   @override
   Widget build(BuildContext context) {
-    final c = widget.color ?? ZenColors.jadeMid;
+    // Farb-Fallback: zuerst Theme.primary, dann Zen DeepSage
+    final themePrimary = Theme.of(context).colorScheme.primary;
+    final baseColor = widget.color ?? themePrimary ?? ZenColors.deepSage;
     final amp = (widget.amplitude).clamp(0.0, 1.0);
 
+    final semanticsText = widget.semanticsLabel ??
+        'Mikrofon-Wellenform ${widget.isActive ? "aktiv" : "inaktiv"}, Pegel ${(amp * 100).round()} Prozent';
+
     return Semantics(
-      label: widget.semanticsLabel ??
-          'Live Waveform ${widget.isActive ? "aktiv" : "inaktiv"} — Amplitude ${(amp * 100).round()} Prozent',
+      label: semanticsText,
       child: RepaintBoundary(
         child: ClipRRect(
           borderRadius: BorderRadius.circular(widget.cornerRadius),
@@ -129,9 +138,9 @@ class _LiveWaveformState extends State<LiveWaveform>
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         colors: [
-                          c.withValues(alpha: 0.16),
+                          baseColor.withValues(alpha: 0.16),
                           ZenColors.white.withValues(alpha: 0.17),
-                          c.withValues(alpha: 0.12),
+                          baseColor.withValues(alpha: 0.12),
                         ],
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
@@ -158,7 +167,7 @@ class _LiveWaveformState extends State<LiveWaveform>
                   painter: _WaveformPainter(
                     phase: _phase,
                     amplitude: amp,
-                    color: c,
+                    color: baseColor,
                     frequency: widget.frequency,
                     thickness: widget.thickness,
                     showGlow: widget.showGlow,
@@ -198,7 +207,7 @@ class _WaveformPainter extends CustomPainter {
     // Hann-Fenster = weiche Ränder
     double envelope(double t) => 0.5 * (1 - math.cos(2 * math.pi * t));
 
-    // Schrittweite dpi-bewusst, aber capped für Performance
+    // Schrittweite dpi-bewusst, capped für Performance
     final step = math.max(1.0, size.width / 160.0);
 
     // Unterwelle (schwächer, leicht phasenversetzt)
@@ -254,15 +263,21 @@ class _WaveformPainter extends CustomPainter {
       stops: const [0.0, 0.5, 1.0],
     ).createShader(Offset.zero & size);
 
+    // „Weicher Schatten“ als extrabreiter, transparenter Stroke
+    final softShadow = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = thickness * 1.25
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..color = color.withValues(alpha: 0.16);
+    canvas.drawPath(mainPath, softShadow);
+
     final mainPaint = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = thickness
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round
       ..shader = grad;
-
-    // Leichter Schatten unter der Welle
-    canvas.drawShadow(mainPath, color.withValues(alpha: 0.12), 6.0, false);
     canvas.drawPath(mainPath, mainPaint);
 
     // Glow-Dot am rechten Rand
@@ -277,12 +292,12 @@ class _WaveformPainter extends CustomPainter {
               0.42;
 
       final glow = Paint()
-        ..color = color.withValues(alpha: 0.20)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
-      canvas.drawCircle(Offset(size.width * t, dotY), 5.5, glow);
+        ..color = color.withValues(alpha: 0.18)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8); // subtiler
+      canvas.drawCircle(Offset(size.width * t, dotY), 5.0, glow);
 
-      final core = Paint()..color = color.withValues(alpha: 0.75);
-      canvas.drawCircle(Offset(size.width * t, dotY), 3.0, core);
+      final core = Paint()..color = color.withValues(alpha: 0.78);
+      canvas.drawCircle(Offset(size.width * t, dotY), 2.6, core);
     }
   }
 

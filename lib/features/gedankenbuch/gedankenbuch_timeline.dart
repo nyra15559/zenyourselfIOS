@@ -1,14 +1,14 @@
 // lib/features/_legacy_gedankenbuch/gedankenbuch_timeline.dart
 //
-// GedankenbuchTimelineScreen — Oxford-Zen v8.2 (Calm Glass Timeline + Stories + Bulk Delete)
+// GedankenbuchTimelineScreen — Oxford-Zen v8.3 (Calm Glass Timeline + Stories + Bulk Delete)
 // -----------------------------------------------------------------------------------------
 // Highlights
-// • Eine ruhige, einheitliche Timeline für Journal, Reflexion **und** Kurzgeschichte.
+// • Ruhige, einheitliche Timeline für Journal, Reflexion **und** Kurzgeschichte.
 // • Glas-Karten, sanfter Stagger, performante Rail via CustomPaint.
-// • Filterchips: Alle · Tagebuch · Reflexion · Kurzgeschichte  — mit Zähler (auch 0).
+// • Filterchips: Alle · Tagebuch · Reflexion · Kurzgeschichte — mit Zähler (auch 0).
 // • „Alle löschen“ in der App-Bar: löscht lokale Items; versucht Provider-Clear, sonst blendet aus.
 // • Tap: Journal/Reflexion/Story → Vollbild-Viewer (Story-Viewer aktiv).
-// • Lokale Edit/Löschen via BottomSheet (ALT) bleiben erhalten.
+// • ALT-BottomSheet (lokale Edit/Löschen) bleibt erhalten.
 //
 // Abhängigkeiten (im Projekt vorhanden):
 //   ZenBackdrop, ZenGlassCard, ZenAppBar, PandaHeader, PandaMoodChip
@@ -150,7 +150,7 @@ class _EntryView {
       onEdit: onEdit,
       onDelete: onDelete,
     );
-    }
+  }
 
   factory _EntryView.fromJournal(jm.JournalEntry j) {
     final isRefl = j.kind == jm.EntryKind.reflection;
@@ -216,8 +216,9 @@ class _EntryView {
       mood: isStory ? '' : moodLabel,
       aiQuestion: isRefl ? j.aiQuestion : null,
       thought: isRefl ? j.thoughtText : null,
-      storyTitle:
-          isStory ? ((j.storyTitle?.trim().isNotEmpty == true ? j.storyTitle : j.title)) : null,
+      storyTitle: isStory
+          ? ((j.storyTitle?.trim().isNotEmpty == true ? j.storyTitle : j.title))
+          : null,
       storyTeaser: isStory ? j.storyTeaser : null,
       onEdit: null,
       onDelete: null,
@@ -663,7 +664,6 @@ class _GedankenbuchTimelineScreenState extends State<GedankenbuchTimelineScreen>
   Future<void> _openViewer(BuildContext context, _EntryView v) async {
     HapticFeedback.selectionClick();
 
-    // Ab jetzt: Story wird regulär angezeigt (kein Platzhalter).
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => jv.JournalEntryView(
@@ -1037,6 +1037,9 @@ class _DayHeader extends StatelessWidget {
   }
 }
 
+/// Timeline-Reihe OHNE IntrinsicHeight (Crash-Fix):
+/// Karte bestimmt die Höhe; links eine Rail-Fläche, die sich über die volle
+/// Kartenhöhe streckt (Stack/Align).
 class _TimelineRow extends StatelessWidget {
   final bool showAbove;
   final bool showBelow;
@@ -1050,21 +1053,25 @@ class _TimelineRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          SizedBox(
+    return Stack(
+      children: [
+        // Die Karte (bestimmt die Höhe)
+        Padding(
+          padding: const EdgeInsets.only(left: 32), // Platz für Rail + Abstand
+          child: child,
+        ),
+        // Linke Rail, über die volle Höhe der Karte
+        Align(
+          alignment: Alignment.centerLeft,
+          child: SizedBox(
             width: 26,
             child: CustomPaint(
               painter: _RailPainter(showAbove: showAbove, showBelow: showBelow),
-              child: const SizedBox.expand(),
+              // Höhe kommt automatisch von der Stack-Höhe (Kind oben)
             ),
           ),
-          const SizedBox(width: 6),
-          Expanded(child: child),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
@@ -1641,6 +1648,7 @@ class _StaggerFadeSlide extends StatefulWidget {
   const _StaggerFadeSlide({
     required this.child,
     this.delay = const Duration(milliseconds: 0),
+    this.duration = const Duration(milliseconds: 260),
   });
 
   @override

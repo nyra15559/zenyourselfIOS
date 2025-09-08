@@ -1,19 +1,19 @@
 // lib/features/journal/journal_entry_view.dart
 //
-// v9.1 — JournalEntryView (Oxford-Zen, Phase 2.6)
+// v9.4 — JournalEntryView (Oxford-Zen, Phase 2.6 — typografisch beruhigt)
 // ---------------------------------------------------------------------------
 // • Vollbild-Viewer mit PandaHeader, ruhiger Glas-Karte und klarer Typo.
 // • Typen: Journal (→ „Dein Gedanke“), Reflexion, Kurzgeschichte.
-// • Journal: 1. nicht-leere Zeile als grüne Überschrift, Rest in Ink.
-// • Reflexion: Frage kursiv, Labels in Ink, Inhalte in Jade.
-// • Story: Titel + Text ruhig gesetzt (Titel grün, Text Ink).
+// • Journal: 1. nicht-leere Zeile als DeepSage-Überschrift, Rest in Ink.
+// • Reflexion: Frage kursiv (Ink), Labels in InkStrong, Inhalte in Ink (ruhig).
+// • Story: Titel + Text ruhig gesetzt (Titel DeepSage, Text Ink).
 // • Zeitformat: „Heute/Gestern, HH:MM“, sonst „DD.MM.YYYY, HH:MM“.
 // • Mood: kleiner Chip rechts in der Meta-Zeile (falls vorhanden).
 // • Actions: Kopieren (ZenToast), optional Bearbeiten.
 // • A11y: Semantics-Labels, Tooltips, fokussierbare Buttons.
+// • Neu (dezent): Journal-Text wird sanft normalisiert (3+ Leerzeilen → 2).
 //
 // Abhängigkeiten: ZenBackdrop, ZenGlassCard, ZenAppBar, PandaHeader, ZenToast, PandaMoodChip
-// Dart-2.x-kompatibel, defensive Null-Checks.
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -67,14 +67,14 @@ class JournalEntryView extends StatelessWidget {
 
   // ─────────────────────────────── Styles ───────────────────────────────
 
-  // Grüne Nutzereingaben (Reflexion-Antwort)
-  TextStyle get _userStyle => const TextStyle(
-        fontFamily: 'ZenKalligrafie', // Fallback: System-Font wenn nicht registriert
-        fontSize: 18,
-        height: 1.30,
-        color: zs.ZenColors.jade,
-        fontWeight: FontWeight.w600,
-      );
+  /// Ruhiger Nutzerschriftstil (Antwort/Journalkörper): NotoSans in Ink.
+  TextStyle _userStyle(BuildContext c) =>
+      (Theme.of(c).textTheme.bodyMedium ?? const TextStyle(fontSize: 14.5))
+          .copyWith(
+            color: zs.ZenColors.inkStrong.withValues(alpha: .96),
+            fontWeight: FontWeight.w600,
+            height: 1.30,
+          );
 
   TextStyle _labelStyle(BuildContext c) =>
       (Theme.of(c).textTheme.labelMedium ?? const TextStyle(fontSize: 12))
@@ -85,20 +85,20 @@ class JournalEntryView extends StatelessWidget {
           .copyWith(
             color: zs.ZenColors.inkStrong.withValues(alpha: .96),
             fontStyle: FontStyle.italic,
-            fontWeight: FontWeight.w600,
+            fontWeight: FontWeight.w500,
             height: 1.28,
           );
 
   TextStyle _captionStyle(BuildContext c) =>
       (Theme.of(c).textTheme.labelSmall ?? const TextStyle(fontSize: 12))
-          .copyWith(color: Colors.black.withValues(alpha: .55));
+          .copyWith(color: zs.ZenColors.inkSubtle.withValues(alpha: .90));
 
-  // Überschrift (grün) wie bei Story
-  TextStyle _greenTitleStyle(BuildContext c) =>
+  // Überschrift (Primary DeepSage)
+  TextStyle _titleStyle(BuildContext c) =>
       (Theme.of(c).textTheme.titleMedium ?? const TextStyle(fontSize: 18))
           .copyWith(
             fontWeight: FontWeight.w700,
-            color: zs.ZenColors.jade,
+            color: zs.ZenColors.deepSage,
             height: 1.22,
           );
 
@@ -119,7 +119,7 @@ class JournalEntryView extends StatelessWidget {
     final headerTitle = () {
       switch (kind) {
         case EntryKind.journal:
-          return 'Dein Gedanke'; // <— gewünscht statt „Dein Eintrag“
+          return 'Dein Gedanke';
         case EntryKind.reflection:
           return 'Deine Reflexion';
         case EntryKind.story:
@@ -144,7 +144,6 @@ class JournalEntryView extends StatelessWidget {
       appBar: const zw.ZenAppBar(title: null, showBack: true),
       body: Stack(
         children: [
-          // Backdrop im Zen-Look (gleich wie auf den „perfekten“ Screens)
           const Positioned.fill(
             child: zw.ZenBackdrop(
               asset: 'assets/schoen.png',
@@ -192,20 +191,21 @@ class JournalEntryView extends StatelessWidget {
   // ─────────────────────────────── Card ────────────────────────────────
 
   Widget _card(BuildContext context) {
+    // dynamischer Badge für Reflexion/Story
+    final (IconData? typeIcon, String? typeLabel) = switch (kind) {
+      EntryKind.reflection => (Icons.psychology_alt_outlined, 'Reflexion'),
+      EntryKind.story      => (Icons.auto_stories_outlined, 'Kurzgeschichte'),
+      EntryKind.journal    => (null, null),
+    };
+
     return Semantics(
       container: true,
-      label: () {
-        switch (kind) {
-          case EntryKind.journal:
-            return 'Eintrag';
-          case EntryKind.reflection:
-            return 'Reflexion';
-          case EntryKind.story:
-            return 'Kurzgeschichte';
-        }
-      }(),
+      label: switch (kind) {
+        EntryKind.journal => 'Eintrag',
+        EntryKind.reflection => 'Reflexion',
+        EntryKind.story => 'Kurzgeschichte',
+      },
       child: zw.ZenGlassCard(
-        // Glas-Defaults gemäß Widgets (harmonisiert mit Story)
         padding: const EdgeInsets.fromLTRB(22, 18, 22, 20),
         borderRadius: const BorderRadius.all(zs.ZenRadii.xl),
         topOpacity: .24,
@@ -229,7 +229,7 @@ class JournalEntryView extends StatelessWidget {
             ),
 
             // Typ-Badge (nur für Reflexion/Story – Journal bleibt bewusst ruhig)
-            if (kind == EntryKind.reflection || kind == EntryKind.story)
+            if (typeIcon != null && typeLabel != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 6),
                 child: Container(
@@ -242,16 +242,10 @@ class JournalEntryView extends StatelessWidget {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(
-                        kind == EntryKind.reflection
-                            ? Icons.psychology_alt_outlined
-                            : Icons.auto_stories_outlined,
-                        color: zs.ZenColors.jadeMid,
-                        size: 18,
-                      ),
+                      Icon(typeIcon, color: zs.ZenColors.jadeMid, size: 18),
                       const SizedBox(width: 6),
                       Text(
-                        kind == EntryKind.reflection ? 'Reflexion' : 'Kurzgeschichte',
+                        typeLabel,
                         style: const TextStyle(
                           fontWeight: FontWeight.w700,
                           fontSize: 14.5,
@@ -276,11 +270,15 @@ class JournalEntryView extends StatelessWidget {
     );
   }
 
-  // Journal: 1. nicht-leere Zeile als Überschrift (grün), Rest in Ink.
+  // Journal: 1. nicht-leere Zeile als Überschrift (DeepSage), Rest in Ink.
   Widget _journalBlock(BuildContext context) {
     final raw = (journalText ?? '').trim();
     if (raw.isEmpty) {
-      return SelectableText('—', style: _greenTitleStyle(context));
+      return const SelectableText(
+        '—',
+        // Screenreader-freundliche Beschreibung
+        semanticsLabel: 'Leer',
+      );
     }
 
     final lines = raw.split(RegExp(r'\r?\n')).map((s) => s.trim()).toList();
@@ -288,13 +286,14 @@ class JournalEntryView extends StatelessWidget {
 
     final title = nonEmpty.isNotEmpty ? nonEmpty.first : '';
     final bodyLines = nonEmpty.length > 1 ? nonEmpty.sublist(1) : const <String>[];
-    final body = bodyLines.join('\n').trim();
+    // sanfte Normalisierung: 3+ Leerzeilen → 2
+    final body = bodyLines.join('\n').trim().replaceAll(RegExp(r'\n{3,}'), '\n\n');
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (title.isNotEmpty) ...[
-          Text(title, style: _greenTitleStyle(context)),
+          Text(title, style: _titleStyle(context)),
           if (body.isNotEmpty) const SizedBox(height: 10),
         ],
         if (body.isNotEmpty)
@@ -313,7 +312,7 @@ class JournalEntryView extends StatelessWidget {
         if (hasThought) ...[
           Text('Dein Gedanke', style: _labelStyle(context)),
           const SizedBox(height: 4),
-          SelectableText('„${userThought!.trim()}“', style: _userStyle),
+          SelectableText('„${userThought!.trim()}“', style: _userStyle(context)),
           const SizedBox(height: 12),
         ],
         if (hasQuestion) ...[
@@ -324,7 +323,9 @@ class JournalEntryView extends StatelessWidget {
         const SizedBox(height: 4),
         SelectableText(
           (userAnswer ?? '').trim().isEmpty ? '—' : userAnswer!.trim(),
-          style: _userStyle,
+          style: _userStyle(context),
+          // A11y: falls nur „—“, sprechbar machen
+          semanticsLabel: (userAnswer ?? '').trim().isEmpty ? 'Leer' : null,
         ),
       ],
     );
@@ -339,7 +340,7 @@ class JournalEntryView extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (title.isNotEmpty) ...[
-          Text(title, style: _greenTitleStyle(context)),
+          Text(title, style: _titleStyle(context)),
           const SizedBox(height: 10),
         ],
         SelectableText(
@@ -348,6 +349,7 @@ class JournalEntryView extends StatelessWidget {
               : (body.isNotEmpty ? body : teaser),
           style: _bodyInkStyle(context),
           textAlign: TextAlign.start,
+          semanticsLabel: (body.isNotEmpty ? body : teaser).isEmpty ? 'Leer' : null,
         ),
       ],
     );
@@ -390,55 +392,55 @@ class JournalEntryView extends StatelessWidget {
       spacing: 10,
       runSpacing: 8,
       children: [
-        OutlinedButton.icon(
-          icon: const Icon(Icons.copy_all_outlined),
-          label: Text(copyLabel()),
-          onPressed: () async {
-            final textToCopy = () {
-              switch (kind) {
-                case EntryKind.journal:
-                  return (journalText ?? '').trim();
-                case EntryKind.reflection:
-                  return <String>[
-                    if ((userThought ?? '').trim().isNotEmpty)
-                      'Gedanke: ${userThought!.trim()}',
-                    if ((aiQuestion ?? '').trim().isNotEmpty)
-                      'Frage: ${aiQuestion!.trim()}',
-                    if ((userAnswer ?? '').trim().isNotEmpty)
-                      'Antwort: ${userAnswer!.trim()}',
-                  ].where((s) => s.isNotEmpty).join('\n');
-                case EntryKind.story:
-                  final t = (storyTitle ?? '').trim();
-                  final b = (storyBody ?? '').trim();
-                  final z = (storyTeaser ?? '').trim();
-                  return <String>[
-                    if (t.isNotEmpty) 'Titel: $t',
-                    (b.isNotEmpty ? b : z),
-                  ].where((s) => s.trim().isNotEmpty).join('\n\n');
-              }
-            }();
+        Tooltip(
+          message: copyLabel(),
+          waitDuration: const Duration(milliseconds: 300),
+          child: OutlinedButton.icon(
+            icon: const Icon(Icons.copy_all_outlined),
+            label: Text(copyLabel()),
+            onPressed: () async {
+              final textToCopy = () {
+                switch (kind) {
+                  case EntryKind.journal:
+                    return (journalText ?? '').trim();
+                  case EntryKind.reflection:
+                    return <String>[
+                      if ((userThought ?? '').trim().isNotEmpty)
+                        'Gedanke: ${userThought!.trim()}',
+                      if ((aiQuestion ?? '').trim().isNotEmpty)
+                        'Frage: ${aiQuestion!.trim()}',
+                      if ((userAnswer ?? '').trim().isNotEmpty)
+                        'Antwort: ${userAnswer!.trim()}',
+                    ].where((s) => s.isNotEmpty).join('\n');
+                  case EntryKind.story:
+                    final t = (storyTitle ?? '').trim();
+                    final b = (storyBody ?? '').trim();
+                    final z = (storyTeaser ?? '').trim();
+                    return <String>[
+                      if (t.isNotEmpty) 'Titel: $t',
+                      (b.isNotEmpty ? b : z),
+                    ].where((s) => s.trim().isNotEmpty).join('\n\n');
+                }
+              }();
 
-            await Clipboard.setData(ClipboardData(text: textToCopy));
-            zw.ZenToast.show(context, 'In Zwischenablage kopiert');
-          },
-          style: OutlinedButton.styleFrom(
-            minimumSize: const Size(0, 44),
-            shape: const RoundedRectangleBorder(
-              borderRadius: BorderRadius.all(zs.ZenRadii.m),
-            ),
-          ),
-        ),
-        if (canEdit)
-          OutlinedButton.icon(
-            icon: const Icon(Icons.edit_rounded),
-            label: const Text('Bearbeiten'),
-            onPressed: onEdit,
+              await Clipboard.setData(ClipboardData(text: textToCopy));
+              zw.ZenToast.show(context, 'In Zwischenablage kopiert');
+            },
             style: OutlinedButton.styleFrom(
               minimumSize: const Size(0, 44),
               shape: const RoundedRectangleBorder(
                 borderRadius: BorderRadius.all(zs.ZenRadii.m),
               ),
             ),
+          ),
+        ),
+        if (canEdit)
+          const SizedBox(width: 2),
+        if (canEdit)
+          const Tooltip(
+            message: 'Bearbeiten',
+            waitDuration: Duration(milliseconds: 300),
+            child: _EditButton(),
           ),
       ],
     );
@@ -463,5 +465,27 @@ class JournalEntryView extends StatelessWidget {
     final dd = two(l.day);
     final mo = two(l.month);
     return '$dd.$mo.${l.year}, $hh:$mm';
+  }
+}
+
+// Kleiner Wrapper, damit Tooltip auch bei deaktiviertem onEdit nicht verschwindet
+class _EditButton extends StatelessWidget {
+  const _EditButton();
+
+  @override
+  Widget build(BuildContext context) {
+    final parent = context.findAncestorWidgetOfExactType<JournalEntryView>();
+    final onEdit = parent?.onEdit;
+    return OutlinedButton.icon(
+      icon: const Icon(Icons.edit_rounded),
+      label: const Text('Bearbeiten'),
+      onPressed: onEdit,
+      style: OutlinedButton.styleFrom(
+        minimumSize: const Size(0, 44),
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(zs.ZenRadii.m),
+        ),
+      ),
+    );
   }
 }

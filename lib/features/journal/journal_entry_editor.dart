@@ -1,51 +1,48 @@
 // lib/features/journal/journal_entry_editor.dart
 //
-// v8 — JournalEntryEditor (Oxford-Zen)
+// v9.1 — JournalEntryEditor (Oxford-Zen, SenStyleDart)
 // -----------------------------------------------------------------------------
-// Ziel
-// - Ruhiger Editor für Tagebuch-Einträge (nur „note“, keine Reflexion).
-// - Bottom-Input (Mic + Text): kurzes Feld zum Anfügen; Transkripte landen dort.
-// - Hauptfeld: großer Multi-Line-Editor in Glas-Karte.
-// - Auto-Clean-Pipeline: vorsichtige Korrektur (Whitespace, Satzzeichen,
-//   Ellipsen, Dashes, ein paar sehr häufige DE-Tippfehler) — *ohne Paraphrase*.
-// - Speichern in JournalEntriesProvider (Dart-2.x-kompatibel).
+// • Ruhiger Editor nur für Journal-Einträge (EntryKind.journal) – optional
+//   Titelzeile, die beim Speichern in den Body gemerged wird.
+// • Mood-Auswahl (ChoiceChips) → wird als Tag "mood:<Label>" persistiert.
+// • Zwei Aktionen: ① Speichern (Tagebuch) ② Als Reflexion speichern.
+// • Quick-Append-Leiste unten (Mic + Senden) fügt zum Haupttext an.
+// • Auto-Clean-Pipeline: vorsichtig & idempotent (Whitespace/Interpunktion,
+//   Ellipsen, Gedankenstrich, häufige DE-Tippfehler) – keine Paraphrase.
+// • Edit-Modus: vorhandenen Journal-Text überschreiben; Mood-Tag wird
+//   ersetzt (vorhandene mood:/moodScore: im Tag-Set werden entfernt).
 //
-// Abhängigkeiten im Projekt vorhanden:
-//   ZenBackdrop, ZenGlassCard, ZenAppBar, PandaHeader, ZenColors, ZenRadii, ZenToast
-//   JournalEntriesProvider / JournalEntry
-//   SpeechService (transcript$ / start() / stop() / isRecording)
-//
-// UX-Hinweise
-// - „Korrigieren“ ist idempotent und defensiv (kein Umformulieren).
-// - Mic-Transkript wird in das *untere* Inputfeld geschrieben; per Senden
-//   (↩︎-Icon oder Ctrl/Cmd+Enter) wird es an den großen Editor angefügt.
-// - Speichern legt/aktualisiert einen JournalEntry (type: note).
-// -----------------------------------------------------------------------------
+// Abhängigkeiten:
+//   zen_style.dart als `zs` (ohne Widgets), zen_widgets.dart als `zw`
+//   providers/journal_entries_provider.dart als `jp`
+//   models/journal_entry.dart als `jm`
+//   services/speech_service.dart (transcript$ / start / stop / isRecording)
 
 import 'dart:async';
-import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/scheduler.dart' show Ticker, TickerProvider, TickerCallback;
 import 'package:provider/provider.dart';
 
 import '../../shared/zen_style.dart' as zs hide ZenBackdrop, ZenGlassCard, ZenAppBar;
 import '../../shared/ui/zen_widgets.dart' as zw
     show ZenBackdrop, ZenGlassCard, ZenAppBar, PandaHeader, ZenToast;
 
-import '../../models/journal_entries_provider.dart';
-import '../../data/journal_entry.dart';
+import '../../providers/journal_entries_provider.dart' as jp;
+import '../../models/journal_entry.dart' as jm;
 import '../../services/speech_service.dart';
 
 class JournalEntryEditor extends StatefulWidget {
-  /// Optional: vorhandener Eintrag zum Bearbeiten.
-  final JournalEntry? existing;
+  /// Optional: vorhandener Eintrag (nur EntryKind.journal vorgesehen).
+  final jm.JournalEntry? existing;
 
-  /// Optionaler Seed-Text (z. B. aus einem Prompt oder einer Selektion).
+  /// Optionaler Seed-Text/Überschrift.
   final String? initialText;
+  final String? initialTitle;
 
-  /// Optionales Label (wird *nicht* persistiert, nur Überschrift im UI).
-  final String? title;
+  /// Optionaler Start-Mood (Glücklich/Ruhig/Neutral/Traurig/Gestresst/Wütend)
+  final String? initialMood;
 
   /// Callback nach erfolgreichem Speichern.
   final VoidCallback? onSaved;
@@ -54,7 +51,8 @@ class JournalEntryEditor extends StatefulWidget {
     super.key,
     this.existing,
     this.initialText,
-    this.title,
+    this.initialTitle,
+    this.initialMood,
     this.onSaved,
   });
 
@@ -64,10 +62,15 @@ class JournalEntryEditor extends StatefulWidget {
 
 class _JournalEntryEditorState extends State<JournalEntryEditor> {
   static const Duration _animShort = Duration(milliseconds: 200);
+  static const List<String> _moods = <String>[
+    'Glücklich', 'Ruhig', 'Neutral', 'Traurig', 'Gestresst', 'Wütend'
+  ];
 
+  final TextEditingController _titleCtrl  = TextEditingController();
   final TextEditingController _editorCtrl = TextEditingController();
   final TextEditingController _quickCtrl  = TextEditingController();
 
+  final FocusNode _titleFocus  = FocusNode();
   final FocusNode _editorFocus = FocusNode();
   final FocusNode _quickFocus  = FocusNode();
   final FocusNode _pageFocus   = FocusNode();
@@ -78,6 +81,7 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
   final SpeechService _speech = SpeechService();
   StreamSubscription<String>? _speechSub;
 
+  String _mood = 'Neutral';
   bool _saving = false;
 
   @override
@@ -85,11 +89,19 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
     super.initState();
     _fadeCtrl = AnimationController(vsync: _TickerProvider(this), duration: _animShort);
 
-    // Seed
-    final seed = (widget.existing?.text ?? widget.initialText ?? '').trim();
-    if (seed.isNotEmpty) _editorCtrl.text = seed;
+    // Seed aus existing / Props
+    final ex = widget.existing;
+    if (ex != null && ex.kind == jm.EntryKind.journal) {
+      _editorCtrl.text = (ex.thoughtText ?? '').trim();
+      _titleCtrl.text  = ''; // Titel wird als Teil des Texts geführt
+      _mood = ex.moodLabel?.trim().isNotEmpty == true ? ex.moodLabel!.trim() : 'Neutral';
+    } else {
+      _editorCtrl.text = (widget.initialText ?? '').trim();
+      _titleCtrl.text  = (widget.initialTitle ?? '').trim();
+      _mood = (widget.initialMood ?? (_editorCtrl.text.isEmpty && _titleCtrl.text.isEmpty ? 'Neutral' : 'Ruhig'));
+    }
 
-    // Mic → quick input
+    // Mic → Quick-Input
     _speechSub = _speech.transcript$.listen((t) {
       if (!mounted) return;
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -97,9 +109,7 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
         final cur = _quickCtrl.text.trim();
         final joined = (cur.isEmpty ? t : '$cur\n$t').trim();
         _quickCtrl.text = joined;
-        _quickCtrl.selection = TextSelection.fromPosition(
-          TextPosition(offset: _quickCtrl.text.length),
-        );
+        _quickCtrl.selection = TextSelection.fromPosition(TextPosition(offset: _quickCtrl.text.length));
         FocusScope.of(context).requestFocus(_quickFocus);
       });
     });
@@ -111,8 +121,10 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
   void dispose() {
     _speechSub?.cancel();
     _speech.dispose();
+    _titleCtrl.dispose();
     _editorCtrl.dispose();
     _quickCtrl.dispose();
+    _titleFocus.dispose();
     _editorFocus.dispose();
     _quickFocus.dispose();
     _pageFocus.dispose();
@@ -131,12 +143,11 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
     final isEnter = e.logicalKey == LogicalKeyboardKey.enter || e.logicalKey == LogicalKeyboardKey.numpadEnter;
     final withCtrlOrCmd = e.isControlPressed || e.isMetaPressed;
     if (withCtrlOrCmd && isEnter) {
-      // Ctrl/Cmd+Enter → Quick anfügen
       _appendQuick();
       return KeyEventResult.handled;
     }
     if (withCtrlOrCmd && e.logicalKey == LogicalKeyboardKey.keyS) {
-      _save();
+      _save(asReflection: false);
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
@@ -150,9 +161,7 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
     final base = _editorCtrl.text.trimRight();
     final next = base.isEmpty ? add : '$base\n\n$add';
     setState(() => _editorCtrl.text = next);
-    _editorCtrl.selection = TextSelection.fromPosition(
-      TextPosition(offset: _editorCtrl.text.length),
-    );
+    _editorCtrl.selection = TextSelection.fromPosition(TextPosition(offset: _editorCtrl.text.length));
     _quickCtrl.clear();
     _scrollToBottom();
     HapticFeedback.selectionClick();
@@ -180,18 +189,19 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
     final after  = _autoCleanPipeline(before);
     if (after != before) {
       setState(() => _editorCtrl.text = after);
-      _editorCtrl.selection = TextSelection.fromPosition(
-        TextPosition(offset: _editorCtrl.text.length),
-      );
+      _editorCtrl.selection = TextSelection.fromPosition(TextPosition(offset: _editorCtrl.text.length));
     }
     HapticFeedback.selectionClick();
     zw.ZenToast.show(context, 'Text vorsichtig korrigiert');
   }
 
-  Future<void> _save() async {
+  Future<void> _save({required bool asReflection}) async {
     if (_saving) return;
-    final raw = _editorCtrl.text.trim();
-    if (raw.isEmpty) {
+
+    final bodyRaw  = _editorCtrl.text.trim();
+    final titleRaw = _titleCtrl.text.trim();
+
+    if (bodyRaw.isEmpty && titleRaw.isEmpty) {
       zw.ZenToast.show(context, 'Schreibe erst etwas in deinen Eintrag.');
       FocusScope.of(context).requestFocus(_editorFocus);
       return;
@@ -199,42 +209,35 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
 
     setState(() => _saving = true);
     try {
-      final cleaned = _autoCleanPipeline(raw);
-      final prov = context.read<JournalEntriesProvider>();
+      final cleaned = _autoCleanPipeline(bodyRaw);
+      final merged  = titleRaw.isEmpty ? cleaned : '$titleRaw\n\n$cleaned';
 
-      // Bestehenden ersetzen oder neuen anlegen
-      final String id = widget.existing?.id ?? _makeId();
-      final DateTime createdUtc = (widget.existing?.createdAt ?? DateTime.now()).toUtc();
+      final prov = context.read<jp.JournalEntriesProvider>();
 
-      final Map<String, dynamic> v = <String, dynamic>{
-        'id': id,
-        'ts': createdUtc.toIso8601String(),
-        'createdAt': createdUtc.toIso8601String(),
-        'type': 'note',
-        'text': cleaned,
-        'label': (widget.title ?? '').trim().isEmpty ? null : widget.title!.trim(),
-        'answer': null,
-        'analysis': null,
-        'reflection': null,
-        'links': {'story_id': null},
-        'isReflection': false,
-        'aiQuestion': null,
-        'kind': 'note',
-      };
-
-      final entry = JournalEntry.fromJson(v);
-
-      // Provider aktualisieren (defensiv, kompatibel zu v8)
-      final current = List<JournalEntry>.from(prov.entries);
-      final idx = current.indexWhere((e) => (e.id ?? '') == id);
-      if (idx >= 0) {
-        current[idx] = entry;
+      if (asReflection) {
+        // Immer NEUE Reflexion (Journal-Editor erstellt/ändert keine Stories)
+        prov.addReflection(text: merged, moodLabel: _mood, aiQuestion: null);
       } else {
-        current.add(entry);
+        final ex = widget.existing;
+        if (ex != null) {
+          // Tags: mood:* ersetzen (und moodScore:*), Rest beibehalten
+          final nextTags = <String>[
+            ...ex.tags.where((t) => !t.startsWith('mood:') && !t.startsWith('moodScore:')),
+            if (_mood.trim().isNotEmpty) 'mood:${_mood.trim()}',
+          ];
+          prov.updateById(
+            ex.id,
+            thoughtText: merged,
+            tags: nextTags,
+            createdAt: ex.createdAt, // ruhige Chronologie beibehalten
+            kind: jm.EntryKind.journal,
+          );
+        } else {
+          prov.addDiary(text: merged, moodLabel: _mood);
+        }
       }
-      prov.replaceAll(current);
 
-      zw.ZenToast.show(context, 'Eintrag gespeichert');
+      zw.ZenToast.show(context, asReflection ? 'Reflexion gespeichert' : 'Eintrag gespeichert');
       widget.onSaved?.call();
       if (mounted) Navigator.of(context).maybePop();
     } finally {
@@ -244,43 +247,35 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
 
   // ---------------- Auto-Clean Pipeline --------------------------------------
 
-  /// Vorsichtige, idempotente Pipeline:
-  /// - Zeilenenden normalisieren, überflüssige Leerzeichen entfernen
-  /// - Max. 2 aufeinanderfolgende Leerzeilen
-  /// - Interpunktions-Spacing ("," "." "!" "?" ":" ";" vor/nach)
-  /// - Ellipsen → „…“, Mehrfach-Ellipsen zu einer
-  /// - Dashes: " - " → " – " (Gedankenstrich) zwischen Wörtern
-  /// - Ein paar *sehr häufige* DE-Tippfehler per Wort-Mapping (word boundary)
-  ///   (keine Grammatik-„Korrekturen“, kein Paraphrasieren)
   String _autoCleanPipeline(String input) {
     var s = input;
 
-    // Normalisieren von CRLF / CR → LF
+    // Zeilenenden normalisieren
     s = s.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
 
-    // Trim Whitespace an Zeilenenden
+    // Trailing-Whitespace je Zeile entfernen
     s = s.split('\n').map((l) => l.replaceAll(RegExp(r'[ \t]+$'), '')).join('\n');
 
     // Mehrfach-Leerzeilen → max. 2
     s = s.replaceAll(RegExp(r'\n{3,}'), '\n\n');
 
-    // Innen-Whitespace: Mehrfach-Spaces → Single (aber Tabs/Neue Zeilen bleiben)
+    // Mehrfach-Spaces → Single (Tabs/Zeilenumbrüche bleiben)
     s = s.replaceAll(RegExp(r'[ ]{2,}'), ' ');
 
-    // Spacing vor Satzzeichen korrigieren: „Hallo , Welt !“ → „Hallo, Welt!“
+    // Space vor Satzzeichen korrigieren
     s = s.replaceAll(RegExp(r'\s+([,.;:!?])'), r'$1');
 
-    // Fehlendes Space nach Satzzeichen (falls Buchstabe/Zahl folgt)
+    // Space nach Satzzeichen ergänzen (falls Zeichen folgt)
     s = s.replaceAllMapped(RegExp(r'([,.!?;:])(?!\s|\n|$)'), (m) => '${m.group(1)} ');
 
-    // Ellipsen: "..." oder "… …" → "…"
+    // Ellipsen
     s = s.replaceAll(RegExp(r'\.{3,}'), '…');
     s = s.replaceAll(RegExp(r'…{2,}'), '…');
 
-    // Dashes: " - " (zwischen Wörtern) → " – "
+    // Gedankenstrich
     s = s.replaceAll(RegExp(r'(?<=\w)\s-\s(?=\w)'), ' – ');
 
-    // Doppelte Satzzeichen (z. B. „!! !“) aufräumen
+    // Doppelte Satzzeichen zusammenziehen
     s = s.replaceAll(RegExp(r'([!?])\s+\1'), r'$1$1');
 
     // Häufige DE-Tippfehler (sehr konservativ)
@@ -292,24 +287,21 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
       RegExp(r'\binterres+', caseSensitive: false): 'interess',
       RegExp(r'\bwiederspiegeln\b', caseSensitive: false): 'widerspiegeln',
       RegExp(r'\bgramatik\b', caseSensitive: false): 'Grammatik',
-      RegExp(r'\bacc?ept\b', caseSensitive: false): 'accept', // falls EN-Fetzen
+      RegExp(r'\bacc?ept\b', caseSensitive: false): 'accept',
     };
     typo.forEach((rx, repl) {
       s = s.replaceAllMapped(rx, (m) {
         final g = m.group(0) ?? '';
-        // Großschreibung am Wortanfang erhalten
         if (g.isNotEmpty && g[0].toUpperCase() == g[0]) {
-          // Capitalize erste Letter im Replacement
           return repl.isEmpty ? repl : '${repl[0].toUpperCase()}${repl.substring(1)}';
         }
         return repl;
       });
     });
 
-    // Letzte kosmetische Korrekturen
-    s = s.replaceAll(RegExp(r'[ \t]+\n'), '\n'); // Space vor Zeilenumbruch
+    // Letzte Kosmetik
+    s = s.replaceAll(RegExp(r'[ \t]+\n'), '\n');
     s = s.trimRight();
-
     return s;
   }
 
@@ -359,78 +351,172 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
                         bottom: 10,
                       ),
                       child: zw.PandaHeader(
-                        title: widget.existing == null
-                            ? (widget.title?.trim().isNotEmpty == true
-                                ? widget.title!.trim()
-                                : 'Neuer Eintrag')
-                            : 'Eintrag bearbeiten',
+                        title: widget.existing == null ? 'Neuer Eintrag' : 'Eintrag bearbeiten',
                         caption: 'Schreibe in Ruhe. Ich bin hier.',
                         pandaSize: pandaSize,
                         strongTitleGreen: true,
                       ),
                     ),
 
-                    // Editor Karte
+                    // Inhalt
                     Expanded(
                       child: FadeTransition(
                         opacity: _fadeCtrl.drive(Tween(begin: 0.0, end: 1.0)),
                         child: ListView(
                           controller: _scroll,
+                          physics: const BouncingScrollPhysics(),
                           padding: const EdgeInsets.fromLTRB(
                             zs.ZenSpacing.m, 0, zs.ZenSpacing.m, zs.ZenSpacing.s,
                           ),
                           children: [
+                            // Titel
+                            zw.ZenGlassCard(
+                              padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+                              borderRadius: const BorderRadius.all(zs.ZenRadii.xl),
+                              topOpacity: .30,
+                              bottomOpacity: .14,
+                              borderOpacity: .18,
+                              child: TextField(
+                                controller: _titleCtrl,
+                                focusNode: _titleFocus,
+                                textInputAction: TextInputAction.next,
+                                onSubmitted: (_) => _editorFocus.requestFocus(),
+                                spellCheckConfiguration: const SpellCheckConfiguration.disabled(),
+                                autocorrect: false,
+                                enableSuggestions: true,
+                                decoration: const InputDecoration(
+                                  hintText: 'Überschrift (optional)',
+                                  border: InputBorder.none,
+                                  isCollapsed: true,
+                                ),
+                                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  color: zs.ZenColors.jade,
+                                  fontWeight: FontWeight.w800,
+                                  height: 1.22,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+
+                            // Haupt-Editor
                             zw.ZenGlassCard(
                               padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
                               borderRadius: const BorderRadius.all(zs.ZenRadii.xl),
                               topOpacity: .30,
                               bottomOpacity: .14,
                               borderOpacity: .18,
-                              child: _EditorTextField(
-                                controller: _editorCtrl,
-                                focusNode: _editorFocus,
-                                hint: 'Schreib, was du festhalten möchtest …',
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  TextField(
+                                    controller: _editorCtrl,
+                                    focusNode: _editorFocus,
+                                    keyboardType: TextInputType.multiline,
+                                    maxLines: null,
+                                    minLines: 10,
+                                    textInputAction: TextInputAction.newline,
+                                    autocorrect: true,
+                                    enableSuggestions: true,
+                                    spellCheckConfiguration: const SpellCheckConfiguration.disabled(),
+                                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                      color: zs.ZenColors.jade,
+                                      height: 1.35,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                    cursorColor: zs.ZenColors.jade,
+                                    decoration: InputDecoration(
+                                      hintText: 'Schreib, was du festhalten möchtest …',
+                                      hintStyle: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                        color: zs.ZenColors.jade.withValues(alpha: .55),
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                      border: InputBorder.none,
+                                      isCollapsed: true,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 10),
+                                  // Tools: Korrigieren
+                                  Row(
+                                    children: [
+                                      OutlinedButton.icon(
+                                        onPressed: _autoClean,
+                                        icon: const Icon(Icons.spellcheck),
+                                        label: const Text('Korrigieren'),
+                                        style: OutlinedButton.styleFrom(
+                                          minimumSize: const Size(0, 42),
+                                          shape: const RoundedRectangleBorder(
+                                            borderRadius: BorderRadius.all(zs.ZenRadii.m),
+                                          ),
+                                        ),
+                                      ),
+                                      const Spacer(),
+                                      Text(
+                                        '${_editorCtrl.text.trim().length} Zeichen',
+                                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                          color: zs.ZenColors.inkSubtle,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
                               ),
                             ),
-                            const SizedBox(height: 10),
+                            const SizedBox(height: 12),
 
-                            // Action Row: Korrigieren + Speichern
-                            Row(
+                            // Mood
+                            _MoodRow(
+                              selected: _mood,
+                              onSelect: (m) => setState(() => _mood = m),
+                            ),
+                            const SizedBox(height: 8),
+
+                            // Hinweiszeile
+                            Align(
+                              alignment: Alignment.center,
+                              child: Text(
+                                'Bleibt lokal. Teilen ist optional.',
+                                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                  color: zs.ZenColors.inkSubtle,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+
+                            // Aktionen
+                            Wrap(
+                              alignment: WrapAlignment.center,
+                              spacing: 10,
+                              runSpacing: 10,
                               children: [
-                                OutlinedButton.icon(
-                                  onPressed: _autoClean,
-                                  icon: const Icon(Icons.spellcheck),
-                                  label: const Text('Korrigieren'),
-                                  style: OutlinedButton.styleFrom(
-                                    minimumSize: const Size(0, 42),
-                                    shape: const RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.all(zs.ZenRadii.m),
+                                SizedBox(
+                                  width: 280,
+                                  child: ElevatedButton.icon(
+                                    onPressed: _saving ? null : () => _save(asReflection: false),
+                                    icon: _saving
+                                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                                        : const Icon(Icons.check_circle_rounded),
+                                    label: Text(_saving ? 'Speichern …' : 'Speichern'),
+                                    style: ElevatedButton.styleFrom(
+                                      minimumSize: const Size(0, 48),
+                                      shape: const RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.all(zs.ZenRadii.m),
+                                      ),
                                     ),
                                   ),
                                 ),
-                                const SizedBox(width: 8),
-                                ElevatedButton.icon(
-                                  onPressed: _saving ? null : _save,
-                                  icon: _saving
-                                      ? const SizedBox(
-                                          width: 18, height: 18,
-                                          child: CircularProgressIndicator(strokeWidth: 2),
-                                        )
-                                      : const Icon(Icons.bookmark_added_rounded),
-                                  label: Text(_saving ? 'Speichern …' : 'Speichern'),
-                                  style: ElevatedButton.styleFrom(
-                                    minimumSize: const Size(0, 42),
-                                    shape: const RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.all(zs.ZenRadii.m),
+                                SizedBox(
+                                  width: 280,
+                                  child: OutlinedButton.icon(
+                                    onPressed: _saving ? null : () => _save(asReflection: true),
+                                    icon: const Icon(Icons.psychology_alt_rounded),
+                                    label: const Text('Als Reflexion speichern'),
+                                    style: OutlinedButton.styleFrom(
+                                      minimumSize: const Size(0, 48),
+                                      shape: const RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.all(zs.ZenRadii.m),
+                                      ),
                                     ),
                                   ),
-                                ),
-                                const Spacer(),
-                                // kleine Legende
-                                Tooltip(
-                                  message: 'Tipp: Ctrl/Cmd+S speichert',
-                                  child: Icon(Icons.info_outline,
-                                      size: 18, color: Colors.black.withValues(alpha: .45)),
                                 ),
                               ],
                             ),
@@ -440,7 +526,7 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
                       ),
                     ),
 
-                    // Bottom-Input (Mic + Text → anfügen)
+                    // Bottom Quick-Append
                     Padding(
                       padding: const EdgeInsets.fromLTRB(
                         zs.ZenSpacing.m, 0, zs.ZenSpacing.m, zs.ZenSpacing.s,
@@ -473,55 +559,46 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
       );
     });
   }
-
-  String _makeId() {
-    final now = DateTime.now().millisecondsSinceEpoch;
-    final r = Random().nextInt(0xFFFF);
-    return 'n_${now}_$r';
-  }
 }
 
 // ---------------- Widgets (intern) -------------------------------------------
 
-class _EditorTextField extends StatelessWidget {
-  final TextEditingController controller;
-  final FocusNode? focusNode;
-  final String hint;
+class _MoodRow extends StatelessWidget {
+  final String selected;
+  final ValueChanged<String> onSelect;
 
-  const _EditorTextField({
-    required this.controller,
-    this.focusNode,
-    required this.hint,
+  const _MoodRow({
+    required this.selected,
+    required this.onSelect,
   });
+
+  static const List<String> _moods = <String>[
+    'Glücklich', 'Ruhig', 'Neutral', 'Traurig', 'Gestresst', 'Wütend',
+  ];
 
   @override
   Widget build(BuildContext context) {
-    final base = Theme.of(context).textTheme.bodyMedium!;
-    return TextField(
-      focusNode: focusNode,
-      controller: controller,
-      keyboardType: TextInputType.multiline,
-      maxLines: null,
-      minLines: 10,
-      textInputAction: TextInputAction.newline,
-      autocorrect: true,
-      enableSuggestions: true,
-      spellCheckConfiguration: const SpellCheckConfiguration.disabled(),
-      style: base.copyWith(
-        color: zs.ZenColors.jade,
-        height: 1.35,
-        fontWeight: FontWeight.w600,
-      ),
-      cursorColor: zs.ZenColors.jade,
-      decoration: InputDecoration(
-        hintText: hint,
-        hintStyle: base.copyWith(
-          color: zs.ZenColors.jade.withValues(alpha: .55),
-          fontWeight: FontWeight.w500,
-        ),
-        border: InputBorder.none,
-        isCollapsed: true,
-      ),
+    return Wrap(
+      spacing: 8,
+      runSpacing: 6,
+      alignment: WrapAlignment.center,
+      children: _moods.map((m) {
+        final isSel = m == selected;
+        return ChoiceChip(
+          label: Text(m),
+          selected: isSel,
+          onSelected: (_) => onSelect(m),
+          visualDensity: VisualDensity.compact,
+          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          selectedColor: zs.ZenColors.jade.withValues(alpha: .10),
+          side: BorderSide(
+            color: isSel
+                ? zs.ZenColors.jade.withValues(alpha: .55)
+                : zs.ZenColors.jade.withValues(alpha: .22),
+          ),
+          shape: const StadiumBorder(),
+        );
+      }).toList(),
     );
   }
 }
@@ -621,8 +698,6 @@ class _QuickAppendBar extends StatelessWidget {
 }
 
 // ---------------- Kleiner lokaler TickerProvider -----------------------------
-// (vermeidet Ancestor-Lookups für AnimationController)
-
 class _TickerProvider extends ChangeNotifier implements TickerProvider {
   _TickerProvider(this._state);
   final State _state;

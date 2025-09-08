@@ -1,6 +1,6 @@
 // lib/features/_legacy_gedankenbuch/gedankenbuch_entry_screen.dart
 //
-// GedankenbuchEntryScreen — Oxford-Zen Composer v7.4 (Calm Single-Sheet)
+// GedankenbuchEntryScreen — Oxford-Zen Composer v7.5 (Calm Single-Sheet · SenStyleDart)
 // ----------------------------------------------------------------------
 // Ziel: pures, ruhiges Schreiben – minimal, konsequent, fehlerverzeihend.
 // • Ein Feld, eine Handlung: großes Schreibfeld auf einer Glas-Karte.
@@ -25,7 +25,7 @@ import '../../shared/zen_style.dart' as zs
 import '../../shared/ui/zen_widgets.dart' as zw
     show ZenBackdrop, ZenGlassCard, ZenAppBar, ZenInfoBar, ZenToast, PandaHeader;
 
-import '../../models/journal_entries_provider.dart' show JournalEntriesProvider;
+import '../../providers/journal_entries_provider.dart' show JournalEntriesProvider;
 import '../reflection/reflection_screen.dart';
 import '../../services/guidance_service.dart'
     show GuidanceService, StructuredThoughtResult;

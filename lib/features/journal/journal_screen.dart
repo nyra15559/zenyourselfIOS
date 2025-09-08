@@ -1,20 +1,15 @@
 // lib/features/journal/journal_screen.dart
 //
-// JournalScreen — Oxford-Zen Timeline (Phase 2.6, stabil mit kontext-FAB)
+// JournalScreen — Oxford-Zen Timeline (Phase 2.7 + sanftes Pull-to-refresh)
 // ---------------------------------------------------------------------------
 // • Nutzt JournalEntriesProvider (Filter + Soft-Hide) und JournalEntry.
 // • Tages-Gruppierung (lokale Zeit) + ruhige Timeline mit Panda-Header.
-// • Filter-Pille: Alle / Tagebuch / Reflexion / Kurzgeschichte (Counts).
+// • Zentrierte Filter-Pille: Alle / Tagebuch / Reflexion / Kurzgeschichte (Counts).
 // • Card: features/journal/widgets/journal_entry_card.dart
 // • Aktionen: Öffnen, Erneut reflektieren (nur Reflexion), Ausblenden, Löschen.
 // • Crash-Fix: KEIN IntrinsicHeight mehr (Timeline-Reihe via Stack/Align).
-// • FAB („+“) jetzt **kontextsensitiv** je aktivem Tab.
-//
-// Abhängigkeiten:
-//   zen_style.dart als `zs`, zen_widgets.dart als `zw`
-//   models/journal_entry.dart als `jm`, providers/journal_entries_provider.dart als `jp`
-//   widgets/journal_entry_card.dart, journal_entry_view.dart als `jv`
-//   reflection/reflection_screen.dart
+// • FAB („+“) kontextsensitiv, optisch beruhigt (Deep Sage).
+// • NEU (sanft): Pull-to-refresh → provider.restore() (wenn Persistence-Hooks gesetzt).
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -74,6 +69,11 @@ class JournalScreen extends StatelessWidget {
         heroTag: 'journal-add',
         tooltip: 'Neuen Eintrag',
         onPressed: () => _startNewEntry(context, provider),
+        backgroundColor: zs.ZenColors.deepSage,
+        foregroundColor: Colors.white,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(zs.ZenRadii.l),
+        ),
         child: const Icon(Icons.add_rounded),
       ),
       body: Stack(
@@ -97,22 +97,47 @@ class JournalScreen extends StatelessWidget {
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: _maxContentWidth),
                 child: isEmpty
-                    ? _buildEmptyState(context, isMobile, provider)
-                    : _buildTimelineList(
-                        context,
+                    ? _wrapRefresh(
+                        context: context,
                         provider: provider,
-                        isMobile: isMobile,
-                        groups: grouped,
-                        allCount: allCount,
-                        journalCount: journalCount,
-                        reflectionCount: reflectionCount,
-                        storyCount: storyCount,
+                        child: _buildEmptyState(context, isMobile, provider),
+                      )
+                    : _wrapRefresh(
+                        context: context,
+                        provider: provider,
+                        child: _buildTimelineList(
+                          context,
+                          provider: provider,
+                          isMobile: isMobile,
+                          groups: grouped,
+                          allCount: allCount,
+                          journalCount: journalCount,
+                          reflectionCount: reflectionCount,
+                          storyCount: storyCount,
+                        ),
                       ),
               ),
             ),
           ),
         ],
       ),
+    );
+  }
+
+  // Sanfter Pull-to-refresh Wrapper (macht nichts kaputt, ruft restore() wenn vorhanden)
+  Widget _wrapRefresh({
+    required BuildContext context,
+    required jp.JournalEntriesProvider provider,
+    required Widget child,
+  }) {
+    return RefreshIndicator.adaptive(
+      onRefresh: () async {
+        await provider.restore(); // no-op wenn kein Load-Hook
+        HapticFeedback.selectionClick();
+      },
+      edgeOffset: 8,
+      displacement: 34,
+      child: child,
     );
   }
 
@@ -183,7 +208,7 @@ class JournalScreen extends StatelessWidget {
       case jp.JournalFilterKind.story:
         return 'Neue Kurzgeschichte beginnen';
       case jp.JournalFilterKind.journal:
-        return 'Neuen Gedanken notieren';
+        return 'Neuen Gedanken festhalten';
       case jp.JournalFilterKind.all:
         return 'Neuen Eintrag beginnen';
     }
@@ -222,20 +247,25 @@ class JournalScreen extends StatelessWidget {
           );
         }
         if (i == 1) {
+          // Zentrierte, kompakte Filter-Pille unter dem Panda
           return Padding(
             padding: const EdgeInsets.only(bottom: 6, top: 12),
-            child: zw.ZenGlassCard(
-              borderRadius: const BorderRadius.all(zs.ZenRadii.l),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              topOpacity: .26,
-              bottomOpacity: .10,
-              borderOpacity: .18,
-              child: _FilterPill(
-                provider: provider,
-                allCount: allCount,
-                journalCount: journalCount,
-                reflectionCount: reflectionCount,
-                storyCount: storyCount,
+            child: Center(
+              child: IntrinsicWidth(
+                child: zw.ZenGlassCard(
+                  borderRadius: const BorderRadius.all(zs.ZenRadii.l),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  topOpacity: .26,
+                  bottomOpacity: .10,
+                  borderOpacity: .18,
+                  child: _FilterPill(
+                    provider: provider,
+                    allCount: allCount,
+                    journalCount: journalCount,
+                    reflectionCount: reflectionCount,
+                    storyCount: storyCount,
+                  ),
+                ),
               ),
             ),
           );
@@ -359,58 +389,65 @@ class JournalScreen extends StatelessWidget {
 
   void _showNewDiarySheet(
       BuildContext context, jp.JournalEntriesProvider provider) {
-    final ctrl = TextEditingController();
+    final titleCtrl = TextEditingController();
+    final textCtrl = TextEditingController();
     showModalBottomSheet(
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
       builder: (ctx) {
+        final padBottom = MediaQuery.of(ctx).viewInsets.bottom + 16;
         return Padding(
-          padding: EdgeInsets.only(
-            left: 16,
-            right: 16,
-            bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
-            top: 8,
-          ),
+          padding: EdgeInsets.fromLTRB(16, 8, 16, padBottom),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                'Neuen Gedanken notieren',
+                'Neuen Gedanken festhalten',
                 style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.w700,
                       color: zs.ZenColors.deepSage,
                     ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
+              // Titel (optional) – wird zur Kompatibilität in den Text eingearbeitet.
               TextField(
-                controller: ctrl,
+                controller: titleCtrl,
+                textInputAction: TextInputAction.next,
+                decoration: const InputDecoration(
+                  hintText: 'Überschrift (optional)',
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: textCtrl,
                 maxLines: 5,
                 minLines: 3,
                 autofocus: true,
                 decoration: const InputDecoration(
                   hintText: 'Was möchtest du festhalten?',
-                  border: OutlineInputBorder(),
                 ),
               ),
               const SizedBox(height: 12),
               Row(
                 children: [
                   Expanded(
-                    child: OutlinedButton(
+                    child: TextButton(
                       onPressed: () => Navigator.pop(ctx),
-                      child: const Text('Abbrechen'),
+                      child: const Text('Schließen'),
                     ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: ElevatedButton.icon(
-                      icon: const Icon(Icons.save_rounded),
-                      label: const Text('Speichern'),
+                      icon: const Icon(Icons.check_rounded),
+                      label: const Text('Festhalten'),
                       onPressed: () {
-                        final t = ctrl.text.trim();
-                        if (t.isEmpty) return;
-                        provider.addDiary(text: t);
+                        final t = textCtrl.text.trim();
+                        final title = titleCtrl.text.trim();
+                        if (t.isEmpty && title.isEmpty) return;
+                        final merged = title.isNotEmpty ? '$title\n\n$t' : t;
+                        provider.addDiary(text: merged);
                         Navigator.pop(ctx);
                         HapticFeedback.selectionClick();
                         zw.ZenToast.show(context, 'Tagebuch-Eintrag gespeichert');
@@ -438,7 +475,7 @@ class JournalScreen extends StatelessWidget {
           children: [
             ListTile(
               leading: const Icon(Icons.menu_book_rounded),
-              title: const Text('Neuen Tagebuch-Eintrag'),
+              title: const Text('Tagebuch-Eintrag'),
               onTap: () {
                 Navigator.pop(ctx);
                 _showNewDiarySheet(context, provider);
@@ -489,34 +526,22 @@ class JournalScreen extends StatelessWidget {
               const SizedBox(height: 8),
               const Text(
                 'Kurzgeschichten entstehen aus deinen Reflexionen. '
-                'Du kannst jetzt eine neue Reflexion beginnen; '
-                'die Geschichte erscheint danach im Gedankenbuch.',
+                'Beginne jetzt eine neue Reflexion — die Geschichte erscheint danach im Gedankenbuch.',
                 textAlign: TextAlign.center,
               ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () => Navigator.pop(ctx),
-                      child: const Text('Später'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      icon: const Icon(Icons.play_arrow_rounded),
-                      label: const Text('Reflexion starten'),
-                      onPressed: () {
-                        Navigator.pop(ctx);
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                              builder: (_) => const ReflectionScreen()),
-                        );
-                      },
-                    ),
-                  ),
-                ],
+              const SizedBox(height: 14),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  icon: const Icon(Icons.play_arrow_rounded),
+                  label: const Text('Reflexion starten'),
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const ReflectionScreen()),
+                    );
+                  },
+                ),
               ),
             ],
           ),
@@ -590,7 +615,11 @@ class _FilterPill extends StatelessWidget {
           label: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 18, color: selected ? zs.ZenColors.deepSage : zs.ZenColors.jadeMid),
+              Icon(
+                icon,
+                size: 18,
+                color: selected ? zs.ZenColors.deepSage : zs.ZenColors.jadeMid,
+              ),
               const SizedBox(width: 6),
               Text('$label ($count)'),
             ],
@@ -611,6 +640,7 @@ class _FilterPill extends StatelessWidget {
     }
 
     return Wrap(
+      alignment: WrapAlignment.center, // zentriert unter dem Panda
       children: [
         chip(jp.JournalFilterKind.all, 'Alle', Icons.all_inclusive_rounded, allCount),
         chip(jp.JournalFilterKind.journal, 'Tagebuch', Icons.menu_book_rounded, journalCount),

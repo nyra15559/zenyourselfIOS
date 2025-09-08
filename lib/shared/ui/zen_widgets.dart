@@ -1,10 +1,12 @@
 // lib/shared/ui/zen_widgets.dart
 //
-// Oxford–Zen UI Widgets (v6.46 · 2025-09-04)
+// Oxford–Zen UI Widgets (v6.50 · 2025-09-04)
 // ---------------------------------------------------------------------------
 // • ZenAppScaffold: optionaler Backdrop, responsive Max-Width.
 // • ZenSafeImage.asset: robustes Asset-Image mit Fallback (kein Crash).
-// • ZenAppBar: integrierter Top-Fade (ohne externe Overlays-Abhängigkeit).
+// • ZenAppBar: integrierter, parametrisierbarer Top-Fade (ohne externe Overlays).
+// • PandaHeader: feiner Rhythmus, dezenter Schatten, perfekter Mittelpunkt-Moment.
+// • Glass/Card/Input: Randkonsistenz (immer Weiß, wie in zen_style Primitives).
 // • Buttons/Chips konsistent zu Tokens in zen_style.dart.
 // • Keine breaking changes zu v6.40; API bleibt kompatibel.
 //
@@ -19,7 +21,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import '../../shared/zen_style.dart' hide ZenBackdrop, ZenGlassCard, ZenGlassInput;
 
 // Re-export (Kompatibilität: ZenFormat weiterhin über dieses File nutzbar)
-export '../../shared/zen_style.dart' show ZenFormat;
+export '../../shared/zen_style.dart' show ZenFormat, ZenSpacing, ZenRadii, ZenColors, ZenShadows, ZenTextStyles;
 
 /// interne Animations-Dauer (vereinheitlicht)
 const Duration _animMed = Duration(milliseconds: 240);
@@ -126,12 +128,18 @@ class ZenAppBar extends StatelessWidget implements PreferredSizeWidget {
   final bool showBack;
   final double elevation;
 
+  /// Feinjustage des integrierten Top-Fades (ohne Breaking Changes)
+  final double fadeHeight;   // px
+  final double fadeOpacity;  // 0..1
+
   const ZenAppBar({
     super.key,
     this.title,
     this.actions,
     this.showBack = true,
     this.elevation = 0,
+    this.fadeHeight = 64,      // zuvor 72 → etwas kompakter für bessere Balance
+    this.fadeOpacity = .12,    // zuvor .14 → etwas leichter
   });
 
   @override
@@ -149,13 +157,13 @@ class ZenAppBar extends StatelessWidget implements PreferredSizeWidget {
           child: Align(
             alignment: Alignment.topCenter,
             child: Container(
-              height: 72,
+              height: fadeHeight,
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                   colors: [
-                    Colors.white.withValues(alpha: .14),
+                    Colors.white.withValues(alpha: fadeOpacity),
                     Colors.white.withValues(alpha: 0),
                   ],
                 ),
@@ -209,7 +217,7 @@ class PandaHeader extends StatelessWidget {
     return Column(
       children: [
         _AnimatedPandaGlow(size: pandaSize),
-        const SizedBox(height: 6),
+        const SizedBox(height: 8), // zuvor 6 → etwas mehr Luft unter dem Panda
         Text(
           title,
           textAlign: TextAlign.center,
@@ -217,18 +225,19 @@ class PandaHeader extends StatelessWidget {
             fontSize: 28,
             color: strongTitleGreen ? ZenColors.deepSage : ZenColors.inkStrong,
             fontWeight: FontWeight.w900,
-            letterSpacing: 0.1,
+            letterSpacing: 0.05, // feiner
             shadows: [
+              // dezenter, breiter — weniger „top heavy“
               Shadow(
-                blurRadius: 8,
-                color: Colors.black.withValues(alpha: .08),
+                blurRadius: 6,
+                color: Colors.black.withValues(alpha: .06),
                 offset: const Offset(0, 2),
               ),
             ],
           ),
         ),
         if (caption != null) ...[
-          const SizedBox(height: 6),
+          const SizedBox(height: 5), // zuvor 6
           Opacity(
             opacity: 0.92,
             child: Text(
@@ -328,10 +337,8 @@ class ZenGlassCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final borderColor = isDark
-        ? Colors.white.withValues(alpha: borderOpacity)
-        : Colors.black.withValues(alpha: borderOpacity);
+    // Randkonsistenz wie in den Glas-Primitives: immer Weiß mit Alpha
+    final borderColor = Colors.white.withValues(alpha: borderOpacity);
 
     return Padding(
       padding: margin,
@@ -394,7 +401,6 @@ class ZenGlassInput extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final br = borderRadius ?? const BorderRadius.all(ZenRadii.l);
-    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return ClipRRect(
       borderRadius: br,
@@ -407,13 +413,13 @@ class ZenGlassInput extends StatelessWidget {
           Container(
             decoration: BoxDecoration(
               borderRadius: br,
-              color: Colors.white.withValues(alpha: isDark ? .06 : .10),
+              // dezentes Weiß als Glasfilm (konstant, wie in Primitives)
+              color: Colors.white.withValues(alpha: .10),
               border: Border.all(
-                color: isDark
-                    ? Colors.white.withValues(alpha: .12)
-                    : Colors.black.withValues(alpha: .08),
+                color: Colors.white.withValues(alpha: .16),
                 width: 1.2,
               ),
+              boxShadow: const [ZenShadows.glow],
             ),
             padding: padding,
             child: child,
@@ -837,9 +843,9 @@ class ZenGhostButtonDanger extends StatelessWidget {
     return TextButton.icon(
       onPressed: onPressed,
       icon: const Icon(Icons.delete_outline, size: 18, color: Colors.redAccent),
-      label: Text(
-        label,
-        style: const TextStyle(fontWeight: FontWeight.w700, color: Colors.redAccent),
+      label: const Text(
+        'Löschen',
+        style: TextStyle(fontWeight: FontWeight.w700, color: Colors.redAccent),
       ),
       style: TextButton.styleFrom(
         minimumSize: const Size(0, 40),
@@ -962,7 +968,9 @@ class ZenChoiceChip extends StatelessWidget {
       onSelected: onSelected,
       side: BorderSide(color: selected ? green.withValues(alpha: .55) : Colors.transparent),
       selectedColor: green.withValues(alpha: .10),
-      backgroundColor: (isDark ? Colors.white.withValues(alpha: .06) : Colors.white.withValues(alpha: .14)),
+      backgroundColor: isDark
+          ? Colors.white.withValues(alpha: .06)
+          : Colors.white.withValues(alpha: .14),
       showCheckmark: false,
       shape: const StadiumBorder(),
       padding: const EdgeInsets.symmetric(
@@ -1385,7 +1393,7 @@ class ZenCard extends StatelessWidget {
     this.width,
     this.height,
     this.glass = false,
-       this.showWatermark = false,
+    this.showWatermark = false,
     this.elevation = 8,
     this.borderRadius = const BorderRadius.all(ZenRadii.l),
     this.color,

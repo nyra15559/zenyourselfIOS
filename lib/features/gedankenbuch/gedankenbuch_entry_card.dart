@@ -148,9 +148,8 @@ class _GedankenbuchEntryCardState extends State<GedankenbuchEntryCard>
         } else {
           final de = locales.firstWhere(
             (l) => l.localeId.toLowerCase().startsWith('de_'),
-            orElse: () => locales.isNotEmpty
-                ? locales.first
-                : stt.LocaleName('de_DE', 'German (DE)'),
+            orElse: () =>
+                locales.isNotEmpty ? locales.first : stt.LocaleName('de_DE', 'German (DE)'),
           );
           chosenLocale = de.localeId;
         }
@@ -237,17 +236,17 @@ class _GedankenbuchEntryCardState extends State<GedankenbuchEntryCard>
     final cleaned = _basicNormalize(raw);
 
     if (!mounted) return;
-    _busyClean = false;
-
-    // Nur übernehmen, wenn Text tatsächlich sauberer ist (keine Paraphrase)
-    if (cleaned != raw) {
-      final pos = cleaned.length;
-      _controller.value = TextEditingValue(
-        text: cleaned,
-        selection: TextSelection.collapsed(offset: pos),
-      );
-    }
-    setState(() {});
+    setState(() {
+      _busyClean = false;
+      // Nur übernehmen, wenn Text tatsächlich sauberer ist (keine Paraphrase)
+      if (cleaned != raw) {
+        final pos = cleaned.length;
+        _controller.value = TextEditingValue(
+          text: cleaned,
+          selection: TextSelection.collapsed(offset: pos),
+        );
+      }
+    });
   }
 
   String _basicNormalize(String input) {
@@ -362,6 +361,7 @@ class _GedankenbuchEntryCardState extends State<GedankenbuchEntryCard>
                           : Icons.menu_book_rounded,
                       size: 20,
                       color: jade,
+                      semanticLabel: _isReflection ? 'Reflexion' : 'Tagebuch',
                     ),
                     const SizedBox(width: 8),
                     Text(
@@ -430,51 +430,51 @@ class _GedankenbuchEntryCardState extends State<GedankenbuchEntryCard>
                             : (!_micEnabled
                                 ? 'Mikrofon nicht bereit'
                                 : 'Einsprechen'),
-                        child: GestureDetector(
-                          onTap: !_micEnabled
-                              ? null
-                              : (_isListening ? _stopListening : _startListening),
-                          child: AnimatedBuilder(
-                            animation: _glowCtrl,
-                            builder: (_, __) {
-                              final glow = 18 + (28 - 18) * _glowCtrl.value;
-                              final borderColor = _micEnabled
-                                  ? _green
-                                      .withValues(alpha: _isListening ? 0.00 : 0.40)
-                                  : Colors.grey.withValues(alpha: 0.35);
-                              return Opacity(
-                                opacity: _micEnabled ? 1.0 : 0.5,
-                                child: Container(
-                                  width: 40,
-                                  height: 40,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: _isListening
-                                        ? _green
-                                        : Colors.transparent,
-                                    boxShadow: _isListening
-                                        ? [
-                                            BoxShadow(
-                                              color: _green.withOpacity(
-                                                  0.22 + 0.10 * _glowCtrl.value),
-                                              blurRadius: glow,
-                                              spreadRadius: 1.0,
-                                            ),
-                                          ]
-                                        : [],
-                                    border:
-                                        Border.all(color: borderColor, width: 1.2),
+                        child: Semantics(
+                          button: true,
+                          label: _isListening ? 'Aufnahme stoppen' : 'Einsprechen',
+                          child: GestureDetector(
+                            onTap: !_micEnabled
+                                ? null
+                                : (_isListening ? _stopListening : _startListening),
+                            child: AnimatedBuilder(
+                              animation: _glowCtrl,
+                              builder: (_, __) {
+                                final glow = 18 + (28 - 18) * _glowCtrl.value;
+                                final borderColor = _micEnabled
+                                    ? _green.withValues(alpha: _isListening ? 0.00 : 0.40)
+                                    : Colors.grey.withValues(alpha: 0.35);
+                                return Opacity(
+                                  opacity: _micEnabled ? 1.0 : 0.5,
+                                  child: Container(
+                                    width: 40,
+                                    height: 40,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: _isListening ? _green : Colors.transparent,
+                                      boxShadow: _isListening
+                                          ? [
+                                              BoxShadow(
+                                                color: _green.withOpacity(
+                                                    0.22 + 0.10 * _glowCtrl.value),
+                                                blurRadius: glow,
+                                                spreadRadius: 1.0,
+                                              ),
+                                            ]
+                                          : [],
+                                      border: Border.all(color: borderColor, width: 1.2),
+                                    ),
+                                    child: Icon(
+                                      _isListening ? Icons.mic : Icons.mic_none,
+                                      size: 20,
+                                      color: _isListening
+                                          ? Colors.white
+                                          : (_micEnabled ? _green : Colors.grey),
+                                    ),
                                   ),
-                                  child: Icon(
-                                    _isListening ? Icons.mic : Icons.mic_none,
-                                    size: 20,
-                                    color: _isListening
-                                        ? Colors.white
-                                        : (_micEnabled ? _green : Colors.grey),
-                                  ),
-                                ),
-                              );
-                            },
+                                );
+                              },
+                            ),
                           ),
                         ),
                       ),
@@ -501,14 +501,19 @@ class _GedankenbuchEntryCardState extends State<GedankenbuchEntryCard>
                       ),
                       // Clear
                       if (_controller.text.isNotEmpty)
-                        IconButton(
-                          tooltip: 'Text löschen',
-                          icon: const Icon(Icons.clear_rounded, size: 20),
-                          color: zs.ZenColors.jadeMid,
-                          onPressed: () {
-                            HapticFeedback.selectionClick();
-                            _controller.clear();
-                          },
+                        Tooltip(
+                          message: 'Text löschen',
+                          child: IconButton(
+                            icon: const Icon(Icons.clear_rounded, size: 20),
+                            color: zs.ZenColors.jadeMid,
+                            onPressed: () {
+                              HapticFeedback.selectionClick();
+                              setState(() {
+                                _controller.clear();
+                                _dictationBase = '';
+                              });
+                            },
+                          ),
                         ),
                     ],
                   ),
@@ -551,8 +556,9 @@ class _GedankenbuchEntryCardState extends State<GedankenbuchEntryCard>
                               : zs.ZenColors.white.withValues(alpha: 0.14),
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
-                            color:
-                                selected ? _green.withValues(alpha: 0.55) : Colors.transparent,
+                            color: selected
+                                ? _green.withValues(alpha: 0.55)
+                                : Colors.transparent,
                             width: 1.2,
                           ),
                           boxShadow: selected
@@ -576,9 +582,7 @@ class _GedankenbuchEntryCardState extends State<GedankenbuchEntryCard>
                                   .textTheme
                                   .labelMedium
                                   ?.copyWith(
-                                    color: selected
-                                        ? _green
-                                        : zs.ZenColors.jadeMid,
+                                    color: selected ? _green : zs.ZenColors.jadeMid,
                                     fontWeight: FontWeight.w700,
                                     letterSpacing: 0.1,
                                   ),
@@ -614,14 +618,11 @@ class _GedankenbuchEntryCardState extends State<GedankenbuchEntryCard>
                           ? null
                           : () async {
                               await Clipboard.setData(
-                                ClipboardData(
-                                    text: _controller.text.trim()),
+                                ClipboardData(text: _controller.text.trim()),
                               );
                               if (!mounted) return;
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                    content:
-                                        Text('In Zwischenablage kopiert')),
+                                const SnackBar(content: Text('In Zwischenablage kopiert')),
                               );
                             },
                     ),

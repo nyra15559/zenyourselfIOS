@@ -1,14 +1,21 @@
 // lib/features/journal/journal_day_screen.dart
 //
-// JournalDayScreen — Zen v6.28 · aktualisiert auf das aktuelle Model/Provider
+// JournalDayScreen — Oxford-Zen v6.29 (SenStyleDart, ruhig & konsistent)
 // --------------------------------------------------------------------
-// • Tages-Detailansicht (Backdrop + PandaHeader).
-// • Header-Karte: Datum, Kennzahlen, 7-Tage-Sparkline.
-// • Filter-Chips (Alle / Notizen / Reflexionen / Kurzgeschichten).
+// • Tages-Detailansicht mit PandaHeader und Glas-Karte für Kennzahlen.
+// • 7-Tage-Sparkline (Provider.moodSparkline) und kompakte Stat-Badges.
+// • Filter-Chips: Alle / Notizen / Reflexionen / Kurzgeschichten.
 // • Einträge als Mini-Story-Karten (JournalEntryCard) inkl. Aktionen.
-// • Aktuelles Datenmodell: models/journal_entry.dart (jm.EntryKind, Felder …)
-// • Aktueller Provider: providers/journal_entries_provider.dart
+// • Teilen: Tageszusammenfassung in Zwischenablage.
+// • A11y: semantische Labels, ruhige Kontraste.
 //
+// Abhängigkeiten:
+//   models/journal_entry.dart      als jm
+//   providers/journal_entries_provider.dart als jp
+//   shared/zen_style.dart          (ZenColors, ZenTextStyles, …)
+//   shared/ui/zen_widgets.dart     (ZenBackdrop, ZenGlassCard, PandaHeader)
+//   widgets/journal_entry_card.dart
+//   reflection/reflection_screen.dart
 
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
@@ -88,7 +95,7 @@ class _JournalDayScreenState extends State<JournalDayScreen>
         children: [
           const Positioned.fill(
             child: zw.ZenBackdrop(
-              asset: 'assets/pro_screen.png',
+              asset: 'assets/schoen.png',
               alignment: Alignment.center,
               glow: .34,
               vignette: .12,
@@ -105,7 +112,8 @@ class _JournalDayScreenState extends State<JournalDayScreen>
             },
             child: CustomScrollView(
               physics: const BouncingScrollPhysics(
-                  parent: AlwaysScrollableScrollPhysics()),
+                parent: AlwaysScrollableScrollPhysics(),
+              ),
               slivers: [
                 // PandaHeader
                 SliverToBoxAdapter(
@@ -301,7 +309,7 @@ class _JournalDayScreenState extends State<JournalDayScreen>
           if (q.isNotEmpty) return q;
           return (e.thoughtText ?? '').trim();
         }
-        // story
+        // Story
         final s = (e.storyTeaser ?? '').trim();
         return s.isNotEmpty ? s : (e.storyTitle ?? '').trim();
       })();
@@ -463,8 +471,10 @@ class _FilterChips extends StatelessWidget {
         visualDensity: VisualDensity.compact,
         selectedColor: ZenColors.jade.withValues(alpha: .10),
         side: BorderSide(
-            color:
-                selected ? ZenColors.jade.withValues(alpha: .55) : ZenColors.outline),
+          color: selected
+              ? ZenColors.jade.withValues(alpha: .55)
+              : ZenColors.outline,
+        ),
         shape: const StadiumBorder(),
       );
     }
@@ -630,7 +640,7 @@ class _DayMetrics {
     int m = 0;
     for (final e in entries) {
       final label = e.moodLabel; // vom Model aus Tags abgeleitet
-      final score = _moodMap[label] ;
+      final score = _moodMap[label];
       if (score != null) {
         sum += score;
         m++;

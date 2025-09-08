@@ -1,15 +1,18 @@
 // lib/features/journal/widgets/journal_entry_card.dart
 //
-// JournalEntryCard — Oxford-Zen v9.2
+// JournalEntryCard — Oxford-Zen Glass v10.5 (SenStyleDart, ruhig & konsistent)
 // -----------------------------------------------------------------------------
-// • Header: Titel (farblich je Typ) + kleiner Typ-Chip + Menü (…)
-// • Meta: „Do., 07.09., 19:05 — <Typ>“
-// • Body-Preview: max. 3 Zeilen; bei Reflection: Frage kursiv, Antwort ruhig grün
-// • CTA nur bei Reflexion: „Erneut reflektieren“
-// • A11y: Semantics-Container
+// • Glasige Karte (ZenGlassCard) gemäß zen_style.dart Tokens.
+// • Header: Titel (DeepSage) + optional trailing + Menü (…).
+// • Meta: nutzt entry.metaLine() → „Do., 07.09., 19:05 — <Typ>“.
+// • Preview: Reflexion (Frage kursiv, Antwort DeepSage) | sonst Plaintext.
+// • CTA nur bei Reflexion: „Erneut reflektieren“.
+// • Typ-Icon links (Chip entfällt) – ruhiger, einheitlicher Look.
+// • Animation ohne projektexterne Tokens (Duration/Curve lokal).
 
 import 'package:flutter/material.dart';
 import '../../../models/journal_entry.dart';
+import '../../../shared/zen_style.dart' as zs;
 
 class JournalEntryCard extends StatefulWidget {
   final JournalEntry entry;
@@ -39,34 +42,26 @@ class _JournalEntryCardState extends State<JournalEntryCard> {
   bool _expanded = false;
 
   bool get _isReflection => widget.entry.kind == EntryKind.reflection;
-  bool get _isStory => widget.entry.kind == EntryKind.story;
-  bool get _isJournal => widget.entry.kind == EntryKind.journal;
 
   @override
   Widget build(BuildContext context) {
-    final e = widget.entry;
-    final badge = e.badge; // {label, icon}
+    final e = widget.entry.withAutoTitle(); // sicherer Titel
+    final badge = e.badge;                  // {label, icon}
     final title = e.computedTitle;
-
-    // Datum + Uhrzeit + Typ (bewusst ausführlich, Header „Heute“ darf bleiben)
-    final meta = _metaLine(e.createdAt, badge.label);
-
-    final cardBorder = Theme.of(context).dividerColor.withValues(alpha: 0.14);
 
     return Semantics(
       container: true,
       label: 'Journaleintrag: ${badge.label}',
-      child: Card(
-        elevation: 0,
-        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: BorderSide(color: cardBorder, width: 1),
-        ),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(16),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
           onTap: widget.onTap,
-          child: Padding(
+          child: zs.ZenGlassCard(
+            borderRadius: const BorderRadius.all(zs.ZenRadii.xl),
+            topOpacity: .30,
+            bottomOpacity: .12,
+            borderOpacity: .18,
             padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -93,31 +88,28 @@ class _JournalEntryCardState extends State<JournalEntryCard> {
                           if (widget.trailing != null) widget.trailing!,
                           _MenuButton(
                             isReflection: _isReflection,
-                            onContinue: _isReflection ? widget.onContinue : null,
+                            onContinue:
+                                _isReflection ? widget.onContinue : null,
                             onEdit: widget.onEdit,
                             onHide: widget.onHide,
                             onDelete: widget.onDelete,
                           ),
                         ],
                       ),
-                      const SizedBox(height: 6),
 
-                      // Typ-Chip
-                      _TypeBadge(label: badge.label, icon: badge.icon),
                       const SizedBox(height: 6),
 
                       // Meta
                       Text(
-                        meta,
+                        e.metaLine(),
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: (Theme.of(context).textTheme.bodySmall?.color ??
-                                      Theme.of(context).hintColor)
-                                  .withValues(alpha: 0.70),
+                              color: zs.ZenColors.inkSubtle
+                                  .withValues(alpha: .90),
                             ),
                       ),
 
-                      // Tags (dezent, max. 3, ohne interne/technische Tags)
-                      finalTags(e.tags),
+                      // Tags (dezent, max. 3; ohne interne/technische Tags)
+                      _finalTags(e.tags),
 
                       const SizedBox(height: 8),
 
@@ -128,10 +120,11 @@ class _JournalEntryCardState extends State<JournalEntryCard> {
                         answer: e.userAnswer ?? '',
                         plainText: e.previewText(),
                         expanded: _expanded,
-                        onToggle: () => setState(() => _expanded = !_expanded),
+                        onToggle: () =>
+                            setState(() => _expanded = !_expanded),
                       ),
 
-                      // Sichtbarer CTA nur bei Reflexionen
+                      // CTA nur bei Reflexionen
                       if (_isReflection && widget.onContinue != null) ...[
                         const SizedBox(height: 8),
                         Align(
@@ -140,6 +133,12 @@ class _JournalEntryCardState extends State<JournalEntryCard> {
                             onPressed: widget.onContinue,
                             icon: const Icon(Icons.playlist_add, size: 18),
                             label: const Text('Erneut reflektieren'),
+                            style: TextButton.styleFrom(
+                              foregroundColor: zs.ZenColors.jade,
+                              textStyle: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
                           ),
                         ),
                       ],
@@ -156,7 +155,7 @@ class _JournalEntryCardState extends State<JournalEntryCard> {
 
   // ─────────────────────────── helpers ───────────────────────────
 
-  Widget finalTags(List<String> tags) {
+  Widget _finalTags(List<String> tags) {
     final chips = _tagChips(tags);
     if (chips.isEmpty) return const SizedBox.shrink();
     return Padding(
@@ -168,28 +167,36 @@ class _JournalEntryCardState extends State<JournalEntryCard> {
   TextStyle _titleStyle(BuildContext context) {
     final base = Theme.of(context).textTheme.titleMedium ??
         const TextStyle(fontSize: 18, fontWeight: FontWeight.w600);
-
-    if (_isStory) {
-      const moka = Color(0xFFA0785A); // ruhiges Bronze/Mokka
-      return base.copyWith(color: moka, fontWeight: FontWeight.w700);
-    }
-    if (_isReflection) {
-      final green = Theme.of(context).colorScheme.primary; // Deep-Sage
-      return base.copyWith(color: green, fontWeight: FontWeight.w700);
-    }
-    return base.copyWith(fontWeight: FontWeight.w700); // Journal neutral
+    return base.copyWith(
+      color: zs.ZenColors.deepSage,
+      fontWeight: FontWeight.w700,
+    );
   }
 
-  /// Filtert Debug-/Meta-/System-Tags raus (z. B. „reflection“, „input:text“,
-  /// „type:*“, „ai:*“, „mood:*“, „emotion:*“) und zeigt max. 3 Stück.
+  /// Filtert Debug-/Meta-/System-Tags raus und zeigt max. 3 Stück.
   List<Widget> _tagChips(List<String> tags) {
     if (tags.isEmpty) return const [];
     const bannedKeys = <String>{
-      'mood', 'moodscore', 'emotion',
-      'input', 'answer', 'user', 'ai', 'ai_question', 'question',
-      'type', 'kind', 'source', 'sourceref'
+      'mood',
+      'moodscore',
+      'emotion',
+      'input',
+      'answer',
+      'user',
+      'ai',
+      'ai_question',
+      'question',
+      'type',
+      'kind',
+      'source',
+      'sourceref',
     };
-    const bannedFlat = <String>{'reflection', 'reflexion', 'journal', 'story'};
+    const bannedFlat = <String>{
+      'reflection',
+      'reflexion',
+      'journal',
+      'story',
+    };
 
     final filtered = tags.where((t) {
       final s = t.trim();
@@ -205,39 +212,6 @@ class _JournalEntryCardState extends State<JournalEntryCard> {
 
     return filtered.map((t) => _TagChip(text: t)).toList(growable: false);
   }
-
-  /// Wochentag + Datum + Uhrzeit + Typ
-  String _metaLine(DateTime ts, String typeLabel) {
-    final wd = _weekdayShort(ts.weekday);
-    final dd = _two(ts.day);
-    final mm = _two(ts.month);
-    final hh = _two(ts.hour);
-    final mi = _two(ts.minute);
-    return '$wd, $dd.$mm., $hh:$mi — $typeLabel';
-  }
-
-  String _weekdayShort(int w) {
-    switch (w) {
-      case DateTime.monday:
-        return 'Mo.';
-      case DateTime.tuesday:
-        return 'Di.';
-      case DateTime.wednesday:
-        return 'Mi.';
-      case DateTime.thursday:
-        return 'Do.';
-      case DateTime.friday:
-        return 'Fr.';
-      case DateTime.saturday:
-        return 'Sa.';
-      case DateTime.sunday:
-        return 'So.';
-      default:
-        return '';
-    }
-  }
-
-  String _two(int n) => n < 10 ? '0$n' : '$n';
 }
 
 // ─────────────────────────── Subwidgets ───────────────────────────
@@ -248,7 +222,7 @@ class _TypeIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = Theme.of(context).colorScheme.primary;
+    final c = zs.ZenColors.deepSage;
     return Container(
       width: 36,
       height: 36,
@@ -280,9 +254,11 @@ class _ExpandablePreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final base = Theme.of(context).textTheme.bodyMedium ?? const TextStyle(fontSize: 14.5);
-    final green = Theme.of(context).colorScheme.primary.withValues(alpha: 0.95);
-    final textColor = Theme.of(context).textTheme.bodyMedium?.color ?? Colors.black87;
+    final base =
+        Theme.of(context).textTheme.bodyMedium ?? const TextStyle(fontSize: 14.5);
+    final green = zs.ZenColors.deepSage.withValues(alpha: .95);
+    final textColor =
+        Theme.of(context).textTheme.bodyMedium?.color ?? zs.ZenColors.ink;
 
     InlineSpan span;
 
@@ -290,7 +266,10 @@ class _ExpandablePreview extends StatelessWidget {
       final q = question.trim();
       final a = answer.trim();
       if (q.isEmpty && a.isEmpty) {
-        span = TextSpan(text: 'Reflexion', style: base.copyWith(color: Colors.black54));
+        span = TextSpan(
+          text: 'Reflexion',
+          style: base.copyWith(color: zs.ZenColors.inkSubtle),
+        );
       } else {
         span = TextSpan(children: [
           if (q.isNotEmpty)
@@ -337,6 +316,9 @@ class _ExpandableRichText extends StatelessWidget {
     this.collapsedMaxLines = 3,
   });
 
+  static const _animDur = Duration(milliseconds: 220);
+  static const _animCurve = Curves.easeInOut;
+
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(builder: (context, constraints) {
@@ -351,8 +333,8 @@ class _ExpandableRichText extends StatelessWidget {
       final overflow = tp.didExceedMaxLines;
 
       return AnimatedSize(
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeOutCubic,
+        duration: _animDur,
+        curve: _animCurve,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -372,7 +354,7 @@ class _ExpandableRichText extends StatelessWidget {
                     child: Text(
                       expanded ? 'Weniger' : 'Mehr anzeigen',
                       style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                            color: Theme.of(context).colorScheme.primary,
+                            color: zs.ZenColors.jade,
                             fontWeight: FontWeight.w600,
                           ),
                     ),
@@ -383,40 +365,6 @@ class _ExpandableRichText extends StatelessWidget {
         ),
       );
     });
-  }
-}
-
-class _TypeBadge extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  const _TypeBadge({required this.label, required this.icon});
-
-  @override
-  Widget build(BuildContext context) {
-    final color = Theme.of(context).colorScheme.primary;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withValues(alpha: 0.18), width: 1),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 14, color: color),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: color,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 0.1,
-                ),
-          ),
-        ],
-      ),
-    );
   }
 }
 
@@ -431,13 +379,13 @@ class _TagChip extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: bg,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: const BorderRadius.all(zs.ZenRadii.s),
         border: Border.all(color: Colors.black.withValues(alpha: .08), width: 1),
       ),
       child: Text(
         text,
         style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              fontWeight: FontWeight.w600,
+              fontWeight: FontWeight.w700,
               letterSpacing: 0.1,
             ),
       ),
@@ -462,7 +410,8 @@ class _MenuButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hasAny = onContinue != null || onEdit != null || onHide != null || onDelete != null;
+    final hasAny =
+        onContinue != null || onEdit != null || onHide != null || onDelete != null;
     if (!hasAny) return const SizedBox.shrink();
 
     return PopupMenuButton<_Action>(
@@ -470,18 +419,30 @@ class _MenuButton extends StatelessWidget {
       itemBuilder: (ctx) {
         final items = <PopupMenuEntry<_Action>>[];
         if (isReflection && onContinue != null) {
-          items.add(const PopupMenuItem(value: _Action.continueFlow, child: Text('Erneut reflektieren')));
+          items.add(const PopupMenuItem(
+            value: _Action.continueFlow,
+            child: Text('Erneut reflektieren'),
+          ));
           items.add(const PopupMenuDivider(height: 6));
         }
         if (onEdit != null) {
-          items.add(const PopupMenuItem(value: _Action.edit, child: Text('Bearbeiten')));
+          items.add(const PopupMenuItem(
+            value: _Action.edit,
+            child: Text('Bearbeiten'),
+          ));
         }
         if (onHide != null) {
-          items.add(const PopupMenuItem(value: _Action.hide, child: Text('Ausblenden')));
+          items.add(const PopupMenuItem(
+            value: _Action.hide,
+            child: Text('Ausblenden'),
+          ));
         }
         if (onDelete != null) {
           items.add(const PopupMenuDivider(height: 6));
-          items.add(const PopupMenuItem(value: _Action.delete, child: Text('Löschen')));
+          items.add(const PopupMenuItem(
+            value: _Action.delete,
+            child: Text('Löschen'),
+          ));
         }
         return items;
       },
@@ -506,7 +467,7 @@ class _MenuButton extends StatelessWidget {
         child: Icon(
           Icons.more_horiz,
           size: 22,
-          color: Theme.of(context).iconTheme.color?.withValues(alpha: 0.80),
+          color: Theme.of(context).iconTheme.color?.withValues(alpha: .80),
         ),
       ),
     );
