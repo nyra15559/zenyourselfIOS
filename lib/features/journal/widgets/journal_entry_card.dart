@@ -1,23 +1,25 @@
 // lib/features/journal/widgets/journal_entry_card.dart
 //
-// JournalEntryCard — Oxford-Zen Glass v10.5 (SenStyleDart, ruhig & konsistent)
+// JournalEntryCard — Oxford-Zen Glass v10.8 (ruhig & konsistent)
 // -----------------------------------------------------------------------------
-// • Glasige Karte (ZenGlassCard) gemäß zen_style.dart Tokens.
+// • Glasige Karte (ZenGlassCard) nach zen_style.dart.
 // • Header: Titel (DeepSage) + optional trailing + Menü (…).
-// • Meta: nutzt entry.metaLine() → „Do., 07.09., 19:05 — <Typ>“.
+// • Meta: „Do., 07.09., 19:05 — <Typ>“ (ohne Model-Helper).
 // • Preview: Reflexion (Frage kursiv, Antwort DeepSage) | sonst Plaintext.
-// • CTA nur bei Reflexion: „Erneut reflektieren“.
-// • Typ-Icon links (Chip entfällt) – ruhiger, einheitlicher Look.
-// • Animation ohne projektexterne Tokens (Duration/Curve lokal).
+// • **Keine** Inline-CTA — Aktionen nur im …-Menü.
+// • KEINE Abhängigkeiten von Model-Hilfsmethoden (withAutoTitle, badge, ...)
+// • Color.withOpacity(...) statt withValues(...).
 
 import 'package:flutter/material.dart';
 import '../../../models/journal_entry.dart';
 import '../../../shared/zen_style.dart' as zs;
+import '../../../shared/ui/zen_widgets.dart' show ZenGlassCard;
+import '../../../utils/formatting.dart' show formatDateTimeShort;
 
 class JournalEntryCard extends StatefulWidget {
   final JournalEntry entry;
   final VoidCallback? onTap;
-  final VoidCallback? onContinue; // nur Reflexion
+  final VoidCallback? onContinue; // nur Reflexion (im Menü)
   final VoidCallback? onEdit;
   final VoidCallback? onHide;
   final VoidCallback? onDelete;
@@ -45,9 +47,10 @@ class _JournalEntryCardState extends State<JournalEntryCard> {
 
   @override
   Widget build(BuildContext context) {
-    final e = widget.entry.withAutoTitle(); // sicherer Titel
-    final badge = e.badge;                  // {label, icon}
-    final title = e.computedTitle;
+    final e = widget.entry;
+    final badge = _badgeFor(e.kind);           // {label, icon}
+    final title = _computedTitle(e);           // sicherer Titel (lokal)
+    final meta = '${formatDateTimeShort(e.createdAt)} — ${badge.label}';
 
     return Semantics(
       container: true,
@@ -57,7 +60,7 @@ class _JournalEntryCardState extends State<JournalEntryCard> {
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: widget.onTap,
-          child: zs.ZenGlassCard(
+          child: ZenGlassCard(
             borderRadius: const BorderRadius.all(zs.ZenRadii.xl),
             topOpacity: .30,
             bottomOpacity: .12,
@@ -88,8 +91,7 @@ class _JournalEntryCardState extends State<JournalEntryCard> {
                           if (widget.trailing != null) widget.trailing!,
                           _MenuButton(
                             isReflection: _isReflection,
-                            onContinue:
-                                _isReflection ? widget.onContinue : null,
+                            onContinue: _isReflection ? widget.onContinue : null,
                             onEdit: widget.onEdit,
                             onHide: widget.onHide,
                             onDelete: widget.onDelete,
@@ -101,10 +103,9 @@ class _JournalEntryCardState extends State<JournalEntryCard> {
 
                       // Meta
                       Text(
-                        e.metaLine(),
+                        meta,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: zs.ZenColors.inkSubtle
-                                  .withValues(alpha: .90),
+                              color: zs.ZenColors.inkSubtle.withOpacity(.90),
                             ),
                       ),
 
@@ -118,30 +119,12 @@ class _JournalEntryCardState extends State<JournalEntryCard> {
                         isReflection: _isReflection,
                         question: e.aiQuestion ?? '',
                         answer: e.userAnswer ?? '',
-                        plainText: e.previewText(),
+                        plainText: _plainPreview(e),
                         expanded: _expanded,
-                        onToggle: () =>
-                            setState(() => _expanded = !_expanded),
+                        onToggle: () => setState(() => _expanded = !_expanded),
                       ),
 
-                      // CTA nur bei Reflexionen
-                      if (_isReflection && widget.onContinue != null) ...[
-                        const SizedBox(height: 8),
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: TextButton.icon(
-                            onPressed: widget.onContinue,
-                            icon: const Icon(Icons.playlist_add, size: 18),
-                            label: const Text('Erneut reflektieren'),
-                            style: TextButton.styleFrom(
-                              foregroundColor: zs.ZenColors.jade,
-                              textStyle: const TextStyle(
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
+                      // (keine Inline-CTA — Aktionen nur im Popup-Menü)
                     ],
                   ),
                 ),
@@ -154,6 +137,36 @@ class _JournalEntryCardState extends State<JournalEntryCard> {
   }
 
   // ─────────────────────────── helpers ───────────────────────────
+
+  // Robuste Titelfindung (ohne Model-Getter)
+  String _computedTitle(JournalEntry e) {
+    String pickFirstNonEmpty(Iterable<String?> opts) {
+      for (final s in opts) {
+        final v = (s ?? '').trim();
+        if (v.isNotEmpty) return v;
+      }
+      return '';
+    }
+
+    final base = pickFirstNonEmpty([e.title, e.userAnswer, e.thoughtText, e.aiQuestion]);
+    if (base.isEmpty) {
+      final d = e.createdAt.toLocal();
+      final dd = d.day.toString().padLeft(2, '0');
+      final mm = d.month.toString().padLeft(2, '0');
+      return 'Eintrag $dd.$mm.${d.year}';
+    }
+
+    final words = base.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+    return words.length <= 10 ? base : '${words.take(10).join(' ')}…';
+  }
+
+  // Plaintext-Vorschau für Nicht-Reflexionen
+  String _plainPreview(JournalEntry e) {
+    final base = (e.thoughtText ?? e.userAnswer ?? e.title ?? e.aiQuestion ?? '').trim();
+    if (base.isEmpty) return '—';
+    final words = base.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+    return words.length <= 40 ? base : '${words.take(40).join(' ')}…';
+  }
 
   Widget _finalTags(List<String> tags) {
     final chips = _tagChips(tags);
@@ -212,9 +225,26 @@ class _JournalEntryCardState extends State<JournalEntryCard> {
 
     return filtered.map((t) => _TagChip(text: t)).toList(growable: false);
   }
+
+  _Badge _badgeFor(EntryKind kind) {
+    switch (kind) {
+      case EntryKind.reflection:
+        return const _Badge('Reflexion', Icons.psychology_alt_rounded);
+      case EntryKind.journal:
+        return const _Badge('Tagebuch', Icons.menu_book_rounded);
+      case EntryKind.story:
+        return const _Badge('Kurzgeschichte', Icons.auto_stories_rounded);
+    }
+  }
 }
 
 // ─────────────────────────── Subwidgets ───────────────────────────
+
+class _Badge {
+  final String label;
+  final IconData icon;
+  const _Badge(this.label, this.icon);
+}
 
 class _TypeIcon extends StatelessWidget {
   final IconData icon;
@@ -222,15 +252,15 @@ class _TypeIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = zs.ZenColors.deepSage;
+    const c = zs.ZenColors.deepSage;
     return Container(
       width: 36,
       height: 36,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(10),
-        color: c.withValues(alpha: 0.07),
+        color: c.withOpacity(0.07),
       ),
-      child: Icon(icon, size: 20, color: c.withValues(alpha: 0.90)),
+      child: Icon(icon, size: 20, color: c.withOpacity(0.90)),
     );
   }
 }
@@ -256,7 +286,7 @@ class _ExpandablePreview extends StatelessWidget {
   Widget build(BuildContext context) {
     final base =
         Theme.of(context).textTheme.bodyMedium ?? const TextStyle(fontSize: 14.5);
-    final green = zs.ZenColors.deepSage.withValues(alpha: .95);
+    final green = zs.ZenColors.deepSage.withOpacity(.95);
     final textColor =
         Theme.of(context).textTheme.bodyMedium?.color ?? zs.ZenColors.ink;
 
@@ -277,7 +307,7 @@ class _ExpandablePreview extends StatelessWidget {
               text: '„$q“ ',
               style: base.copyWith(
                 fontStyle: FontStyle.italic,
-                color: textColor.withValues(alpha: 0.75),
+                color: textColor.withOpacity(0.75),
               ),
             ),
           if (a.isNotEmpty)
@@ -374,13 +404,13 @@ class _TagChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bg = Colors.black.withValues(alpha: .04);
+    final bg = Colors.black.withOpacity(.04);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: bg,
         borderRadius: const BorderRadius.all(zs.ZenRadii.s),
-        border: Border.all(color: Colors.black.withValues(alpha: .08), width: 1),
+        border: Border.all(color: Colors.black.withOpacity(.08), width: 1),
       ),
       child: Text(
         text,
@@ -467,7 +497,7 @@ class _MenuButton extends StatelessWidget {
         child: Icon(
           Icons.more_horiz,
           size: 22,
-          color: Theme.of(context).iconTheme.color?.withValues(alpha: .80),
+          color: Theme.of(context).iconTheme.color?.withOpacity(.80),
         ),
       ),
     );

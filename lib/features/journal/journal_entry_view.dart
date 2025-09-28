@@ -1,30 +1,31 @@
 // lib/features/journal/journal_entry_view.dart
 //
-// v9.4 — JournalEntryView (Oxford-Zen, Phase 2.6 — typografisch beruhigt)
-// ---------------------------------------------------------------------------
-// • Vollbild-Viewer mit PandaHeader, ruhiger Glas-Karte und klarer Typo.
-// • Typen: Journal (→ „Dein Gedanke“), Reflexion, Kurzgeschichte.
-// • Journal: 1. nicht-leere Zeile als DeepSage-Überschrift, Rest in Ink.
-// • Reflexion: Frage kursiv (Ink), Labels in InkStrong, Inhalte in Ink (ruhig).
-// • Story: Titel + Text ruhig gesetzt (Titel DeepSage, Text Ink).
-// • Zeitformat: „Heute/Gestern, HH:MM“, sonst „DD.MM.YYYY, HH:MM“.
-// • Mood: kleiner Chip rechts in der Meta-Zeile (falls vorhanden).
-// • Actions: Kopieren (ZenToast), optional Bearbeiten.
-// • A11y: Semantics-Labels, Tooltips, fokussierbare Buttons.
-// • Neu (dezent): Journal-Text wird sanft normalisiert (3+ Leerzeilen → 2).
+// v10.1 — JournalEntryView (Oxford-Zen • Full-bleed, Parity, Senior polish)
+// -----------------------------------------------------------------------------
+// • Vollbild-Detailansicht für: Tagebuch („Dein Gedanke“), Reflexion, Kurzgeschichte.
+// • Kein schwarzer Balken: Stack(fit: expand) + Base-ColoredBox + Positioned.fill Backdrop.
+// • „Milky“ Hintergrund via enableHaze:true (+ wash/glow/vignette).
+// • Einheitliche, ruhige Typografie (Story-ähnlich):
+//     – Überschrift grün • Lauftext schwarz • Frage kursiv (ruhig).
+//     – Reflexion: Gedanke = Überschrift, Frage = kursiv, Antwort = Fließtext.
+// • Typ-Badge jetzt für alle drei Arten (Tagebuch, Reflexion, Kurzgeschichte).
+// • Panda-Mood (PandaMoodChip) statt generischer Smiley, wenn Mood vorhanden.
+// • Keine Aktionen/Copy im Detail — bleiben im Listen-Kontext.
+// • Desktop: ClampingScrollPhysics, extra Bottom-Padding per viewPadding.
 //
-// Abhängigkeiten: ZenBackdrop, ZenGlassCard, ZenAppBar, PandaHeader, ZenToast, PandaMoodChip
+// Implementationshinweise:
+// - KEINE const-Verwendung bei ZenAppBar / ZenBackdrop / Positioned.fill.
+// - Color.withOpacity(...) (kein deprecated withValues(...)).
+// - Enum lokal, um Kollisionen mit Model-Enums zu vermeiden.
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../shared/zen_style.dart' as zs
     hide ZenBackdrop, ZenGlassCard, ZenAppBar;
 import '../../shared/ui/zen_widgets.dart' as zw
-    show ZenBackdrop, ZenGlassCard, ZenAppBar, PandaHeader, ZenToast, PandaMoodChip;
+    show ZenBackdrop, ZenGlassCard, ZenAppBar, PandaHeader, PandaMoodChip;
 
-/// Viewer-spezifische Typen (bewusst lokal, damit es keine Enum-Kollision
-/// mit dem Model-Enum gibt; in Aufrufern per Alias importieren: `as jv`).
+/// Viewer-spezifische Typen (lokal gehalten).
 enum EntryKind { journal, reflection, story }
 
 class JournalEntryView extends StatelessWidget {
@@ -42,12 +43,12 @@ class JournalEntryView extends StatelessWidget {
   // STORY
   final String? storyTitle;
   final String? storyTeaser; // kurzer Auszug / erster Satz
-  final String? storyBody;   // falls verfügbar, sonst Teaser nutzen
+  final String? storyBody;   // Volltext, falls vorhanden
 
   // Optionales Meta
   final String? moodLabel;   // z. B. „Neutral“, „Erleichtert“, …
 
-  // Optional: Sekundär-Aktion (z. B. Editor)
+  // Optional: Sekundär-Aktion (z. B. Editor) — im Detail bewusst nicht angezeigt
   final VoidCallback? onEdit;
 
   const JournalEntryView({
@@ -67,11 +68,10 @@ class JournalEntryView extends StatelessWidget {
 
   // ─────────────────────────────── Styles ───────────────────────────────
 
-  /// Ruhiger Nutzerschriftstil (Antwort/Journalkörper): NotoSans in Ink.
   TextStyle _userStyle(BuildContext c) =>
       (Theme.of(c).textTheme.bodyMedium ?? const TextStyle(fontSize: 14.5))
           .copyWith(
-            color: zs.ZenColors.inkStrong.withValues(alpha: .96),
+            color: zs.ZenColors.inkStrong.withOpacity(.96),
             fontWeight: FontWeight.w600,
             height: 1.30,
           );
@@ -83,7 +83,7 @@ class JournalEntryView extends StatelessWidget {
   TextStyle _questionStyle(BuildContext c) =>
       (Theme.of(c).textTheme.bodyMedium ?? const TextStyle(fontSize: 14))
           .copyWith(
-            color: zs.ZenColors.inkStrong.withValues(alpha: .96),
+            color: zs.ZenColors.inkStrong.withOpacity(.96),
             fontStyle: FontStyle.italic,
             fontWeight: FontWeight.w500,
             height: 1.28,
@@ -91,9 +91,8 @@ class JournalEntryView extends StatelessWidget {
 
   TextStyle _captionStyle(BuildContext c) =>
       (Theme.of(c).textTheme.labelSmall ?? const TextStyle(fontSize: 12))
-          .copyWith(color: zs.ZenColors.inkSubtle.withValues(alpha: .90));
+          .copyWith(color: zs.ZenColors.inkSubtle.withOpacity(.90));
 
-  // Überschrift (Primary DeepSage)
   TextStyle _titleStyle(BuildContext c) =>
       (Theme.of(c).textTheme.titleMedium ?? const TextStyle(fontSize: 18))
           .copyWith(
@@ -102,11 +101,10 @@ class JournalEntryView extends StatelessWidget {
             height: 1.22,
           );
 
-  // Fließtext in Ink – ruhig, gut lesbar
   TextStyle _bodyInkStyle(BuildContext c) =>
       (Theme.of(c).textTheme.bodyMedium ?? const TextStyle(fontSize: 14.5))
           .copyWith(
-            color: zs.ZenColors.inkStrong.withValues(alpha: .96),
+            color: zs.ZenColors.inkStrong.withOpacity(.96),
             height: 1.30,
           );
 
@@ -115,6 +113,7 @@ class JournalEntryView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isMobile = MediaQuery.of(context).size.width < 470;
+    final bottomSafe = MediaQuery.of(context).viewPadding.bottom;
 
     final headerTitle = () {
       switch (kind) {
@@ -140,10 +139,19 @@ class JournalEntryView extends StatelessWidget {
 
     return Scaffold(
       extendBodyBehindAppBar: true,
+      extendBody: true,
       backgroundColor: Colors.transparent,
       appBar: const zw.ZenAppBar(title: null, showBack: true),
       body: Stack(
+        fit: StackFit.expand, // volle Höhe (kein Gap auf Desktop)
         children: [
+          // Base-Fallback-Farbe (Ränder/HiDPI)
+          Positioned.fill(
+            child: ColoredBox(
+              color: Theme.of(context).scaffoldBackgroundColor,
+            ),
+          ),
+          // „Milky“ Backdrop
           const Positioned.fill(
             child: zw.ZenBackdrop(
               asset: 'assets/schoen.png',
@@ -151,14 +159,17 @@ class JournalEntryView extends StatelessWidget {
               vignette: .12,
               saturation: .95,
               wash: .06,
-              enableHaze: false,
+              enableHaze: true,
             ),
           ),
           SafeArea(
             child: SingleChildScrollView(
-              physics: const BouncingScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(
-                zs.ZenSpacing.m, 20, zs.ZenSpacing.m, zs.ZenSpacing.l,
+              physics: const ClampingScrollPhysics(),
+              padding: EdgeInsets.fromLTRB(
+                zs.ZenSpacing.m,
+                20,
+                zs.ZenSpacing.m,
+                zs.ZenSpacing.l + bottomSafe, // extra Raum unten
               ),
               child: Align(
                 alignment: Alignment.topCenter,
@@ -175,8 +186,6 @@ class JournalEntryView extends StatelessWidget {
                       ),
                       const SizedBox(height: 12),
                       _card(context),
-                      const SizedBox(height: 14),
-                      _actions(context),
                     ],
                   ),
                 ),
@@ -191,17 +200,28 @@ class JournalEntryView extends StatelessWidget {
   // ─────────────────────────────── Card ────────────────────────────────
 
   Widget _card(BuildContext context) {
-    // dynamischer Badge für Reflexion/Story
-    final (IconData? typeIcon, String? typeLabel) = switch (kind) {
-      EntryKind.reflection => (Icons.psychology_alt_outlined, 'Reflexion'),
-      EntryKind.story      => (Icons.auto_stories_outlined, 'Kurzgeschichte'),
-      EntryKind.journal    => (null, null),
-    };
+    // non-nullables: wir befüllen explizit für alle drei Fälle
+    late final IconData typeIcon;
+    late final String typeLabel;
+    switch (kind) {
+      case EntryKind.reflection:
+        typeIcon = Icons.psychology_alt_outlined;
+        typeLabel = 'Reflexion';
+        break;
+      case EntryKind.story:
+        typeIcon = Icons.auto_stories_outlined;
+        typeLabel = 'Kurzgeschichte';
+        break;
+      case EntryKind.journal:
+        typeIcon = Icons.menu_book_outlined;
+        typeLabel = 'Tagebuch';
+        break;
+    }
 
     return Semantics(
       container: true,
       label: switch (kind) {
-        EntryKind.journal => 'Eintrag',
+        EntryKind.journal => 'Tagebuch',
         EntryKind.reflection => 'Reflexion',
         EntryKind.story => 'Kurzgeschichte',
       },
@@ -214,48 +234,35 @@ class JournalEntryView extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // kleiner Handle
-            Align(
-              alignment: Alignment.center,
+            // Typ-Badge (für alle drei Arten)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
               child: Container(
-                height: 4,
-                width: 48,
-                margin: const EdgeInsets.only(bottom: 12, top: 2),
+                padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 8),
                 decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: .10),
-                  borderRadius: BorderRadius.circular(2),
+                  color: zs.ZenColors.mist.withOpacity(0.80),
+                  borderRadius: const BorderRadius.all(zs.ZenRadii.s),
+                  border: Border.all(
+                    color: zs.ZenColors.jadeMid.withOpacity(0.18),
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(typeIcon, color: zs.ZenColors.jadeMid, size: 18),
+                    const SizedBox(width: 6),
+                    Text(
+                      typeLabel,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14.5,
+                        color: zs.ZenColors.jade,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
-
-            // Typ-Badge (nur für Reflexion/Story – Journal bleibt bewusst ruhig)
-            if (typeIcon != null && typeLabel != null)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 8),
-                  decoration: BoxDecoration(
-                    color: zs.ZenColors.mist.withValues(alpha: 0.80),
-                    borderRadius: const BorderRadius.all(zs.ZenRadii.s),
-                    border: Border.all(color: zs.ZenColors.jadeMid.withValues(alpha: 0.18)),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(typeIcon, color: zs.ZenColors.jadeMid, size: 18),
-                      const SizedBox(width: 6),
-                      Text(
-                        typeLabel,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 14.5,
-                          color: zs.ZenColors.jade,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
 
             // Inhalt
             if (kind == EntryKind.journal) _journalBlock(context)
@@ -270,15 +277,11 @@ class JournalEntryView extends StatelessWidget {
     );
   }
 
-  // Journal: 1. nicht-leere Zeile als Überschrift (DeepSage), Rest in Ink.
+  // Journal: Erste nicht-leere Zeile als grüne Überschrift, Rest als ruhiger Fließtext.
   Widget _journalBlock(BuildContext context) {
     final raw = (journalText ?? '').trim();
     if (raw.isEmpty) {
-      return const SelectableText(
-        '—',
-        // Screenreader-freundliche Beschreibung
-        semanticsLabel: 'Leer',
-      );
+      return const SelectableText('—', semanticsLabel: 'Leer');
     }
 
     final lines = raw.split(RegExp(r'\r?\n')).map((s) => s.trim()).toList();
@@ -302,39 +305,37 @@ class JournalEntryView extends StatelessWidget {
     );
   }
 
+  // Reflexion: RUHIG wie Story — Gedanke als Überschrift, Frage kursiv, Antwort Fließtext.
   Widget _reflectionBlock(BuildContext context) {
-    final hasThought = (userThought ?? '').trim().isNotEmpty;
-    final hasQuestion = (aiQuestion ?? '').trim().isNotEmpty;
+    final thought = (userThought ?? '').trim();
+    final question = (aiQuestion ?? '').trim();
+    final answer = (userAnswer ?? '').trim();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (hasThought) ...[
-          Text('Dein Gedanke', style: _labelStyle(context)),
-          const SizedBox(height: 4),
-          SelectableText('„${userThought!.trim()}“', style: _userStyle(context)),
-          const SizedBox(height: 12),
-        ],
-        if (hasQuestion) ...[
-          SelectableText(aiQuestion!.trim(), style: _questionStyle(context)),
+        if (thought.isNotEmpty) ...[
+          Text(thought, style: _titleStyle(context)),
           const SizedBox(height: 10),
         ],
-        Text('Deine Antwort', style: _labelStyle(context)),
-        const SizedBox(height: 4),
-        SelectableText(
-          (userAnswer ?? '').trim().isEmpty ? '—' : userAnswer!.trim(),
-          style: _userStyle(context),
-          // A11y: falls nur „—“, sprechbar machen
-          semanticsLabel: (userAnswer ?? '').trim().isEmpty ? 'Leer' : null,
-        ),
+        if (question.isNotEmpty) ...[
+          SelectableText(question, style: _questionStyle(context)),
+          const SizedBox(height: 10),
+        ],
+        if (answer.isNotEmpty)
+          SelectableText(answer, style: _bodyInkStyle(context))
+        else
+          const SelectableText('—', semanticsLabel: 'Leer'),
       ],
     );
   }
 
+  // Story: Volltext (oder Teaser) ruhig gesetzt.
   Widget _storyBlock(BuildContext context) {
     final title = (storyTitle ?? '').trim();
     final body = (storyBody ?? '').trim();
     final teaser = (storyTeaser ?? '').trim();
+    final text = (body.isNotEmpty ? body : teaser);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -344,18 +345,17 @@ class JournalEntryView extends StatelessWidget {
           const SizedBox(height: 10),
         ],
         SelectableText(
-          (body.isNotEmpty ? body : teaser).isEmpty
-              ? '—'
-              : (body.isNotEmpty ? body : teaser),
+          text.isEmpty ? '—' : text,
           style: _bodyInkStyle(context),
           textAlign: TextAlign.start,
-          semanticsLabel: (body.isNotEmpty ? body : teaser).isEmpty ? 'Leer' : null,
+          maxLines: null, // kompletter Story-Text
+          semanticsLabel: text.isEmpty ? 'Leer' : null,
         ),
       ],
     );
   }
 
-  // ───────────────────────────── Meta & Actions ───────────────────────────
+  // ───────────────────────────── Meta ───────────────────────────
 
   Widget _metaRow(BuildContext context) {
     final ts = _formatDate(createdAt);
@@ -369,79 +369,6 @@ class JournalEntryView extends StatelessWidget {
           zw.PandaMoodChip(mood: mood, small: true),
         ],
         const Spacer(),
-      ],
-    );
-  }
-
-  Widget _actions(BuildContext context) {
-    final canEdit = onEdit != null;
-
-    String copyLabel() {
-      switch (kind) {
-        case EntryKind.journal:
-          return 'Eintrag kopieren';
-        case EntryKind.reflection:
-          return 'Reflexion kopieren';
-        case EntryKind.story:
-          return 'Kurzgeschichte kopieren';
-      }
-    }
-
-    return Wrap(
-      alignment: WrapAlignment.center,
-      spacing: 10,
-      runSpacing: 8,
-      children: [
-        Tooltip(
-          message: copyLabel(),
-          waitDuration: const Duration(milliseconds: 300),
-          child: OutlinedButton.icon(
-            icon: const Icon(Icons.copy_all_outlined),
-            label: Text(copyLabel()),
-            onPressed: () async {
-              final textToCopy = () {
-                switch (kind) {
-                  case EntryKind.journal:
-                    return (journalText ?? '').trim();
-                  case EntryKind.reflection:
-                    return <String>[
-                      if ((userThought ?? '').trim().isNotEmpty)
-                        'Gedanke: ${userThought!.trim()}',
-                      if ((aiQuestion ?? '').trim().isNotEmpty)
-                        'Frage: ${aiQuestion!.trim()}',
-                      if ((userAnswer ?? '').trim().isNotEmpty)
-                        'Antwort: ${userAnswer!.trim()}',
-                    ].where((s) => s.isNotEmpty).join('\n');
-                  case EntryKind.story:
-                    final t = (storyTitle ?? '').trim();
-                    final b = (storyBody ?? '').trim();
-                    final z = (storyTeaser ?? '').trim();
-                    return <String>[
-                      if (t.isNotEmpty) 'Titel: $t',
-                      (b.isNotEmpty ? b : z),
-                    ].where((s) => s.trim().isNotEmpty).join('\n\n');
-                }
-              }();
-
-              await Clipboard.setData(ClipboardData(text: textToCopy));
-              zw.ZenToast.show(context, 'In Zwischenablage kopiert');
-            },
-            style: OutlinedButton.styleFrom(
-              minimumSize: const Size(0, 44),
-              shape: const RoundedRectangleBorder(
-                borderRadius: BorderRadius.all(zs.ZenRadii.m),
-              ),
-            ),
-          ),
-        ),
-        if (canEdit)
-          const SizedBox(width: 2),
-        if (canEdit)
-          const Tooltip(
-            message: 'Bearbeiten',
-            waitDuration: Duration(milliseconds: 300),
-            child: _EditButton(),
-          ),
       ],
     );
   }
@@ -465,27 +392,5 @@ class JournalEntryView extends StatelessWidget {
     final dd = two(l.day);
     final mo = two(l.month);
     return '$dd.$mo.${l.year}, $hh:$mm';
-  }
-}
-
-// Kleiner Wrapper, damit Tooltip auch bei deaktiviertem onEdit nicht verschwindet
-class _EditButton extends StatelessWidget {
-  const _EditButton();
-
-  @override
-  Widget build(BuildContext context) {
-    final parent = context.findAncestorWidgetOfExactType<JournalEntryView>();
-    final onEdit = parent?.onEdit;
-    return OutlinedButton.icon(
-      icon: const Icon(Icons.edit_rounded),
-      label: const Text('Bearbeiten'),
-      onPressed: onEdit,
-      style: OutlinedButton.styleFrom(
-        minimumSize: const Size(0, 44),
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.all(zs.ZenRadii.m),
-        ),
-      ),
-    );
   }
 }

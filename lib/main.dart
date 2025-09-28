@@ -1,18 +1,24 @@
-import 'features/story/story_screen.dart';
 // lib/main.dart
 //
-// ZenYourself — App Bootstrap (Oxford-Zen, Pro-Level, 2025-08)
-// ------------------------------------------------------------
-// • Robustes Bootstrapping (runZonedGuarded, PlatformDispatcher.onError)
-// • API-Wiring mit --dart-define Fallback auf ZenEnv (env_config.dart)
-// • Provider-Setup inkl. Journal-Persistenz (kanonisch)
-// • A11y, i18n, Themes, sanftes Scroll-Verhalten
+// ZenYourself — App Bootstrap (Oxford-Zen, Pro-Level)
+// v1.2 · 2025-09-14
+// -----------------------------------------------------------------------------
+// • EINZIGE MaterialApp im Projekt (verhindert Routing-Konflikte).
+// • Alle benannten Routen (/, /reflection, /journey, …) hier registriert.
+// • Robustes Bootstrapping (runZonedGuarded, PlatformDispatcher.onError).
+// • Provider-Setup inkl. Journal-Persistenz (kanonisch).
+// • A11y, i18n, Themes, sanftes Scroll-Verhalten.
+// -----------------------------------------------------------------------------
 
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
+
 import 'app_theme.dart';
+
+// Routing-Konstanten
+import 'app/app.dart' show AppRoutes;
 
 // --- State Management Provider ---
 import 'models/mood_entries_provider.dart';
@@ -41,18 +47,20 @@ import 'services/api_client.dart';
 
 // --- Core Screens ---
 import 'features/start/start_screen.dart';
+import 'features/journal/journal_screen.dart';
+import 'features/reflection/reflection_screen.dart';
+import 'features/impulse/impulse_screen.dart';
+import 'features/story/story_screen.dart';
+import 'features/pro/pro_screen.dart';
+import 'features/journey/journey_map.dart';
 
 // --- Env Defaults / Fallback ---
 import 'env_config.dart';
 
-// --- Gedankenbuch-Route (NEU) ---
-
 /// Compile-Time Konfiguration (per --dart-define)
-const String _kApiUrl = String.fromEnvironment('ZEN_API_URL', defaultValue: '');
-const bool _kApiEnabled =
-    bool.fromEnvironment('ZEN_API_ENABLED', defaultValue: true);
-const String _kApiToken =
-    String.fromEnvironment('ZEN_APP_TOKEN', defaultValue: '');
+const String _kApiUrl    = String.fromEnvironment('ZEN_API_URL',    defaultValue: '');
+const bool   _kApiEnabled= bool.fromEnvironment('ZEN_API_ENABLED',  defaultValue: true);
+const String _kApiToken  = String.fromEnvironment('ZEN_APP_TOKEN',  defaultValue: '');
 
 Future<void> main() async {
   runZonedGuarded(() async {
@@ -89,10 +97,8 @@ void _setupZenApi() {
       _kApiUrl.isNotEmpty || _kApiToken.isNotEmpty || !_kApiEnabled;
 
   final bool enabled = definesUsed ? _kApiEnabled : ZenEnv.apiEnabled;
-  final String url =
-      definesUsed && _kApiUrl.isNotEmpty ? _kApiUrl : ZenEnv.apiUrl;
-  final String token =
-      definesUsed && _kApiToken.isNotEmpty ? _kApiToken : ZenEnv.appToken;
+  final String url   = definesUsed && _kApiUrl.isNotEmpty ? _kApiUrl : ZenEnv.apiUrl;
+  final String token = definesUsed && _kApiToken.isNotEmpty ? _kApiToken : ZenEnv.appToken;
 
   if (enabled && url.isNotEmpty) {
     try {
@@ -108,8 +114,7 @@ void _setupZenApi() {
       );
 
       if (token.isEmpty) {
-        debugPrint(
-            '⚠️  ZenYourself: Kein APP_TOKEN gesetzt – der Worker könnte 401/403 liefern.');
+        debugPrint('⚠️  ZenYourself: Kein APP_TOKEN gesetzt – der Worker könnte 401/403 liefern.');
       }
       debugPrint('✅ GuidanceService HTTP enabled → $url');
     } catch (e, st) {
@@ -135,7 +140,7 @@ class ZenYourselfApp extends StatelessWidget {
         // --- A11y / System ---
         ChangeNotifierProvider(create: (_) => ColorBlindModeProvider(false)),
         ChangeNotifierProvider(create: (_) => LargeTextModeProvider()),
-        ChangeNotifierProvider(create: (_) => SoundscapeManager()),
+        Provider(create: (_) => SoundscapeManager()), // kein ChangeNotifier
         ChangeNotifierProvider(create: (_) => UserProfileProvider()),
         ChangeNotifierProvider(create: (_) => AppSettings()),
 
@@ -148,11 +153,10 @@ class ZenYourselfApp extends StatelessWidget {
           create: (_) {
             final p = JournalEntriesProvider();
             // Restore & Persist (asynchron starten)
-            // ignore: discarded_futures
             p.attachPersistence(
-              load: () async => await storage
+              load: () async => storage
                   .loadJournalEntries<jm.JournalEntry>(jm.JournalEntry.fromMap),
-              save: (entries) async => await storage.saveJournalEntries(entries),
+              save: (entries) async => storage.saveJournalEntries(entries),
               loadNow: true,
             );
             return p;
@@ -218,13 +222,31 @@ class _ZenYourselfMaterialApp extends StatelessWidget {
           // UX-Verhalten
           scrollBehavior: const _ZenScrollBehavior(),
 
-          // Routen (NEU): benannte Route fürs Gedankenbuch
+          // === WICHTIG: EINZIGE Routing-Quelle ===
+          initialRoute: AppRoutes.start,
           routes: {
-            '/gedankenbuch': (_) => StoryScreen(),
+            AppRoutes.start: (_) => const StartScreen(),
+            AppRoutes.journal: (_) => const JournalScreen(),
+            AppRoutes.reflection: (_) => const ReflectionScreen(),
+            AppRoutes.impulse: (_) => const ImpulseScreen(),
+            AppRoutes.story: (_) => const StoryScreen(),
+            AppRoutes.pro: (_) => const ProScreen(
+                  moodEntries: [],
+                  reflectionEntries: [],
+                ),
+            AppRoutes.journey: (_) => const JourneyMapScreen(
+                  moodEntries: [],
+                  reflections: [],
+                ),
+            AppRoutes.menu: (_) => const JourneyMapScreen(
+                  moodEntries: [],
+                  reflections: [],
+                ),
+            // Optional: historischer Alias
+            '/gedankenbuch': (_) => const StoryScreen(),
           },
-
-          // Start
-          home: const StartScreen(),
+          onUnknownRoute: (_) =>
+              MaterialPageRoute(builder: (_) => const StartScreen()),
         ),
       ),
     );

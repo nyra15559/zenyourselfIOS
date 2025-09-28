@@ -1,6 +1,11 @@
 // lib/features/journey/journey_map.dart
 //
-// JourneyMapScreen — v7 Oxford (Therapeuten-Tile, Privacy-Footer, Safe-Nav)
+// JourneyMapScreen — v7.3 Oxford (Therapeuten-Tile, Privacy-Footer, Safe-Nav)
+// Anpassungsdatum: 2025-09-13
+// Hinweise:
+// • Gemäß Projektstil: keine übermäßige Verwendung von `const` bei Widgets.
+// • Safe-Nav-Lock verhindert doppelte Navigations-Pushes.
+// • Story-Gate via Provider: Freischaltung nach ≥ StoryScreen.neededReflections.
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -9,14 +14,13 @@ import 'package:provider/provider.dart';
 // Tokens (ohne Widget-Backdrop, um Namenskollision zu vermeiden)
 import '../../shared/zen_style.dart' as zs hide ZenBackdrop, ZenGlassCard;
 // UI-Widgets (mit Widget-Backdrop)
-import '../../shared/ui/zen_widgets.dart'
-    show ZenBackdrop, ZenGlassCard, ZenInfoBar, ZenToast;
+import '../../shared/ui/zen_widgets.dart' show ZenBackdrop, ZenGlassCard;
 
 // Datenmodelle (Legacy – bleibt für Konstruktor-Signatur als Fallback)
 import '../../data/mood_entry.dart';
 import '../../data/reflection_entry.dart';
 
-// NEU: Kanonische Quelle für Reflexionen
+// Kanonische Quelle für Reflexionen
 import '../../providers/journal_entries_provider.dart';
 
 // Screens
@@ -93,27 +97,24 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
 
   void _showLockedSnack(int remaining) {
     final plural = remaining == 1 ? 'Runde' : 'Runden';
-    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-      SnackBar(
-        content: Text('Noch $remaining komplette $plural bis zur Kurzgeschichte.'),
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 2),
-      ),
+    final snack = SnackBar(
+      content: Text('Noch $remaining komplette $plural bis zur Kurzgeschichte.'),
+      behavior: SnackBarBehavior.floating,
+      duration: const Duration(seconds: 2),
     );
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(snack);
   }
 
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
     final isCompact = size.width < 520;
-    final gridCount = isCompact ? 1 : 2;
     final maxGridWidth = size.width < _tabletMaxWidth ? 480.0 : 720.0;
     final tt = Theme.of(context).textTheme;
 
-    // Reflexions-Zähler aus dem JournalEntriesProvider.
+    // Reflexions-Zähler aus dem JournalEntriesProvider (Fallback: Legacy-Param).
     final prov = context.watch<JournalEntriesProvider?>();
-    final reflectionsCount =
-        (prov?.reflections.length ?? widget.reflections.length);
+    final reflectionsCount = prov?.reflections.length ?? widget.reflections.length;
     final storyUnlocked = reflectionsCount >= _kStoryUnlock;
     final remaining = storyUnlocked ? 0 : (_kStoryUnlock - reflectionsCount);
 
@@ -199,7 +200,7 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
                                     subtitle: 'Lass deine Gedanken los',
                                     onTap: () {
                                       HapticFeedback.selectionClick();
-                                      _pushLocked(MaterialPageRoute(builder: (_) => JournalScreen()));
+                                      _pushLocked(MaterialPageRoute(builder: (_) => const JournalScreen()));
                                     },
                                   ),
                                   _OptionTile(
@@ -233,7 +234,7 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
                                     subtitle: 'Atem & Mini-Reset',
                                     onTap: () {
                                       HapticFeedback.selectionClick();
-                                      _pushLocked(MaterialPageRoute(builder: (_) => ImpulseScreen()));
+                                      _pushLocked(MaterialPageRoute(builder: (_) => const ImpulseScreen()));
                                     },
                                   ),
                                   _OptionTile(
@@ -252,7 +253,7 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
                                       );
                                     },
                                   ),
-                                  // NEU: Therapeuten-Modus als eigener Tile
+                                  // Therapeuten-Modus als eigener Tile
                                   _OptionTile(
                                     icon: Icons.verified_user_rounded,
                                     label: 'Therapeuten-Modus',
@@ -298,23 +299,27 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
                           _randomQuote(reflectionsCount),
                           key: ValueKey(reflectionsCount % 7),
                           textAlign: TextAlign.center,
-                          style: Theme.of(context).textTheme.titleMedium!.copyWith(
-                                color: zs.ZenColors.deepSage,
-                                fontStyle: FontStyle.italic,
-                                fontSize: 16.0,
-                                shadows: const [
-                                  Shadow(blurRadius: 6, color: Colors.black26, offset: Offset(0, 2)),
-                                ],
+                          style: tt.titleMedium!.copyWith(
+                            color: zs.ZenColors.deepSage,
+                            fontStyle: FontStyle.italic,
+                            fontSize: 16.0,
+                            shadows: [
+                              const Shadow(
+                                blurRadius: 6,
+                                color: Colors.black26,
+                                offset: Offset(0, 2),
                               ),
+                            ],
+                          ),
                         ),
                       ),
                       const SizedBox(height: 6),
                       Text(
                         'Privacy first · Lokaler Modus: Deine Daten bleiben auf deinem Gerät.',
                         textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: zs.ZenColors.deepSage.withValues(alpha: .82),
-                            ),
+                        style: tt.bodySmall?.copyWith(
+                          color: zs.ZenColors.deepSage.withValues(alpha: .82),
+                        ),
                       ),
                     ],
                   ),
@@ -328,7 +333,7 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
   }
 
   String _randomQuote(int idx) {
-    const quotes = [
+    final quotes = [
       'Manchmal reicht es, einfach da zu sein.',
       'Ruhe finden beginnt mit dem Annehmen.',
       'Dein Weg darf leicht sein.',
@@ -379,9 +384,16 @@ class _BackButton extends StatelessWidget {
               color: zs.ZenColors.surface.withValues(alpha: .49),
               shape: BoxShape.circle,
               boxShadow: zs.ZenShadows.card,
-              border: Border.all(color: zs.ZenColors.sage.withValues(alpha: .18), width: 1.2),
+              border: Border.all(
+                color: zs.ZenColors.sage.withValues(alpha: .18),
+                width: 1.2,
+              ),
             ),
-            child: const Icon(Icons.arrow_back_rounded, color: zs.ZenColors.deepSage, size: 26),
+            child: const Icon(
+              Icons.arrow_back_rounded,
+              color: zs.ZenColors.deepSage,
+              size: 26,
+            ),
           ),
         ),
       ),
@@ -428,7 +440,9 @@ class _OptionTile extends StatelessWidget {
               decoration: BoxDecoration(
                 color: zs.ZenColors.cta.withValues(alpha: .12),
                 shape: BoxShape.circle,
-                border: Border.all(color: zs.ZenColors.cta.withValues(alpha: .35)),
+                border: Border.all(
+                  color: zs.ZenColors.cta.withValues(alpha: .35),
+                ),
               ),
               child: Icon(icon, color: zs.ZenColors.cta, size: 22),
             ),
@@ -465,7 +479,10 @@ class _OptionTile extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            Icon(locked ? Icons.lock_rounded : Icons.chevron_right_rounded, color: zs.ZenColors.cta),
+            Icon(
+              locked ? Icons.lock_rounded : Icons.chevron_right_rounded,
+              color: zs.ZenColors.cta,
+            ),
           ],
         ),
       ),
@@ -485,9 +502,12 @@ class _OptionTile extends StatelessWidget {
             if (locked) {
               HapticFeedback.selectionClick();
               final msg = lockHint ?? 'Noch etwas Geduld – bald freigeschaltet.';
-              ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-                SnackBar(content: Text(msg), behavior: SnackBarBehavior.floating, duration: const Duration(seconds: 2)),
+              final snack = SnackBar(
+                content: Text(msg),
+                behavior: SnackBarBehavior.floating,
+                duration: const Duration(seconds: 2),
               );
+              ScaffoldMessenger.maybeOf(context)?.showSnackBar(snack);
               return;
             }
             onTap();

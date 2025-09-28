@@ -1,17 +1,26 @@
 // lib/shared/zen_style.dart
 //
 // ZenYourself — Oxford-Zen Design System (Tokens · Themes · Backdrop · Glass)
-// v6.70 — 2025-09-09
+// v7.11 — 2025-09-18 · Safe-Assets Hotfix (kein Crash bei fehlenden Bildern)
 // -----------------------------------------------------------------------------
-// • Stable Flutter APIs: withOpacity(...) statt withValues(...), MaterialStateProperty.
-// • Ruhigeres Dark-Theme, feinere Chips/Inputs, realistische Glass-Shadows.
-// • Backdrop-/Glass-Primitives konsolidiert, aber kompatibel zu v6.32/6.60.
-// • Keine Breaking Changes; gleiche Klassen/Signaturen.
-//
-// Hinweis: zen_widgets.dart hidet seine eigenen UI-Varianten (kein Konflikt).
+// • Keine Breaking Changes: gleiche Klassen/Signaturen (Backdrop/Glass/Compat).
+// • NEU: _SafeAssetImage prüft Assets → rendert still ohne Fehler, wenn fehlt.
+// • Presets (ZenBackdropPresets) optional; keine harten Abhängigkeiten.
+// • Vollständiges M3-Theme, AA-kontrastsicher, warmes Dark-Theme.
 
 import 'dart:ui' as ui show ImageFilter;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
+
+/// ==========================================================================
+/// COMPAT: Color.withValues(...)  →  withOpacity(...) (alpha)
+/// ==========================================================================
+extension _ZenColorCompat on Color {
+  Color withValues({double? alpha}) {
+    final a = (alpha ?? opacity).clamp(0.0, 1.0);
+    return withOpacity(a);
+  }
+}
 
 /// ==========================================================================
 /// COLORS — Oxford-Zen Palette
@@ -31,13 +40,13 @@ class ZenColors {
   static const sage       = Color(0xFF6E8B74); // Sekundär
   static const deepSage   = Color(0xFF2F5F49); // CTA/Highlights (Primary)
   static const jade       = Color(0xFF3E7D67); // Akzent/Chips
-  // ✅ COMPAT alias (legacy Screens nutzen 'jadeMid')
-  static const jadeMid    = sage;
+  static const jadeMid    = sage;              // COMPAT alias
 
   // CTA Family
   static const cta        = deepSage;
   static const ctaHover   = Color(0xFF275242);
   static const ctaPressed = Color(0xFF214538);
+  static const ctaDisabled= Color(0xFF7FA190);
 
   // Lines / Focus
   static const border  = Color(0xFFD9CCBA);
@@ -54,12 +63,11 @@ class ZenColors {
   static const warning = Color(0xFFC5901A);
   static const info    = Color(0xFF2C6AA3);
 
-  // COMPAT / Misc
+  // Misc / COMPAT
   static const white   = Color(0xFFFFFFFF);
   static const cloud   = Color(0xFFF0F3F5);
   static const mist    = Color(0xFFEFEFEF);
   static const gold    = Color(0xFFFFD580);
-  // ✅ COMPAT extras (weiterhin im Code referenziert)
   static const bamboo  = Color(0xFFA5CBA1);
   static const cherry  = Color(0xFFD7263D);
 }
@@ -95,18 +103,16 @@ class ZenSpacing {
 
 class ZenShadows {
   static const List<BoxShadow> card = [
-    BoxShadow(
-      color: Color(0x14000000), // ~8%
-      blurRadius: 14,
-      offset: Offset(0, 5),
-    ),
+    BoxShadow(color: Color(0x14000000), blurRadius: 14, offset: Offset(0, 5)),
   ];
 
   static const BoxShadow glow = BoxShadow(
-    color: Color(0x12000000), // ~7%
-    blurRadius: 18,
-    offset: Offset(0, 6),
+    color: Color(0x12000000), blurRadius: 18, offset: Offset(0, 6),
   );
+
+  static const List<BoxShadow> popover = [
+    BoxShadow(color: Color(0x1A000000), blurRadius: 20, offset: Offset(0, 8)),
+  ];
 }
 
 /// ==========================================================================
@@ -117,6 +123,7 @@ class ZenTypography {
     fontFamily: 'NotoSans',
     fontSize: 16,
     height: 24 / 16,
+    letterSpacing: 0.1,
     color: ZenColors.ink,
   );
 
@@ -124,6 +131,7 @@ class ZenTypography {
     fontFamily: 'NotoSans',
     fontSize: 20,
     height: 26 / 20,
+    letterSpacing: 0.1,
     fontWeight: FontWeight.w600,
     color: ZenColors.inkStrong,
   );
@@ -134,6 +142,8 @@ class ZenTypography {
     fontFamilyFallback: ['NotoSans'],
     fontWeight: FontWeight.w800,
     fontSize: 28,
+    height: 32 / 28,
+    letterSpacing: 0.0,
     color: ZenColors.inkStrong,
   );
 }
@@ -167,7 +177,7 @@ ThemeData zenDarkTheme()  => _buildTheme(brightness: Brightness.dark);
 ThemeData _buildTheme({required Brightness brightness}) {
   final bool isDark = brightness == Brightness.dark;
 
-  // Dark Palette (lokale, ruhige Töne — nicht pechschwarz)
+  // Dark Palette (ruhig, nicht pechschwarz)
   const bgDark         = Color(0xFF0F1211);
   const surfaceDark    = Color(0xFF151917);
   const surfaceAltDark = Color(0xFF1B201D);
@@ -213,18 +223,19 @@ ThemeData _buildTheme({required Brightness brightness}) {
   // ─────────────────── Buttons
   final elevated = ElevatedButtonThemeData(
     style: ButtonStyle(
-      backgroundColor: MaterialStateProperty.resolveWith((states) {
-        if (states.contains(MaterialState.pressed)) return ZenColors.ctaPressed;
-        if (states.contains(MaterialState.hovered))  return ZenColors.ctaHover;
+      backgroundColor: WidgetStateProperty.resolveWith((states) {
+        if (states.contains(WidgetState.disabled)) return ZenColors.ctaDisabled;
+        if (states.contains(WidgetState.pressed))  return ZenColors.ctaPressed;
+        if (states.contains(WidgetState.hovered))  return ZenColors.ctaHover;
         return ZenColors.cta;
       }),
-      foregroundColor: const MaterialStatePropertyAll(Colors.white),
-      padding: const MaterialStatePropertyAll(
+      foregroundColor: const WidgetStatePropertyAll(Colors.white),
+      padding: const WidgetStatePropertyAll(
         EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       ),
-      minimumSize: const MaterialStatePropertyAll(Size(0, 52)),
-      elevation: const MaterialStatePropertyAll(1.5),
-      shape: const MaterialStatePropertyAll(
+      minimumSize: const WidgetStatePropertyAll(Size(0, 52)),
+      elevation: const WidgetStatePropertyAll(1.5),
+      shape: const WidgetStatePropertyAll(
         RoundedRectangleBorder(borderRadius: BorderRadius.all(ZenRadii.l)),
       ),
       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -253,11 +264,24 @@ ThemeData _buildTheme({required Brightness brightness}) {
     ),
   );
 
+  // ─────────────────── IconButtons
+  final iconButton = IconButtonThemeData(
+    style: IconButton.styleFrom(
+      foregroundColor: isDark ? inkDark : ZenColors.ink,
+      minimumSize: const Size(40, 40),
+      padding: const EdgeInsets.all(8),
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    ),
+  );
+
   // ─────────────────── Inputs
   final input = InputDecorationTheme(
     filled: true,
     fillColor: isDark ? surfaceAltDark : ZenColors.surfaceAlt,
     contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+    hintStyle: TextStyle(
+      color: (isDark ? inkDark : ZenColors.ink).withOpacity(.55),
+    ),
     border: const OutlineInputBorder(
       borderRadius: BorderRadius.all(ZenRadii.l),
       borderSide: BorderSide(color: ZenColors.outline),
@@ -285,7 +309,77 @@ ThemeData _buildTheme({required Brightness brightness}) {
     ),
   );
 
-  // ─────────────────── SnackBar (für Undo 3s etc.)
+  // ─────────────────── Lists / Tiles
+  final listTile = ListTileThemeData(
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+    iconColor: isDark ? inkDark : ZenColors.ink,
+    textColor: isDark ? inkDark : ZenColors.ink,
+    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+    tileColor: (isDark ? surfaceAltDark : ZenColors.surface).withOpacity(.6),
+  );
+
+  // ─────────────────── Tabs (⚠️ neue SDKs nutzen *ThemeData)
+  const tabTheme = TabBarThemeData(
+    indicatorSize: TabBarIndicatorSize.label,
+    dividerColor: Colors.transparent,
+    labelPadding: EdgeInsets.symmetric(horizontal: 8),
+  );
+
+  // ─────────────────── Tooltips
+  final tooltip = TooltipThemeData(
+    decoration: BoxDecoration(
+      color: isDark ? surfaceAltDark : ZenColors.surface,
+      borderRadius: BorderRadius.circular(10),
+      boxShadow: ZenShadows.popover,
+      border: Border.all(color: isDark ? outlineDark : ZenColors.outline),
+    ),
+    textStyle: TextStyle(
+      color: isDark ? inkDark : ZenColors.ink,
+      fontWeight: FontWeight.w600,
+    ),
+    waitDuration: const Duration(milliseconds: 350),
+    showDuration: const Duration(milliseconds: 2400),
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+  );
+
+  // ─────────────────── Scrollbar
+  final scrollbar = ScrollbarThemeData(
+    thickness: const WidgetStatePropertyAll(4.0),
+    radius: const Radius.circular(6),
+    thumbVisibility: const WidgetStatePropertyAll(false),
+    thumbColor: WidgetStatePropertyAll(
+      (isDark ? ZenColors.jade : ZenColors.ink).withOpacity(.25),
+    ),
+  );
+
+  // ─────────────────── Toggles
+  final switchTheme = SwitchThemeData(
+    trackColor: WidgetStateProperty.resolveWith((s) {
+      if (s.contains(WidgetState.selected)) return ZenColors.jade.withOpacity(.45);
+      return (isDark ? outlineDark : ZenColors.outline).withOpacity(.6);
+    }),
+    thumbColor: WidgetStateProperty.resolveWith((s) {
+      if (s.contains(WidgetState.selected)) return ZenColors.jade;
+      return isDark ? inkDark : ZenColors.surface;
+    }),
+  );
+
+  final checkboxTheme = CheckboxThemeData(
+    fillColor: WidgetStateProperty.resolveWith((s) {
+      if (s.contains(WidgetState.selected)) return ZenColors.jade;
+      return isDark ? outlineDark : ZenColors.outline;
+    }),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+  );
+
+  final radioTheme = RadioThemeData(
+    fillColor: WidgetStateProperty.resolveWith((s) {
+      if (s.contains(WidgetState.selected)) return ZenColors.jade;
+      return isDark ? outlineDark : ZenColors.outline;
+    }),
+  );
+
+  // ─────────────────── SnackBar
   final snack = SnackBarThemeData(
     backgroundColor: ZenColors.deepSage,
     contentTextStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
@@ -293,7 +387,7 @@ ThemeData _buildTheme({required Brightness brightness}) {
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
   );
 
-  // ─────────────────── Bottom Sheet (gläsern, 3-Zeilen-FAB-Sheet möglich)
+  // ─────────────────── Bottom Sheet
   final bottomSheet = BottomSheetThemeData(
     backgroundColor: Colors.transparent,
     surfaceTintColor: Colors.transparent,
@@ -303,13 +397,42 @@ ThemeData _buildTheme({required Brightness brightness}) {
     ),
   );
 
+  // ─────────────────── Cards / Dividers
+  final cardTheme = CardThemeData(
+    color: (isDark ? surfaceAltDark : ZenColors.surface).withOpacity(.88),
+    elevation: 0,
+    margin: const EdgeInsets.all(0),
+    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.all(ZenRadii.l)),
+    shadowColor: Colors.black.withOpacity(.08),
+    surfaceTintColor: Colors.transparent,
+  );
+
+  final dividerTheme = DividerThemeData(
+    color: isDark ? borderDark : ZenColors.border,
+    thickness: 1,
+    space: 16,
+  );
+
+  // ─────────────────── FAB / Bottom Nav
+  const fabTheme = FloatingActionButtonThemeData(
+    elevation: 0, highlightElevation: 0,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.all(ZenRadii.l)),
+  );
+
+  final bottomNavTheme = BottomNavigationBarThemeData(
+    backgroundColor: (isDark ? surfaceDark : ZenColors.surface).withOpacity(.92),
+    selectedItemColor: ZenColors.cta,
+    unselectedItemColor: (isDark ? inkDark : ZenColors.ink).withOpacity(.65),
+    showUnselectedLabels: false, type: BottomNavigationBarType.fixed, elevation: 0,
+  );
+
   // ─────────────────── ThemeData
   return ThemeData(
     useMaterial3: true,
     brightness: brightness,
     visualDensity: VisualDensity.standard,
     colorScheme: colorScheme,
-    scaffoldBackgroundColor: colorScheme.surface,
+    scaffoldBackgroundColor: isDark ? bgDark : colorScheme.surface,
     fontFamily: 'NotoSans',
 
     appBarTheme: appBar,
@@ -325,7 +448,18 @@ ThemeData _buildTheme({required Brightness brightness}) {
     textButtonTheme: textButton,
     inputDecorationTheme: input,
     chipTheme: chip,
-    dividerColor: isDark ? borderDark : ZenColors.border,
+    iconButtonTheme: iconButton,
+    listTileTheme: listTile,
+    tabBarTheme: tabTheme,
+    tooltipTheme: tooltip,
+    scrollbarTheme: scrollbar,
+    switchTheme: switchTheme,
+    checkboxTheme: checkboxTheme,
+    radioTheme: radioTheme,
+    cardTheme: cardTheme,
+    dividerTheme: dividerTheme,
+    floatingActionButtonTheme: fabTheme,
+    bottomNavigationBarTheme: bottomNavTheme,
     snackBarTheme: snack,
     bottomSheetTheme: bottomSheet,
 
@@ -413,7 +547,62 @@ class ZenOverlays {
 }
 
 /// ==========================================================================
-/// BACKDROP — Artwork mit Glow/Vignette/Haze/Sättigung/Wash
+/// ART ASSETS & BACKDROP PRESETS (optional, dank Safe-Loader niemals fatal)
+/// ==========================================================================
+class ZenArt {
+  // Passe diese Pfade an dein Projekt an (oder ignoriere sie einfach).
+  static const start      = 'assets/bg/bg_start.png';
+  static const menu       = 'assets/bg/bg_menu.png';
+  static const reflection = 'assets/bg/bg_reflection.png';
+  static const journal    = 'assets/bg/bg_journal.png';
+
+  static const baseW = 2560.0;
+  static const baseH = 1440.0;
+
+  // Laterne rechts (ruhige, konsistente Position)
+  static const alignRightSafe = Alignment(0.20, 0.0);
+}
+
+class ZenBackdropPresets {
+  static Widget start({String? art}) => ZenBackdrop(
+        asset: art ?? ZenArt.start,
+        alignment: ZenArt.alignRightSafe,
+        artBaseWidth: ZenArt.baseW,
+        artBaseHeight: ZenArt.baseH,
+        vignette: .10, glow: .24, enableHaze: true, hazeStrength: .10,
+        dimRight: false, saturation: .98, wash: .06,
+      );
+
+  static Widget menu({String? art}) => ZenBackdrop(
+        asset: art ?? ZenArt.menu,
+        alignment: ZenArt.alignRightSafe,
+        artBaseWidth: ZenArt.baseW,
+        artBaseHeight: ZenArt.baseH,
+        vignette: .12, glow: .22, enableHaze: true, hazeStrength: .08,
+        dimRight: false, saturation: .96, wash: .04,
+      );
+
+  static Widget reflection({String? art}) => ZenBackdrop(
+        asset: art ?? ZenArt.reflection,
+        alignment: ZenArt.alignRightSafe,
+        artBaseWidth: ZenArt.baseW,
+        artBaseHeight: ZenArt.baseH,
+        vignette: .14, glow: .20, enableHaze: true, hazeStrength: .12,
+        dimRight: false, saturation: .94, wash: .03,
+      );
+
+  static Widget journal({String? art}) => ZenBackdrop(
+        asset: art ?? ZenArt.journal,
+        alignment: ZenArt.alignRightSafe,
+        artBaseWidth: ZenArt.baseW,
+        artBaseHeight: ZenArt.baseH,
+        vignette: .10, glow: .26, enableHaze: true, hazeStrength: .10,
+        dimRight: false, saturation: .98, wash: .05,
+      );
+}
+
+/// ==========================================================================
+/// BACKDROP — Artwork mit Glow/Vignette/Haze/Sättigung/Wash (safe)
 /// ==========================================================================
 class ZenBackdrop extends StatelessWidget {
   final String asset;
@@ -470,22 +659,16 @@ class ZenBackdrop extends StatelessWidget {
         ImageFiltered(
           imageFilter: ui.ImageFilter.blur(sigmaX: 24, sigmaY: 24),
           child: ColorFiltered(
-            colorFilter: 
-    ColorFilter.mode(Colors.white.withOpacity(0.05), BlendMode.srcATop)
-  
-                ,
-            child: Image.asset(
-              asset,
-              fit: BoxFit.cover,
-              alignment: Alignment.center,
+            colorFilter: ColorFilter.mode(Colors.white.withOpacity(0.05), BlendMode.srcATop),
+            child: _SafeAssetImage(
+              path: asset, fit: BoxFit.cover, alignment: Alignment.center,
               filterQuality: FilterQuality.low,
-              errorBuilder: (_, __, ___) => const SizedBox.shrink(),
             ),
           ),
         ),
       ),
 
-      // Hauptbild
+      // Hauptbild (Contain optional)
       applySaturation(
         fixedContain
             ? _ContainArtwork(
@@ -494,22 +677,17 @@ class ZenBackdrop extends StatelessWidget {
                 baseHeight: artBaseHeight,
                 alignment: alignment,
               )
-            : Image.asset(
-                asset,
-                fit: BoxFit.cover,
-                alignment: alignment,
+            : _SafeAssetImage(
+                path: asset, fit: BoxFit.cover, alignment: alignment,
                 filterQuality: FilterQuality.high,
-                errorBuilder: (_, __, ___) => const SizedBox.shrink(),
               ),
       ),
 
       if (wash > 0) IgnorePointer(child: Container(color: Colors.white.withOpacity(wash))),
 
       // Gold-Grün Glow
-      IgnorePointer(
-        child: Container(
-          decoration: ZenOverlays.radialGlow(center: const Offset(.50, -.05), opacity: glow),
-        ),
+      IgnorePointer(child:
+        Container(decoration: ZenOverlays.radialGlow(center: const Offset(.50, -.05), opacity: glow)),
       ),
 
       // Haze (optional)
@@ -518,8 +696,7 @@ class ZenBackdrop extends StatelessWidget {
           child: DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
+                begin: Alignment.topCenter, end: Alignment.bottomCenter,
                 colors: [
                   ZenColors.white.withOpacity(hazeStrength * 1.0),
                   ZenColors.surfaceAlt.withOpacity(hazeStrength * 0.75),
@@ -536,8 +713,7 @@ class ZenBackdrop extends StatelessWidget {
         child: DecoratedBox(
           decoration: BoxDecoration(
             gradient: RadialGradient(
-              center: Alignment.center,
-              radius: 1.15,
+              center: Alignment.center, radius: 1.15,
               colors: [Colors.transparent, Colors.black.withOpacity(vignette)],
               stops: const [0.78, 1.0],
             ),
@@ -552,12 +728,8 @@ class ZenBackdrop extends StatelessWidget {
             child: DecoratedBox(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
-                  begin: Alignment.centerRight,
-                  end: Alignment.centerLeft,
-                  colors: [
-                    Colors.black.withOpacity(dimRightStrength),
-                    Colors.transparent,
-                  ],
+                  begin: Alignment.centerRight, end: Alignment.centerLeft,
+                  colors: [Colors.black.withOpacity(dimRightStrength), Colors.transparent],
                   stops: const [0.0, 0.22],
                 ),
               ),
@@ -577,6 +749,49 @@ class ZenBackdrop extends StatelessWidget {
       r * a,     g * a,     b * a + s, 0, 0,
       0,         0,         0,         1, 0,
     ];
+  }
+}
+
+/// Safe-Loader für Assets: rendert still, wenn Asset fehlt (kein Fehlerlog-Spam).
+class _SafeAssetImage extends StatelessWidget {
+  final String path;
+  final BoxFit fit;
+  final Alignment alignment;
+  final FilterQuality filterQuality;
+
+  static final Map<String, bool> _cache = {};
+
+  const _SafeAssetImage({
+    required this.path,
+    this.fit = BoxFit.cover,
+    this.alignment = Alignment.center,
+    this.filterQuality = FilterQuality.low,
+  });
+
+  static Future<bool> _exists(String p) async {
+    if (_cache.containsKey(p)) return _cache[p]!;
+    try {
+      await rootBundle.load(p);
+      _cache[p] = true;
+    } catch (_) {
+      _cache[p] = false;
+    }
+    return _cache[p]!;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<bool>(
+      future: _exists(path),
+      builder: (_, snap) {
+        final ok = snap.data == true;
+        if (!ok) return const SizedBox.shrink();
+        return Image.asset(
+          path, fit: fit, alignment: alignment, filterQuality: filterQuality,
+          errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+        );
+      },
+    );
   }
 }
 
@@ -601,7 +816,7 @@ class _ContainArtwork extends StatelessWidget {
         final scale = _min3(
           c.maxWidth / baseWidth,
           c.maxHeight / baseHeight,
-          1.0, // nicht über Originalgröße hinaus
+          1.0,
         );
         final w = baseWidth * scale;
         final h = baseHeight * scale;
@@ -610,12 +825,11 @@ class _ContainArtwork extends StatelessWidget {
           child: SizedBox(
             width: w,
             height: h,
-            child: Image.asset(
-              asset,
+            child: _SafeAssetImage(
+              path: asset,
               fit: BoxFit.contain,
               alignment: alignment,
               filterQuality: FilterQuality.high,
-              errorBuilder: (_, __, ___) => const SizedBox.shrink(),
             ),
           ),
         );
@@ -631,7 +845,7 @@ class _ContainArtwork extends StatelessWidget {
 
 /// ==========================================================================
 /// GLASS PRIMITIVES — generische Glas-Bausteine (UI-unabhängig)
-/// ==========================================================================
+// ==========================================================================
 class ZenGlassCard extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry? padding;
@@ -678,30 +892,20 @@ class ZenGlassCard extends StatelessWidget {
           filter: ui.ImageFilter.blur(sigmaX: blurSigmaX, sigmaY: blurSigmaY),
           child: Container(
             padding: padding ??
-                const EdgeInsets.symmetric(
-                  horizontal: ZenSpacing.l,
-                  vertical: ZenSpacing.l,
-                ),
+                const EdgeInsets.symmetric(horizontal: ZenSpacing.l, vertical: ZenSpacing.l),
             decoration: BoxDecoration(
               gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
+                begin: Alignment.topCenter, end: Alignment.bottomCenter,
                 colors: [
                   ZenColors.surface.withOpacity(resolvedTopOpacity),
                   ZenColors.surface.withOpacity(resolvedBottomOpacity),
                 ],
               ),
               borderRadius: borderRadius,
-              border: Border.all(
-                color: Colors.white.withOpacity(borderOpacity),
-                width: 1.0,
-              ),
+              border: Border.all(color: Colors.white.withOpacity(borderOpacity), width: 1.0),
               boxShadow: const [
                 BoxShadow(
-                  color: Color(0x14000000), // ~8%
-                  blurRadius: 18,
-                  spreadRadius: 1.2,
-                  offset: Offset(0, 5),
+                  color: Color(0x14000000), blurRadius: 18, spreadRadius: 1.2, offset: Offset(0, 5),
                 ),
               ],
             ),
@@ -739,12 +943,8 @@ class ZenGlassInput extends StatelessWidget {
           padding: padding ?? const EdgeInsets.fromLTRB(12, 8, 8, 8),
           decoration: BoxDecoration(
             gradient: const LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [
-                Color(0x26FFFFFF), // ~0.15
-                Color(0x1AFFFFFF), // ~0.10
-              ],
+              begin: Alignment.topCenter, end: Alignment.bottomCenter,
+              colors: [Color(0x26FFFFFF), Color(0x1AFFFFFF)],
             ),
             borderRadius: borderRadius,
             border: Border.all(color: Colors.white.withOpacity(0.16), width: 1.0),
@@ -768,9 +968,7 @@ class ZenDivider extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Divider(
-      height: height,
-      thickness: 1,
-      color: ZenColors.outline.withOpacity(opacity),
+      height: height, thickness: 1, color: ZenColors.outline.withOpacity(opacity),
     );
   }
 }
@@ -805,9 +1003,7 @@ class ZenBadge extends StatelessWidget {
           Text(
             label,
             style: const TextStyle(
-              fontWeight: FontWeight.w700,
-              fontSize: 14.5,
-              color: ZenColors.jade,
+              fontWeight: FontWeight.w700, fontSize: 14.5, color: ZenColors.jade,
             ),
           ),
         ],
@@ -818,7 +1014,7 @@ class ZenBadge extends StatelessWidget {
 
 /// ==========================================================================
 /// CONTEXT EXTENSIONS · TEXTSTYLES (Compat)
-/// ==========================================================================
+// ==========================================================================
 extension ZenContext on BuildContext {
   ColorScheme get cs => Theme.of(this).colorScheme;
   TextTheme  get tt => Theme.of(this).textTheme;
@@ -862,13 +1058,13 @@ class ZenFormat {
     final n = (now ?? DateTime.now()).toLocal();
     final d = day.toLocal();
     final today = DateTime(n.year, n.month, n.day);
-    final yesterday = today.subtract(const Duration(days: 1));
-    final onlyDay = DateTime(d.year, d.month, d.day);
 
-    if (onlyDay == today) return 'Heute';
-    if (onlyDay == yesterday) return 'Gestern';
+    if (DateTime(d.year, d.month, d.day) == today) return 'Heute';
+    if (DateTime(d.year, d.month, d.day) == gestern(today)) return 'Gestern';
     return date(d);
   }
+
+  static DateTime gestern(DateTime today) => today.subtract(const Duration(days: 1));
 
   /// Optional: Mood → Emoji
   static String moodEmoji(String mood) {

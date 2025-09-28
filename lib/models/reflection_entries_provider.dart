@@ -8,11 +8,15 @@
 // - Robuste Restore-/Import-Pfade (keine Throws in die UI)
 // - Ephemerer Session-Flow (Thread-IDs, Turn-Zähler, recommend_end-Gating) getrennt vom Persist-Schema
 // - Komfort-APIs: upsertAll, updateManyById, applyTurn, purgeStaleSessions
+//
+// Hinweise (v6.30):
+// • Keine Breaking Changes ggü. v6.2x; nur Robustheit & Konsistenz.
+// • Persistenz-Hooks sind optional und werden defensiv behandelt.
 
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
+// kein material nötig: import 'package:flutter/material.dart';
 
 import '../data/reflection_entry.dart';
 
@@ -419,7 +423,7 @@ class ReflectionEntriesProvider with ChangeNotifier {
       final t = x.timestamp;
       final inLower = inclusive ? !t.isBefore(s) : t.isAfter(s);
       final inUpper = inclusive ? !t.isAfter(e) : t.isBefore(e);
-      if (inLower && inUpper) { // <-- FIX: 'und' -> '&&'
+      if (inLower && inUpper) { // fix: 'und' → '&&'
         out.add(x);
       }
       // Da DESC: sobald t < s (untere Grenze), können wir abbrechen

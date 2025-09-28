@@ -120,8 +120,7 @@ class MoodEntry {
     }
   }
 
-  /// Backward-Compat: von älteren Call-Sites erwarteter Getter.
-  /// Wir wählen DE als Standard.
+  /// Backward-Compat: von älteren Call-Sites erwarteter Getter (DE als Default).
   String get moodLabel => moodLabelDe;
 
   /// Emoji – synchron zur Heatmap (Wetter-Metapher).
@@ -152,7 +151,7 @@ class MoodEntry {
       case 2:
         return const Color(0xFFF7EDD6); // Sanftbeige
       case 3:
-        return const Color(0xFFDFF2E6); // Hellgrün
+        return const Color(0xFFDFF2E6); // Hellgrün  (FIX: 0xFFDFF2E6)
       case 4:
         return const Color(0xFFC2E5CF); // Zen-Grün
       default:
@@ -233,12 +232,11 @@ class MoodEntry {
     return MoodEntry(timestamp: now, moodScore: score, note: normalized);
   }
 
-  /// Mapping unserer **Journal-Mood-Labels** (MoodScreen) → Score.
-  /// Erwartete Labels: „Wütend“, „Gestresst“, „Traurig“, „Neutral“, „Ruhig“, „Glücklich“.
+  /// Mapping unserer Journal-Mood-Labels (MoodScreen) → Score.
   static int scoreFromJournalLabel(String label) {
     switch (label.trim()) {
       case 'Wütend':
-        return 0; // bewusst „sehr schlecht“
+        return 0;
       case 'Gestresst':
       case 'Traurig':
         return 1;
@@ -251,6 +249,18 @@ class MoodEntry {
       default:
         return 2;
     }
+  }
+
+  /// Direkt von Score erzeugen (z. B. für Saves ohne Mapping).
+  static MoodEntry fromScore(int score,
+      {DateTime? atUtc, String? note, String? extra, String? aiSummary}) {
+    return MoodEntry(
+      timestamp: (atUtc ?? DateTime.now().toUtc()),
+      moodScore: score,
+      note: note,
+      extra: extra,
+      aiSummary: aiSummary,
+    );
   }
 
   // -----------------------
@@ -271,7 +281,6 @@ class MoodEntry {
         aiSummary: aiSummary ?? this.aiSummary,
       );
 
-  /// Für Timeline/Heatmap-Sortierung (neueste zuerst).
   int compareTo(MoodEntry other) => other.timestamp.compareTo(timestamp);
 
   @override
@@ -294,10 +303,14 @@ class MoodEntry {
         aiSummary,
       );
 
+  @override
+  String toString() =>
+      'MoodEntry(${timestamp.toIso8601String()}, score:$moodScore, '
+      'note:${note ?? "-"}, extra:${extra ?? "-"}, ai:${aiSummary ?? "-"})';
+
   // ======================
   // Intern: Normalisierung
   // ======================
-
   static int _clampMood(int v) {
     if (v < 0) return 0;
     if (v > 4) return 4;
@@ -312,20 +325,16 @@ class MoodEntry {
 
   static DateTime _parseDate(dynamic v) {
     if (v is DateTime) return v.toUtc();
-
     if (v is num) {
       final n = v.toInt().abs();
-      // Sekunden vs Millisekunden Heuristik
       if (n <= 9999999999) {
         return DateTime.fromMillisecondsSinceEpoch(n * 1000, isUtc: true);
       } else {
         return DateTime.fromMillisecondsSinceEpoch(n, isUtc: true);
       }
     }
-
     if (v is String) {
       final s = v.trim();
-      // Numerische Strings zulassen
       final asNum = int.tryParse(s);
       if (asNum != null) return _parseDate(asNum);
       try {
@@ -334,7 +343,6 @@ class MoodEntry {
         return DateTime.now().toUtc();
       }
     }
-
     return DateTime.now().toUtc();
   }
 
@@ -347,7 +355,6 @@ class MoodEntry {
 
   static String _csv(String? s) {
     final v = s ?? '';
-    // Escape doppelte Anführungszeichen nach RFC 4180
     final escaped = v.replaceAll('"', '""');
     return '"$escaped"';
   }

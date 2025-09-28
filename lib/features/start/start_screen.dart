@@ -1,282 +1,294 @@
 // lib/features/start/start_screen.dart
 //
-// StartScreen — Oxford Calm Onboarding (Green Style, v3.4)
-// -----------------------------------------------------------------
-// • Einheitlicher Full-bleed Backdrop via ZenBackdrop (Glow/Vignette/Haze/Wash)
-// • Panda mit sanftem Sage-Halo (Hero-ready)
-// • CTA: "Beginnen" mit Blume/Samen (Icons.spa_outlined)
-// • Trustline (Text only)
-// • A11y: Semantics, große Touch-Ziele
-//
-// Hinweis: nutzt ZenBackdrop statt mehrerer Overlays (performanter & konsistent)
+// StartScreen — ZenYourself · v5.4.1 (Ein-CTA Flow, route-agnostic)
+// -----------------------------------------------------------------------------
+// - Hintergrund: assets/startscreen1.png
+// - Panda:       assets/pandasitz.png
+// - 1 Haupt-CTA: „Beginnen“
+//     • Erststart (keine Einträge)  → ReflectionScreen
+//     • Wiederkehrend (>=1 Eintrag) → JourneyMapScreen
+// - Info-Bubble: kurzer Kontext-Hinweis (ohne Aktion)
+// - Footer: „Wie funktioniert das?“, „Datenschutz“, „Impressum“
+// -----------------------------------------------------------------------------
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
-// Design-Tokens (Farben/Spacing/Radii) – als Alias `zs`, Widgets werden hier „gehidet“
-import '../../shared/zen_style.dart' as zs
-    hide ZenBackdrop, ZenGlassCard, ZenGlassInput;
+import '../../shared/ui/zen_widgets.dart'
+    show
+        ZenAppScaffold,
+        ZenBackdrop,
+        ZenSafeImage,
+        ZenPrimaryButton,
+        ZenInfoBar,
+        ZenDialog,
+        ZenColors,
+        ZenTextStyles,
+        ZenRadii;
 
-// Zen-Widgets (nur die benötigten Widgets) – als Alias `zw`
-import '../../shared/ui/zen_widgets.dart' as zw show ZenBackdrop;
+// Daten/Provider
+import '../../providers/journal_entries_provider.dart';
 
-import '../../models/mood_entries_provider.dart';
-import '../../models/reflection_entries_provider.dart';
+// Direktnavigation (harness-sicher)
 import '../journey/journey_map.dart';
+import '../reflection/reflection_screen.dart';
 
 class StartScreen extends StatelessWidget {
   const StartScreen({super.key});
 
-  static const String _bgAsset = 'assets/startscreen1.png';
-  static const String _pandaAsset = 'assets/panda.png';
-  static const String _appName = 'ZenYourself';
-  static const String _tagline =
-      'Dein Raum für Selbstreflexion,\nAchtsamkeit & innere Ruhe';
-
-  // Responsive Konstanten
-  static const double _mobileMaxWidth = 560.0;
-  static const double _pandaSizeRel = 0.30;
-
   @override
   Widget build(BuildContext context) {
-    // Provider-Reads (einmalig im Build, kein Listen)
-    final entries = context.read<MoodEntriesProvider>().entries;
-    final reflections = context.read<ReflectionEntriesProvider>().reflections;
-
-    final size = MediaQuery.of(context).size;
-    final isNarrow = size.width < _mobileMaxWidth;
-
     final overlay = Theme.of(context).brightness == Brightness.dark
         ? SystemUiOverlayStyle.light
         : SystemUiOverlayStyle.dark;
 
-    final pandaW = _clampDouble(size.width * _pandaSizeRel, 130, 260);
+    final size = MediaQuery.of(context).size;
+    final isNarrow = size.width < 420;
+    final double pandaSize = isNarrow ? 160 : 200;
 
-    final titleStyle = Theme.of(context).textTheme.headlineMedium!;
-    final bodyStyle = Theme.of(context).textTheme.bodyMedium!;
+    final EdgeInsets pad =
+        EdgeInsets.fromLTRB(16, isNarrow ? 12 : 20, 16, isNarrow ? 18 : 28);
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: overlay,
-      child: Scaffold(
-        backgroundColor: zs.ZenColors.bg,
+      child: ZenAppScaffold(
+        appBar: null,
+        maxBodyWidth: 760,
+        bodyPadding: pad,
+        backdropAsset: 'assets/startscreen1.png',
+        backdropWash: .06,
+        backdropSaturation: .96,
+        backdropGlow: .30,
+        backdropVignette: .12,
+        backdropMilk: .10,
         body: SafeArea(
-          top: false,
-          bottom: false,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              // 1) Einheitlicher Backdrop (performant & konsistent)
-              const Positioned.fill(
-                child: zw.ZenBackdrop(
-                  asset: _bgAsset,
-                  alignment: Alignment.center,
-                  glow: .38,
-                  vignette: .12,
-                  enableHaze: true,
-                  hazeStrength: .16,
-                  saturation: .92, // leicht entsättigt
-                  wash: .06, // sanft aufgehellt
-                ),
-              ),
-
-              // 2) Inhalt
-              Center(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.only(bottom: zs.ZenSpacing.xl),
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: _mobileMaxWidth),
-                    child: Padding(
-                      padding: EdgeInsets.symmetric(
-                        horizontal: isNarrow ? zs.ZenSpacing.l : zs.ZenSpacing.xl,
-                        vertical: zs.ZenSpacing.s,
-                      ),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          SizedBox(height: MediaQuery.of(context).padding.top),
-                          const SizedBox(height: zs.ZenSpacing.l),
-
-                          // Panda mit Sage-Halo
-                          _PandaWithHalo(asset: _pandaAsset, width: pandaW),
-
-                          const SizedBox(height: zs.ZenSpacing.l),
-
-                          // App-Name (weicher als tiefschwarz)
-                          Text(
-                            _appName,
-                            textAlign: TextAlign.center,
-                            style: titleStyle.copyWith(
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: -0.2,
-                              color: zs.ZenColors.inkStrong.withValues(alpha: 0.90),
-                            ),
-                          ),
-
-                          const SizedBox(height: zs.ZenSpacing.s),
-
-                          // Tagline in Deep-Sage
-                          Text(
-                            _tagline,
-                            textAlign: TextAlign.center,
-                            style: bodyStyle.copyWith(
-                              fontWeight: FontWeight.w700,
-                              color: zs.ZenColors.deepSage,
-                              height: 1.35,
-                            ),
-                          ),
-
-                          const SizedBox(height: zs.ZenSpacing.l),
-
-                          // Bulletpoints
-                          Semantics(
-                            label:
-                                'Hauptvorteile: Geführte Reflexion, Privatsphäre, Mit Expertinnen und Experten entwickelt',
-                            container: true,
-                            child: const Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                _ChampionBullet(
-                                  icon: Icons.spa_rounded,
-                                  text:
-                                      'Geführte Reflexion mit wissenschaftlichem Ansatz',
-                                ),
-                                SizedBox(height: zs.ZenSpacing.s),
-                                _ChampionBullet(
-                                  icon: Icons.lock_rounded,
-                                  text:
-                                      'Deine Antworten sind privat – du entscheidest, was du teilst',
-                                ),
-                                SizedBox(height: zs.ZenSpacing.s),
-                                _ChampionBullet(
-                                  icon: Icons.groups_rounded,
-                                  text:
-                                      'Entwickelt mit Psychologen & Betroffenen',
-                                ),
-                              ],
-                            ),
-                          ),
-
-                          const SizedBox(height: zs.ZenSpacing.l * 1.25),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-
-              // 3) CTA unten
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: zs.ZenSpacing.xl + MediaQuery.of(context).padding.bottom,
-                child: Center(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: _mobileMaxWidth),
-                    child: Padding(
-                      padding: EdgeInsets.symmetric(
-                        horizontal: isNarrow ? zs.ZenSpacing.l : zs.ZenSpacing.xl,
-                      ),
-                      child: Column(
-                        children: [
-                          // CTA: „Beginnen“ (Blume/Samen)
-                          Semantics(
-                            button: true,
-                            label: 'Beginnen',
-                            child: _PrimaryCtaButton(
-                              label: 'Beginnen',
-                              onPressed: () {
-                                HapticFeedback.lightImpact();
-                                Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) => JourneyMapScreen(
-                                      moodEntries: entries,
-                                      reflections: reflections,
-                                    ),
-                                  ),
-                                );
-                              },
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          // Trustline (Text only, no emoji)
-                          Text(
-                            'Designed in Switzerland.',
-                            textAlign: TextAlign.center,
-                            style: Theme.of(context)
-                                .textTheme
-                                .labelMedium
-                                ?.copyWith(
-                                  color: zs.ZenColors.inkSubtle,
-                                  letterSpacing: 0.15,
-                                ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
+          child: Center(
+            child: _StartContent(pandaSize: pandaSize),
           ),
         ),
       ),
     );
   }
-
-  double _clampDouble(double v, double min, double max) {
-    if (v < min) return min;
-    if (v > max) return max;
-    return v;
-  }
 }
 
-// --- Panda mit sanftem Sage-Halo ---
-class _PandaWithHalo extends StatelessWidget {
-  final String asset;
-  final double width;
-  const _PandaWithHalo({required this.asset, required this.width});
+class _StartContent extends StatelessWidget {
+  final double pandaSize;
+  const _StartContent({required this.pandaSize});
 
   @override
   Widget build(BuildContext context) {
-    final haloSize = width + 56;
-    return Semantics(
-      label: 'Willkommensmaskottchen: Panda',
-      image: true,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          // Sage-Halo
-          Container(
-            width: haloSize,
-            height: haloSize,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: RadialGradient(
-                colors: [
-                  zs.ZenColors.sage.withValues(alpha: 0.30),
-                  zs.ZenColors.sage.withValues(alpha: 0.00),
-                ],
-                stops: const [0.0, 1.0],
+    final width = MediaQuery.of(context).size.width;
+    final narrow = width < 420;
+
+    // Live aus Provider: gibt es bereits Einträge?
+    final hasEntries = context.select<JournalEntriesProvider, bool>(
+      (p) => p.entries.isNotEmpty,
+    );
+
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        // Panda
+        Container(
+          margin: EdgeInsets.only(bottom: narrow ? 10 : 12),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                color: ZenColors.deepSage.withOpacity(.14),
+                blurRadius: 28,
+                spreadRadius: 2,
+                offset: const Offset(0, 6),
               ),
-              boxShadow: [
-                BoxShadow(
-                  color: zs.ZenColors.jadeMid.withValues(alpha: 0.10),
-                  blurRadius: 22,
-                  spreadRadius: 2,
-                ),
-              ],
-            ),
+            ],
           ),
-          Hero(
-            tag: 'panda-hero',
-            child: Image.asset(
-              asset,
-              width: width,
-              fit: BoxFit.contain,
-              errorBuilder: (_, __, ___) =>
-                  const SizedBox(width: 180, height: 180),
-            ),
+          child: ZenSafeImage.asset(
+            'assets/star_pa.png',
+            width: pandaSize,
+            height: pandaSize,
+          ),
+        ),
+
+        // Titel + Tagline
+        Text(
+          'ZenYourself',
+          textAlign: TextAlign.center,
+          style: ZenTextStyles.h2.copyWith(
+            fontWeight: FontWeight.w800,
+            color: ZenColors.deepSage,
+          ),
+        ),
+        SizedBox(height: narrow ? 4 : 6),
+        Text(
+          'Your inner voice, reconnected.',
+          textAlign: TextAlign.center,
+          style: ZenTextStyles.subtitle.copyWith(
+            color: ZenColors.jade,
+            fontWeight: FontWeight.w700,
+            height: 1.25,
+          ),
+        ),
+
+        SizedBox(height: narrow ? 12 : 16),
+
+        // Bullet-Punkte
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 620),
+          child: const Column(
+            children: [
+              _BulletRow(
+                icon: Icons.local_florist_rounded,
+                text: 'Geführte Reflexion mit wissenschaftlichem Ansatz',
+              ),
+              SizedBox(height: 8),
+              _BulletRow(
+                icon: Icons.lock_outline_rounded,
+                text:
+                    'Deine Antworten sind privat – du entscheidest, was du teilst',
+              ),
+              SizedBox(height: 8),
+              _BulletRow(
+                icon: Icons.groups_2_rounded,
+                text: 'Entwickelt mit Psychologen & Betroffenen',
+              ),
+            ],
+          ),
+        ),
+
+        SizedBox(height: narrow ? 14 : 18),
+
+        // Info-Bubble (Option A, ohne Aktion)
+        const _StartInfoBar(),
+
+        // CTA: Beginnen → Reflection (0) / Journey (>=1)
+        SizedBox(height: narrow ? 18 : 22),
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 360),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Expanded(
+                child: ZenPrimaryButton(
+                  label: 'Beginnen',
+                  icon: Icons.spa_rounded,
+                  height: 50,
+                  onPressed: () {
+                    HapticFeedback.selectionClick();
+                    if (hasEntries) {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const JourneyMapScreen(
+                            moodEntries: [],
+                            reflections: [],
+                          ),
+                        ),
+                      );
+                    } else {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const ReflectionScreen(),
+                        ),
+                      );
+                    }
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        // Footer-Links
+        SizedBox(height: narrow ? 12 : 16),
+        _SecondaryActions(),
+
+        SizedBox(height: narrow ? 8 : 12),
+        Opacity(
+          opacity: .70,
+          child: Text(
+            'Designed in Switzerland.',
+            style: ZenTextStyles.caption.copyWith(color: ZenColors.ink),
+            textAlign: TextAlign.center,
+          ),
+        ),
+        SizedBox(height: narrow ? 6 : 10),
+      ],
+    );
+  }
+}
+
+class _BulletRow extends StatelessWidget {
+  final IconData icon;
+  final String text;
+  const _BulletRow({required this.icon, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    final style = Theme.of(context)
+        .textTheme
+        .bodyMedium
+        ?.copyWith(color: ZenColors.inkStrong, height: 1.32);
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 18, color: ZenColors.deepSage),
+        const SizedBox(width: 8),
+        Expanded(child: Text(text, style: style)),
+      ],
+    );
+  }
+}
+
+class _StartInfoBar extends StatelessWidget {
+  const _StartInfoBar();
+
+  @override
+  Widget build(BuildContext context) {
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 620),
+      child: ZenInfoBar(
+        message:
+            'Erster Start: Beginnen führt dich in die Reflexion.\n'
+            'Ab dem ersten Eintrag öffnet Beginnen das Hauptmenü.',
+        // keine Aktion – Footer deckt weiterführende Infos ab
+        color: ZenColors.jade.withOpacity(.08),
+      ),
+    );
+  }
+}
+
+class _SecondaryActions extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final linkStyle = Theme.of(context).textTheme.bodySmall?.copyWith(
+          color: ZenColors.jade,
+          fontWeight: FontWeight.w700,
+        );
+
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 580),
+      child: Wrap(
+        spacing: 14,
+        runSpacing: 6,
+        alignment: WrapAlignment.center,
+        children: [
+          _TextLink(
+            label: 'Wie funktioniert das?',
+            onTap: () => _showHowItWorks(context),
+            style: linkStyle,
+          ),
+          _Dot(),
+          _TextLink(
+            label: 'Datenschutz',
+            onTap: () => _showPrivacy(context),
+            style: linkStyle,
+          ),
+          _Dot(),
+          _TextLink(
+            label: 'Impressum',
+            onTap: () => _showImprint(context),
+            style: linkStyle,
           ),
         ],
       ),
@@ -284,74 +296,186 @@ class _PandaWithHalo extends StatelessWidget {
   }
 }
 
-// --- Bullet mit Icon & Zen-Typografie ---
-class _ChampionBullet extends StatelessWidget {
-  final IconData icon;
-  final String text;
-  const _ChampionBullet({required this.icon, required this.text});
-
+class _Dot extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    final style = Theme.of(context).textTheme.bodyMedium!.copyWith(
-          fontSize: 15.8,
-          color: zs.ZenColors.ink,
-          fontWeight: FontWeight.w500,
-          letterSpacing: 0.07,
-          height: 1.32,
-        );
-
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(icon, color: zs.ZenColors.deepSage, size: 21.5),
-        const SizedBox(width: zs.ZenSpacing.s),
-        Expanded(child: Text(text, style: style)),
-      ],
+    return Text(
+      '·',
+      style: ZenTextStyles.caption.copyWith(
+        color: ZenColors.ink,
+        fontWeight: FontWeight.w700,
+      ),
     );
   }
 }
 
-// --- Lokaler Primary CTA (kompakt) mit Blume/Samen-Icon ---
-class _PrimaryCtaButton extends StatelessWidget {
+class _TextLink extends StatelessWidget {
   final String label;
-  final VoidCallback onPressed;
-
-  const _PrimaryCtaButton({
-    required this.label,
-    required this.onPressed,
-  });
+  final VoidCallback onTap;
+  final TextStyle? style;
+  const _TextLink({required this.label, required this.onTap, this.style});
 
   @override
   Widget build(BuildContext context) {
-    final txt = Theme.of(context).textTheme.labelLarge?.copyWith(
-          fontSize: 16.0,
-          fontWeight: FontWeight.w700,
-          letterSpacing: 0.6, // ruhiger Raum zwischen Buchstaben
-          color: Colors.white,
-        );
-
-    return ConstrainedBox(
-      constraints: const BoxConstraints(minHeight: 48), // kompakter
-      child: ElevatedButton.icon(
-        style: ElevatedButton.styleFrom(
-          backgroundColor: zs.ZenColors.deepSage,
-          foregroundColor: Colors.white,
-          elevation: 1.7,
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-          shape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(zs.ZenRadii.l),
-          ),
-        ).copyWith(
-          overlayColor: WidgetStateProperty.resolveWith(
-            (states) => states.contains(WidgetState.pressed)
-                ? Colors.black.withValues(alpha: 0.06)
-                : null,
-          ),
-        ),
-        onPressed: onPressed,
-        icon: const Icon(Icons.spa_outlined, size: 22),
-        label: Text(label, style: txt),
+    return InkWell(
+      borderRadius: const BorderRadius.all(ZenRadii.s),
+      onTap: () {
+        HapticFeedback.selectionClick();
+        onTap();
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        child: Text(label, style: style),
       ),
     );
   }
+}
+
+// ───────────────────────────────── Dialoge ─────────────────────────────────
+
+void _showHowItWorks(BuildContext context) {
+  showDialog(
+    context: context,
+    builder: (ctx) => ZenDialog(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.info_outline_rounded,
+                      color: ZenColors.deepSage),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Wie funktioniert ZenYourself?',
+                    style: ZenTextStyles.title.copyWith(
+                      color: ZenColors.deepSage,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Du startest mit einem Gedanken oder einer kurzen Frage. '
+                'Der Panda spiegelt und stellt eine ruhige, präzise Frage zurück. '
+                'Du entscheidest, was du teilen möchtest. '
+                'Deine Antworten kannst du später im Gedankenbuch speichern.',
+                style:
+                    ZenTextStyles.body.copyWith(color: ZenColors.ink, height: 1.34),
+              ),
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('Schließen'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+void _showPrivacy(BuildContext context) {
+  showDialog(
+    context: context,
+    builder: (ctx) => ZenDialog(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.lock_outline_rounded,
+                      color: ZenColors.deepSage),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Datenschutz',
+                    style: ZenTextStyles.title.copyWith(
+                      color: ZenColors.deepSage,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Deine Antworten sind privat. '
+                'Sie werden lokal angezeigt und nur dann geteilt, wenn du das ausdrücklich möchtest. '
+                'Du kannst jede Reflexion auch als Entwurf behalten oder später löschen.',
+                style:
+                    ZenTextStyles.body.copyWith(color: ZenColors.ink, height: 1.34),
+              ),
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('Schließen'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+void _showImprint(BuildContext context) {
+  showDialog(
+    context: context,
+    builder: (ctx) => ZenDialog(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.badge_outlined, color: ZenColors.deepSage),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Impressum',
+                    style: ZenTextStyles.title.copyWith(
+                      color: ZenColors.deepSage,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'ZenYourself · Switzerland\n'
+                'Kontakt: hello@zenyourself.app\n'
+                'Hinweis: Dies ist eine mentale Unterstützungs-App und ersetzt keine Therapie.',
+                style:
+                    ZenTextStyles.body.copyWith(color: ZenColors.ink, height: 1.34),
+              ),
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('Schließen'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
 }

@@ -4,7 +4,6 @@ publish_to: "none"
 version: 1.0.0+1
 
 environment:
-  # Moderne Pakete (intl, flutter_svg, notifications, speech_to_text) brauchen Dart 3.x
   sdk: ">=3.3.0 <4.0.0"
 
 dependencies:
@@ -18,7 +17,6 @@ dependencies:
 
   # ---- System / Storage ----------------------------------------------
   path_provider: ^2.1.5
-  # WICHTIG: Diese Version ist stabil und kompatibel zu unserem LocalStorageService
   shared_preferences: ^2.2.2
   flutter_secure_storage: ^9.0.0
 
@@ -36,7 +34,6 @@ dependencies:
 
   # ---- Media / Audio --------------------------------------------------
   just_audio: ^0.9.36
-  # audioplayers: ^6.5.0   # absichtlich entfernt (Konflikte vermeiden)
 
   # ---- Device / Permissions / Notifications --------------------------
   permission_handler: ^11.3.0
@@ -49,7 +46,7 @@ dependencies:
   screenshot: ^3.0.0
   uuid: ^4.4.2
   collection: ^1.18.0
-  intl: ^0.20.2   # kompatibel zu flutter_localizations (DE-Formatierungen)
+  intl: ^0.20.2
 
 dev_dependencies:
   flutter_test:
@@ -58,11 +55,27 @@ dev_dependencies:
   json_serializable: ^6.7.1
   flutter_lints: ^4.0.0
 
+  # ---- App-Icon Generator --------------------------------------------
+  flutter_launcher_icons: ^0.13.1
+
+# App-Icons (Profi: adaptive + monochrome + iOS Alpha-Removal)
+flutter_launcher_icons:
+  android: true
+  ios: true
+  # Basis-Icon (mind. 1024x1024, ohne abgerundete Ecken)
+  image_path: assets/icons/icon_zenyourself.png
+  # Adaptive Icons (Android 8.0+)
+  adaptive_icon_background: "#2F5F49"               # Zen-Grün (oder PNG)
+  adaptive_icon_foreground: assets/icons/icon_zenyourself.png
+  adaptive_icon_monochrome: assets/icons/icon_zenyourself.png
+  # Platform Tweaks
+  min_sdk_android: 21
+  remove_alpha_ios: true
+
 flutter:
   uses-material-design: true
 
   assets:
-    # Einzelbilder (Hero/Backdrops etc.)
     - assets/journey_rain.png
     - assets/schoen.png
     - assets/schmetterlingpanda.png
@@ -77,13 +90,7 @@ flutter:
     - assets/langerweg.png
     - assets/flusspanda.png
     - assets/brueckenpanda.png
-    - assets/onboard_speak.png
-    - assets/bild1.png
-    - assets/bild2.png
-    - assets/bild3.png
-    - assets/bild4.png
-    - assets/bild5.png
-    - assets/bild6.png
+    - assets/pandasitz.png
     - assets/startbild1.png
     - assets/startbild2.png
     - assets/startbild3.png
@@ -105,9 +112,16 @@ flutter:
     - assets/teich.png
     - assets/tempel.png
     - assets/welcomescreen.png
-    - assets/woleknhimmel.png  # (prüf: Schreibweise korrekt?)
+    - assets/woleknhimmel.png  # Schreibweise prüfen, sonst anpassen
     - assets/wolken.png
     - assets/zweiwege.png
+    - assets/panda-header.png
+    - assets/story_panda_final.png
+    - assets/bg/bg_start.png
+    - assets/bg/bg_journal.png
+    - assets/bg/bg_menu.png
+    - assets/bg/bg_reflection.png
+    - assets/star_pa.png
 
     # Ordner komplett einbinden:
     - assets/audio/
@@ -117,6 +131,10 @@ flutter:
     - family: NotoSans
       fonts:
         - asset: assets/fonts/NotoSans-Regular.ttf
-    # - family: ZenKalligrafie
-    #   fonts:
-    #     - asset: assets/fonts/ZenKalligrafie-Regular.ttf
+
+    # ZenKalligrafie vorläufig auf NotoSans aliasiert, damit der Build nie
+    # an einer fehlenden Datei scheitert. Wenn vorhanden, diese Zeile durch
+    # assets/fonts/ZenKalligrafie-Regular.ttf ersetzen.
+    - family: ZenKalligrafie
+      fonts:
+        - asset: assets/fonts/NotoSans-Regular.ttf

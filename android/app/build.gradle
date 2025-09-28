@@ -16,15 +16,17 @@ def flutterVersionCode = localProperties.getProperty('flutter.versionCode') ?: '
 def flutterVersionName = localProperties.getProperty('flutter.versionName') ?: '1.0'
 
 android {
-    namespace "com.example.image_gallery_saver"
+    // ❗️Nur eine namespace-Zeile behalten:
     namespace "com.example.zenyourself_complete_ui_final"
-    compileSdkVersion 35
-    ndkVersion "26.3.11579264"
+
+    // ⚙️ SDK & NDK anheben
+    compileSdk 36
+    ndkVersion "27.0.12077973"
 
     defaultConfig {
         applicationId "com.example.zenyourself_complete_ui_final"
-        minSdkVersion 21
-        targetSdkVersion 35
+        minSdkVersion flutter.minSdkVersion
+        targetSdkVersion 36
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
     }
@@ -46,7 +48,7 @@ android {
     buildTypes {
         release {
             signingConfig signingConfigs.debug
-            // Für Production hier deinen eigenen Release-Key eintragen!
+            // TODO: Für Production deinen echten Release-Key eintragen.
         }
     }
 }
@@ -56,6 +58,6 @@ flutter {
 }
 
 dependencies {
-    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22"
+    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22" // ok für jetzt
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'
 }

@@ -1,13 +1,14 @@
 // lib/features/pro/pro_screen.dart
 //
-// ProScreen — Oxford Journey Board (Unified Backdrop, glass bubbles)
+// ProScreen — Oxford Journey Board (v3.2 · 2025-09-13)
 // ------------------------------------------------------------------
-// WHY:
-// - Video-Export ausgeblendet (Roadmap).
-// - PDF/CSV Export per try/catch abgesichert + klare Snackbars.
-// - A11y: Semantics-Labels für Export-Buttons.
-// - Provider-first Kennzahlen & Sparkline bleiben erhalten.
-// - Keine neuen Abhängigkeiten, nur behutsame Anpassungen.
+// Fixes & Updates
+// • ✅ AnimatedPandaGlow: korrektes createState() + ruhiger Glow.
+// • ✅ Stable Flutter APIs: überall .withOpacity statt .withValues.
+// • ✅ Alias-Imports: zen_style.dart hidden (Backdrop/Glass/AppBar in ui).
+// • 🛡️ Export bleibt try/catch + Snackbars (wie vorher).
+// • 🐼 Panda-Header, Glas-Bubbles & KPIs unverändert im Oxford-Stil.
+//
 
 import 'dart:ui';
 import 'package:flutter/material.dart';
@@ -63,17 +64,15 @@ class ProScreen extends StatelessWidget {
         ? _averageMoodFromProvider(prov, window: const Duration(days: 30))
         : _fallbackAvgMoodFromMoodEntries(moodEntries);
 
-    final reflectionsCount = hasProv
-        ? prov.reflections.length
-        : reflectionEntries.length;
+    final reflectionsCount =
+        hasProv ? prov.reflections.length : reflectionEntries.length;
 
     final activeDays = hasProv
         ? _activeDaysCountFromProvider(prov)
         : moodEntries.map((e) => e.dayTag).toSet().length;
 
-    final lastInsights = hasProv
-        ? prov.reflections.take(5).toList()
-        : const <jm.JournalEntry>[];
+    final lastInsights =
+        hasProv ? prov.reflections.take(5).toList() : const <jm.JournalEntry>[];
 
     final last7MoodLegacy = moodEntries.takeLast(7);
     final last7FromSeries = series.takeLast(7);
@@ -138,7 +137,7 @@ class ProScreen extends StatelessWidget {
                             shadows: [
                               Shadow(
                                 blurRadius: 8,
-                                color: Colors.black.withValues(alpha: .08),
+                                color: Colors.black.withOpacity(.08),
                                 offset: const Offset(0, 2),
                               ),
                             ],
@@ -325,23 +324,23 @@ class ProScreen extends StatelessWidget {
                                     semanticsLabel:
                                         'Monatsdaten als CSV exportieren',
                                     onTap: () {
-                                      try {
-                                        AnonExportWidget.exportAsCSV(
-                                          context,
-                                          moodEntries,
-                                        );
-                                      } catch (_) {
-                                        ScaffoldMessenger.of(context)
-                                            .showSnackBar(
-                                          const SnackBar(
-                                            content: Text(
-                                              'CSV-Export nicht möglich. Bitte später erneut versuchen.',
+                                        try {
+                                          AnonExportWidget.exportAsCSV(
+                                            context,
+                                            moodEntries,
+                                          );
+                                        } catch (_) {
+                                          ScaffoldMessenger.of(context)
+                                              .showSnackBar(
+                                            const SnackBar(
+                                              content: Text(
+                                                'CSV-Export nicht möglich. Bitte später erneut versuchen.',
+                                              ),
+                                              behavior:
+                                                  SnackBarBehavior.floating,
                                             ),
-                                            behavior:
-                                                SnackBarBehavior.floating,
-                                          ),
-                                        );
-                                      }
+                                          );
+                                        }
                                     },
                                   ),
                                   // Video-Export ist ausgeblendet (Roadmap)
@@ -482,7 +481,7 @@ class ProScreen extends StatelessWidget {
             dense: true,
             contentPadding: EdgeInsets.zero,
             leading: Icon(Icons.bubble_chart_rounded,
-                color: zs.ZenColors.deepSage.withValues(alpha: 0.86)),
+                color: zs.ZenColors.deepSage.withOpacity(0.86)),
             title: Text(
               _bestReflectionTextJournal(e),
               style: tt.bodyMedium!.copyWith(
@@ -510,7 +509,7 @@ class ProScreen extends StatelessWidget {
           dense: true,
           contentPadding: EdgeInsets.zero,
           leading: Icon(Icons.bubble_chart_rounded,
-              color: zs.ZenColors.deepSage.withValues(alpha: 0.86)),
+              color: zs.ZenColors.deepSage.withOpacity(0.86)),
           title: Text(
             _bestReflectionTextLegacy(e),
             style: tt.bodyMedium!.copyWith(
@@ -573,6 +572,7 @@ class ProScreen extends StatelessWidget {
 class AnimatedPandaGlow extends StatefulWidget {
   final double size;
   const AnimatedPandaGlow({this.size = 68, super.key});
+
   @override
   State<AnimatedPandaGlow> createState() => _AnimatedPandaGlowState();
 }
@@ -606,14 +606,14 @@ class _AnimatedPandaGlowState extends State<AnimatedPandaGlow>
           boxShadow: [
             BoxShadow(
               color: zs.ZenColors.deepSage
-                  .withValues(alpha: 0.10 + 0.17 * _glowController.value),
+                  .withOpacity(0.10 + 0.17 * _glowController.value),
               blurRadius: 30 + 16 * _glowController.value,
               spreadRadius: 4 + 5 * _glowController.value,
             ),
           ],
         ),
         child: Image.asset(
-          'assets/panda.png',
+          'assets/star_pa.png',
           width: widget.size,
           height: widget.size,
           fit: BoxFit.contain,
@@ -642,22 +642,21 @@ class _ZenMoodBar extends StatelessWidget {
           height: 18 + (e?.moodScore ?? 1) * 4.0,
           margin: const EdgeInsets.symmetric(horizontal: 3),
           decoration: BoxDecoration(
-            color: e == null
-                ? Colors.grey.withValues(alpha: 0.12)
-                : e.color.withValues(alpha: 0.96),
+            color:
+                e == null ? Colors.grey.withOpacity(0.12) : e.color.withOpacity(0.96),
             borderRadius: BorderRadius.circular(10),
             boxShadow: [
               if (e != null)
                 BoxShadow(
-                  color: e.color.withValues(alpha: 0.10),
+                  color: e.color.withOpacity(0.10),
                   blurRadius: 9,
                   offset: const Offset(0, 2),
                 ),
             ],
             border: Border.all(
               color: e == null
-                  ? Colors.grey.withValues(alpha: 0.16)
-                  : e.color.withValues(alpha: 0.35),
+                  ? Colors.grey.withOpacity(0.16)
+                  : e.color.withOpacity(0.35),
               width: 1.1,
             ),
           ),
@@ -697,7 +696,7 @@ class _ZenMoodBarSeries extends StatelessWidget {
       children: List.generate(7, (i) {
         final val = i < norm.length ? norm[i] : null;
         final color = val == null
-            ? Colors.grey.withValues(alpha: 0.12)
+            ? Colors.grey.withOpacity(0.12)
             : (val >= 3.0
                 ? zs.ZenColors.deepSage
                 : (val >= 2.0 ? zs.ZenColors.sage : Colors.grey));
@@ -707,21 +706,20 @@ class _ZenMoodBarSeries extends StatelessWidget {
           height: 18 + (val ?? 1) * 4.0,
           margin: const EdgeInsets.symmetric(horizontal: 3),
           decoration: BoxDecoration(
-            color:
-                val == null ? Colors.grey.withValues(alpha: 0.12) : color.withValues(alpha: 0.96),
+            color: val == null ? Colors.grey.withOpacity(0.12) : color.withOpacity(0.96),
             borderRadius: BorderRadius.circular(10),
             boxShadow: [
               if (val != null)
                 BoxShadow(
-                  color: color.withValues(alpha: 0.10),
+                  color: color.withOpacity(0.10),
                   blurRadius: 9,
                   offset: const Offset(0, 2),
                 ),
             ],
             border: Border.all(
               color: val == null
-                  ? Colors.grey.withValues(alpha: 0.16)
-                  : color.withValues(alpha: 0.35),
+                  ? Colors.grey.withOpacity(0.16)
+                  : color.withOpacity(0.35),
               width: 1.1,
             ),
           ),
@@ -754,7 +752,6 @@ class ZenMoodGraphSeries extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final data = series.takeLast(30);
-    final tt = Theme.of(context).textTheme;
 
     return SizedBox(
       height: 118,
@@ -781,8 +778,8 @@ class ZenMoodGraphSeries extends StatelessWidget {
                 show: true,
                 gradient: LinearGradient(
                   colors: [
-                    zs.ZenColors.sage.withValues(alpha: 0.16),
-                    Colors.white.withValues(alpha: 0.10),
+                    zs.ZenColors.sage.withOpacity(0.16),
+                    Colors.white.withOpacity(0.10),
                   ],
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
@@ -796,7 +793,7 @@ class ZenMoodGraphSeries extends StatelessWidget {
                   .map(
                     (t) => LineTooltipItem(
                       'Wert: ${t.y.toStringAsFixed(2)}',
-                      tt.bodyMedium!.copyWith(
+                      const TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.bold,
                       ),
@@ -816,7 +813,7 @@ class ZenMoodGraphSeries extends StatelessWidget {
 Widget _vSep() => Container(
       width: 1.6,
       height: 37,
-      color: zs.ZenColors.sage.withValues(alpha: 0.18),
+      color: zs.ZenColors.sage.withOpacity(0.18),
     );
 
 // Statistik-Kachel
@@ -837,7 +834,7 @@ class _ProStatTile extends StatelessWidget {
     return Column(
       children: [
         CircleAvatar(
-          backgroundColor: zs.ZenColors.sage.withValues(alpha: 0.18),
+          backgroundColor: zs.ZenColors.sage.withOpacity(0.18),
           radius: 20.5,
           child: Icon(icon, color: zs.ZenColors.sage, size: 20.5),
         ),

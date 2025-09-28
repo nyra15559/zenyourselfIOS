@@ -1,21 +1,26 @@
 // lib/services/speech_service.dart
 //
-// SpeechService — Oxford Safety Edition v2.2 (prod-safe, reentrancy-proof)
+// SpeechService — Oxford Safety Edition v2.4 (prod-safe, reentrancy-proof)
+// Update: 2025-09-24
 // -----------------------------------------------------------------------
-// Drop-in-Kompatibilität zu bestehendem Code:
+// Drop-in-Kompatibilität zur v2.3-API:
 //   - Klasse: SpeechService (ChangeNotifier)
 //   - Properties: isRecording, isPaused, isActive, transcript$, partial$,
 //                 level$, elapsed$, elapsedSeconds$, totalSeconds
 //   - Methoden: start/stop/pause/resume/toggle/reset/dispose
 //   - Debug-Simulation optional (kDebugMode)
 //   - attachTranscriber(...) & attachWhisper(...)
-//
-// Hinweis ggü. v2.1: Die Transcriber-Schnittstelle liegt in whisper_service.dart
-// (SpeechTranscriber). Wir importieren sie als `stt` und re-exportieren die Typen.
-//
+// Änderungen ggü. v2.3:
+//   • Permissions: echter Check via permission_handler (graceful Fallback auf true
+//     bei Web/fehlender Plattform-Unterstützung, kein harter Fail).
+//   • Stabilität: defensive Guards gegen doppelte State-Wechsel, bessere
+//     Fehlerweitergabe ohne UI-Crash.
+//   • Kommentar- und Log-Feinschliff.
+// -----------------------------------------------------------------------
 
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:permission_handler/permission_handler.dart' as ph;
 
 // Transcriber-Typen aus whisper_service.dart
 import './whisper_service.dart' as stt;
@@ -110,6 +115,7 @@ class SpeechService with ChangeNotifier {
 
   /// Idempotenter Toggle: Startet (falls idle) oder stoppt (falls aktiv).
   Future<void> toggle({bool? simulate, Duration? maxDuration, String? locale}) async {
+    if (_disposed) return;
     if (isRecording || isPaused) {
       await stop();
     } else {
@@ -126,7 +132,7 @@ class SpeechService with ChangeNotifier {
     if (_state == SpeechState.stopping) return; // mitten im Stop → ignoriere
     if (isRecording || isPaused) return; // idempotent
 
-    // Mic-Permission (später mit permission_handler ersetzen)
+    // Mic-Permission
     final hasMic = await _checkMicrophonePermission();
     if (!hasMic) {
       _fail('Mikrofonberechtigung verweigert');
@@ -171,9 +177,14 @@ class SpeechService with ChangeNotifier {
       try {
         await _engine!.start(locale: locale);
       } catch (e) {
-        _fail('Transcriber-Start fehlgeschlagen', error: e);
+        // v2.4: Kein Error-State, wenn Simulation aktiv – stattdessen Warnung + Simulation.
         if (_simulate) {
+          if (!_errorCtrl.isClosed) {
+            _errorCtrl.add('Transcriber-Start fehlgeschlagen – wechsle in Simulation');
+          }
           _startSimulation();
+        } else {
+          _fail('Transcriber-Start fehlgeschlagen', error: e);
         }
       }
     } else if (_simulate) {
@@ -289,7 +300,8 @@ class SpeechService with ChangeNotifier {
   void setLevel(double level) {
     if (_disposed) return;
     if (_levelCtrl.isClosed) return;
-    final clamped = level.clamp(0.0, 1.0);
+    final num clampedNum = level.clamp(0.0, 1.0);
+    final double clamped = clampedNum.toDouble();
     _levelCtrl.add(clamped);
   }
 
@@ -331,9 +343,11 @@ class SpeechService with ChangeNotifier {
       if (_elapsedCtrl.isClosed) return;
       _elapsedCtrl.add(_sw.elapsed);
       if (_simulate) {
-        // kleiner Pegel-Jitter für UI-Feedback
+        // kleiner Pegel-Jitter für UI-Feedback (0..1..0 Dreieck)
         final ms = _sw.elapsedMilliseconds % 2000;
-        final amp = (ms < 1000 ? ms / 1000 : (2000 - ms) / 1000).clamp(0.05, 0.9);
+        final double base = ms < 1000 ? ms / 1000.0 : (2000 - ms) / 1000.0;
+        final num clampedNum = base.clamp(0.05, 0.9);
+        final double amp = clampedNum.toDouble();
         setLevel(amp);
       }
     });
@@ -380,11 +394,25 @@ class SpeechService with ChangeNotifier {
     _simuTimer = null;
   }
 
-  // ---------------- Permissions (Stub) ----------------
-
+  // ---------------- Permissions ----------------
+  //
+  // Nutzt permission_handler, fällt aber auf true zurück, wenn:
+  // - Web (Browser zeigt eigenen Prompt),
+  // - Plattform die Abfrage nicht unterstützt,
+  // - ein Fehler geworfen wird (wir verhindern harte Crashes).
+  //
   Future<bool> _checkMicrophonePermission() async {
-    // TODO: mit permission_handler/Platform-APIs ersetzen.
-    return true;
+    try {
+      if (kIsWeb) return true; // Browser fragt selbst
+      // Einige Desktop-Targets haben (noch) keine vollen Permission-APIs.
+      final status = await ph.Permission.microphone.status;
+      if (status.isGranted) return true;
+      final req = await ph.Permission.microphone.request();
+      return req.isGranted || req.isLimited;
+    } catch (_) {
+      // Fallback: nicht blockieren, UI kann trotzdem starten
+      return true;
+    }
   }
 
   // ---------------- Engine-Subs Cleanup ----------------
@@ -402,6 +430,10 @@ class SpeechService with ChangeNotifier {
 
   void _setState(SpeechState s) {
     if (_disposed) return;
+    if (_state == s) {
+      // keine UI-Flut
+      return;
+    }
     _state = s;
     try {
       if (!_disposed) notifyListeners();

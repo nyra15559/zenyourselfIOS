@@ -1,7 +1,7 @@
 // lib/features/journal/journal_screen.dart
 //
-// JournalScreen — Oxford-Zen Timeline (Phase 2.7 + sanftes Pull-to-refresh)
-// ---------------------------------------------------------------------------
+// JournalScreen — Oxford-Zen Timeline (Phase 2.8 • Parität + sanftes Pull-to-refresh)
+// -----------------------------------------------------------------------------------
 // • Nutzt JournalEntriesProvider (Filter + Soft-Hide) und JournalEntry.
 // • Tages-Gruppierung (lokale Zeit) + ruhige Timeline mit Panda-Header.
 // • Zentrierte Filter-Pille: Alle / Tagebuch / Reflexion / Kurzgeschichte (Counts).
@@ -9,7 +9,16 @@
 // • Aktionen: Öffnen, Erneut reflektieren (nur Reflexion), Ausblenden, Löschen.
 // • Crash-Fix: KEIN IntrinsicHeight mehr (Timeline-Reihe via Stack/Align).
 // • FAB („+“) kontextsensitiv, optisch beruhigt (Deep Sage).
-// • NEU (sanft): Pull-to-refresh → provider.restore() (wenn Persistence-Hooks gesetzt).
+// • Pull-to-refresh → provider.restore() (falls Persistence-Hooks gesetzt).
+//
+// In diesem Patch (Parität zum Viewer):
+// • _openViewer: Story wird korrekt als Story angezeigt (Header, Badge, Volltext).
+// • Übergabe der Story-Felder (title/teaser/body) an JournalEntryView.
+// • Kommentare/Benennung aufgeräumt; keine Verhaltensänderung außerhalb des Fixes.
+//
+// Technische Notizen:
+// • Bei ZenAppBar/Backdrop KEINE const verwenden (intern dynamisch).
+// • Color.withOpacity(...) statt withValues(...).
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -124,7 +133,8 @@ class JournalScreen extends StatelessWidget {
     );
   }
 
-  // Sanfter Pull-to-refresh Wrapper (macht nichts kaputt, ruft restore() wenn vorhanden)
+  // ——————————————————— Pull-to-refresh Wrapper ———————————————————
+
   Widget _wrapRefresh({
     required BuildContext context,
     required jp.JournalEntriesProvider provider,
@@ -141,7 +151,7 @@ class JournalScreen extends StatelessWidget {
     );
   }
 
-  // ─────────────────────────── UI: Empty State ───────────────────────────
+  // ———————————————————————— UI: Empty State ————————————————————————
 
   Widget _buildEmptyState(
     BuildContext context,
@@ -151,7 +161,7 @@ class JournalScreen extends StatelessWidget {
     final pandaSize = MediaQuery.of(context).size.width < 470 ? 88.0 : 112.0;
     final activeFilter = provider.filterKind;
 
-    // Klarer CTA zusätzlich zum FAB (gerade wenn Nutzer das FAB übersieht)
+    // Klarer CTA zusätzlich zum FAB (falls Nutzer das FAB übersieht)
     return ListView(
       key: const PageStorageKey('journal_empty'),
       physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
@@ -214,7 +224,7 @@ class JournalScreen extends StatelessWidget {
     }
   }
 
-  // ─────────────────────────── UI: Timeline ───────────────────────────
+  // ———————————————————————— UI: Timeline —————————————————————————
 
   Widget _buildTimelineList(
     BuildContext context, {
@@ -314,35 +324,49 @@ class JournalScreen extends StatelessWidget {
     );
   }
 
-  // ─────────────────────────── Actions ───────────────────────────
+  // ———————————————————————— Actions / Navigation ————————————————————————
 
   Future<void> _openViewer(BuildContext context, jm.JournalEntry e) async {
-    jv.EntryKind vk(jm.EntryKind k) {
-      switch (k) {
-        case jm.EntryKind.reflection:
-          return jv.EntryKind.reflection;
-        case jm.EntryKind.journal:
-          return jv.EntryKind.journal;
-        case jm.EntryKind.story:
-          // Bis der Story-Viewer fertig ist, zeigen wir die Story im Journal-Viewer an
-          return jv.EntryKind.journal;
-      }
-    }
+    // Korrekte Abbildung des Model-Enums auf den Viewer-Typ.
+    final viewKind = switch (e.kind) {
+      jm.EntryKind.journal    => jv.EntryKind.journal,
+      jm.EntryKind.reflection => jv.EntryKind.reflection,
+      jm.EntryKind.story      => jv.EntryKind.story, // ← wichtig: Story bleibt Story
+    };
 
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => jv.JournalEntryView(
-          kind: vk(e.kind),
+          kind: viewKind,
           createdAt: e.createdAt,
-          journalText: e.kind == jm.EntryKind.journal ? e.thoughtText : null,
-          userThought: e.kind == jm.EntryKind.reflection ? e.thoughtText : null,
-          aiQuestion: e.kind == jm.EntryKind.reflection ? e.aiQuestion : null,
-          userAnswer: e.kind == jm.EntryKind.reflection ? e.userAnswer : null,
-          moodLabel: e.moodLabel, // ← nutzt Tag-Auswertung im Model
+
+          // Tagebuch
+          journalText: viewKind == jv.EntryKind.journal ? e.thoughtText : null,
+
+          // Reflexion
+          userThought: viewKind == jv.EntryKind.reflection ? e.thoughtText : null,
+          aiQuestion:  viewKind == jv.EntryKind.reflection ? e.aiQuestion  : null,
+          userAnswer:  viewKind == jv.EntryKind.reflection ? e.userAnswer  : null,
+
+          // Kurzgeschichte — vollständige Weitergabe an den Viewer
+          storyTitle:  viewKind == jv.EntryKind.story ? _storyTitleFor(e) : null,
+          storyTeaser: viewKind == jv.EntryKind.story ? e.storyTeaser   : null,
+          storyBody:   viewKind == jv.EntryKind.story ? e.storyBody     : null,
+
+          // Stimmung (Panda-Chip)
+          moodLabel: _moodLabelOf(e),
           onEdit: null,
         ),
       ),
     );
+  }
+
+  // Falls Story keinen expliziten Titel hat, fällt sauber auf e.title zurück.
+  String? _storyTitleFor(jm.JournalEntry e) {
+    final t = (e.storyTitle ?? '').trim();
+    if (t.isNotEmpty) return t;
+    final fallback = (e.title ?? '').trim();
+    return fallback.isEmpty ? null : fallback;
   }
 
   Future<void> _continueIntoReflection(
@@ -356,7 +380,7 @@ class JournalScreen extends StatelessWidget {
       if ((e.thoughtText ?? '').trim().isNotEmpty) return e.thoughtText!.trim();
       if ((e.userAnswer ?? '').trim().isNotEmpty) return e.userAnswer!.trim();
       if ((e.aiQuestion ?? '').trim().isNotEmpty) return e.aiQuestion!.trim();
-      return e.computedTitle;
+      return _computedTitle(e);
     })();
 
     await Navigator.of(context).push(
@@ -385,7 +409,7 @@ class JournalScreen extends StatelessWidget {
     }
   }
 
-  // ─────────────────────────── Bottom Sheets ───────────────────────────
+  // ———————————————————————— Bottom Sheets ————————————————————————
 
   void _showNewDiarySheet(
       BuildContext context, jp.JournalEntriesProvider provider) {
@@ -550,7 +574,7 @@ class JournalScreen extends StatelessWidget {
     );
   }
 
-  // ─────────────────────────── Helpers ───────────────────────────
+  // ———————————————————————— Helpers ————————————————————————
 
   List<_DayGroup> _groupByDay(List<jm.JournalEntry> items) {
     if (items.isEmpty) return const <_DayGroup>[];
@@ -581,9 +605,51 @@ class JournalScreen extends StatelessWidget {
     out.sort((a, b) => b.dateOnly.compareTo(a.dateOnly));
     return out;
   }
+
+  // ——— Local fallbacks for fehlende Model-Getter ———
+
+  String? _moodLabelOf(jm.JournalEntry e) {
+    for (final t in e.tags) {
+      final s = t.trim();
+      if (s.toLowerCase().startsWith('mood:')) {
+        final raw = s.substring(5).trim();
+        if (raw.isEmpty) return null;
+        // Erster Buchstabe groß
+        return raw[0].toUpperCase() + raw.substring(1);
+      }
+    }
+    return null;
+  }
+
+  String _computedTitle(jm.JournalEntry e) {
+    String pickFirstNonEmpty(Iterable<String?> opts) {
+      for (final s in opts) {
+        final v = (s ?? '').trim();
+        if (v.isNotEmpty) return v;
+      }
+      return '';
+    }
+
+    final base = pickFirstNonEmpty([
+      e.title,
+      e.userAnswer,
+      e.thoughtText,
+      e.aiQuestion,
+    ]);
+
+    if (base.isEmpty) {
+      final d = e.createdAt.toLocal();
+      final dd = d.day.toString().padLeft(2, '0');
+      final mm = d.month.toString().padLeft(2, '0');
+      return 'Eintrag $dd.$mm.${d.year}';
+    }
+    final words = base.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+    if (words.length <= 10) return base;
+    return '${words.take(10).join(' ')}…';
+  }
 }
 
-// ─────────────────────────── Kleine UI-Bausteine ───────────────────────────
+// ———————————————————————— Kleine UI-Bausteine ————————————————————————
 
 class _FilterPill extends StatelessWidget {
   final jp.JournalEntriesProvider provider;
@@ -624,15 +690,17 @@ class _FilterPill extends StatelessWidget {
               Text('$label ($count)'),
             ],
           ),
-          selectedColor: zs.ZenColors.sage.withValues(alpha: .22),
-          backgroundColor: zs.ZenColors.white.withValues(alpha: .18),
+          selectedColor: zs.ZenColors.sage.withOpacity(.22),
+          backgroundColor: zs.ZenColors.white.withOpacity(.18),
           showCheckmark: false,
           labelStyle: Theme.of(context).textTheme.labelMedium?.copyWith(
                 color: selected ? zs.ZenColors.deepSage : zs.ZenColors.jadeMid,
                 fontWeight: FontWeight.w700,
               ),
           side: BorderSide(
-            color: selected ? zs.ZenColors.deepSage : zs.ZenColors.jadeMid.withValues(alpha: .22),
+            color: selected
+                ? zs.ZenColors.deepSage
+                : zs.ZenColors.jadeMid.withOpacity(.22),
           ),
           shape: const StadiumBorder(),
         ),
@@ -678,10 +746,10 @@ class _DayHeader extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 10),
           decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: .66),
+            color: Colors.white.withOpacity(.66),
             borderRadius: const BorderRadius.all(zs.ZenRadii.m),
             border: Border.all(
-              color: zs.ZenColors.jadeMid.withValues(alpha: 0.14),
+              color: zs.ZenColors.jadeMid.withOpacity(0.14),
               width: 1,
             ),
             boxShadow: const [BoxShadow(color: Color(0x14000000), blurRadius: 8)],
@@ -700,9 +768,8 @@ class _DayHeader extends StatelessWidget {
 }
 
 /// Timeline-Reihe OHNE IntrinsicHeight (Crash-Fix):
-/// Wir nutzen eine Stack, in der die Karte die Höhe bestimmt.
-/// Links liegt eine schmale Fläche mit CustomPaint, die sich
-/// via Align auf die volle Höhe der Karte streckt.
+/// Die Karte bestimmt die Höhe. Links eine schmale Fläche mit CustomPaint,
+/// die via Align auf die volle Kartenhöhe gestreckt wird.
 class _TimelineRow extends StatelessWidget {
   final bool showAbove;
   final bool showBelow;
@@ -731,7 +798,6 @@ class _TimelineRow extends StatelessWidget {
             width: 26,
             child: CustomPaint(
               painter: _RailPainter(showAbove: showAbove, showBelow: showBelow),
-              // Höhe kommt automatisch von der Stack-Höhe (Kind oben)
             ),
           ),
         ),
@@ -777,7 +843,7 @@ class _RailPainter extends CustomPainter {
     }
 
     final dotPaint = Paint()
-      ..color = const Color(0xFF2F5F49).withValues(alpha: .28)
+      ..color = const Color(0xFF2F5F49).withOpacity(.28)
       ..style = PaintingStyle.fill
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 1.2);
     canvas.drawCircle(Offset(centerX, dotY), 4.8, dotPaint);

@@ -1,15 +1,14 @@
 // lib/features/story/story_screen.dart
 //
-// StoryScreen — Zen v6.29 · 2025-09-04
+// StoryScreen — Zen v6.54 (Oxford polish · StartScreen-Matching · Top-Anchor)
+// Update: 2025-09-15
 // -----------------------------------------------------------------------------
-// • Manuelles Generieren erst nach Klick auf CTA (kein Auto-Generate).
-// • AppBar ohne Titel (vermeidet „Kurzgeschichte“-Dopplung).
-// • Panda-Header via Widgets: `zw.PandaHeader` (Glow, 88/112 je nach Breite).
-// • Gate-Text (überarbeitet): Nur Instruktion, keine fette „Moment“-Headline.
-// • CTA: dezent (Outlined, Jade). „Jetzt reflektieren“ bleibt Primary.
-// • Lade-Overlay: zentriert (zw.ZenCenteredLoadingOverlay).
-// • Ergebnis-Karte: klar, mit „Anhören/Kopieren/Als TXT/Speichern“.
-// • NEU: „Kurzgeschichte speichern“ → speichert als Journal-Entry (EntryKind.story).
+// • Hero-Panda wie im StartScreen (160/200 px), identische Typo-Abstände.
+// • NEU: Top-Anchor statt Zentrierung → Panda steht im oberen Drittel
+//   (viewport-abhängig: ~12% Höhe, mit Min/Max-Klammern).
+// • Anordnung: Panda → Titel → Tagline → Gate-Karte (wie StartScreen).
+// • Keine Breaking Changes (Public API unverändert).
+// • A11y/Robustheit: Semantics, mounted-Guards, defensive errorBuilder.
 //
 
 import 'dart:io';
@@ -17,6 +16,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
+import '../../services/guidance/dtos.dart';
+
+
+
 
 // Zen-Design (Tokens)
 import '../../shared/zen_style.dart' as zs hide ZenBackdrop, ZenGlassCard, ZenAppBar;
@@ -29,12 +32,21 @@ import '../../models/journal_entry.dart' as jm;
 
 // Services
 import '../../services/guidance_service.dart';
+import '../../services/local_storage.dart';
 
 // TTS
 import '../../services/tts_service.dart' as tts;
 
 // Für CTA "Reflektieren"
 import '../reflection/reflection_screen.dart';
+
+const String kStoryPandaAsset = 'assets/story_panda_final.png';
+
+// Feintuning für die vertikale Verankerung des Heros.
+// Passe factor/min/max bei Bedarf minimal an.
+const double _kHeroTopAnchorFactor = 0.01; // 12% der Höhe
+const double _kHeroTopAnchorMin = -10;      // min. 36 px
+const double _kHeroTopAnchorMax = 60;     // max. 120 px
 
 class StoryScreen extends StatefulWidget {
   const StoryScreen({super.key});
@@ -45,7 +57,8 @@ class StoryScreen extends StatefulWidget {
   State<StoryScreen> createState() => _StoryScreenState();
 }
 
-class _StoryScreenState extends State<StoryScreen> {
+class _StoryScreenState extends State<StoryScreen>
+    with SingleTickerProviderStateMixin {
   StoryResult? _story; // aktuelles Ergebnis
   bool _loading = false;
   String? _error;
@@ -54,13 +67,29 @@ class _StoryScreenState extends State<StoryScreen> {
   bool _storySaved = false;
   String? _savedEntryId;
 
+  // Fortschritts-Reset (Persistenz)
+  static const String _kResetAtKey = 'story:lastResetAt';
+  final LocalStorageService _store = LocalStorageService();
+  DateTime? _lastResetAt; // UTC ISO aus Prefs (null = noch nie zurückgesetzt)
+
   // TTS
   bool _speaking = false;
   late final VoidCallback _speakingListener;
 
+  // Micro-Transition
+  late final AnimationController _anim;
+  late final Animation<double> _fadeIn;
+
   @override
   void initState() {
     super.initState();
+    _initPrefs();
+    _anim = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 260),
+    )..forward();
+    _fadeIn = CurvedAnimation(parent: _anim, curve: Curves.easeOutCubic);
+
     _speakingListener = () {
       if (!mounted) return;
       setState(() => _speaking = tts.TtsService.instance.speaking.value);
@@ -68,43 +97,63 @@ class _StoryScreenState extends State<StoryScreen> {
     tts.TtsService.instance.speaking.addListener(_speakingListener);
   }
 
+  Future<void> _initPrefs() async {
+    await _store.init();
+    final s = await _store.loadSetting<String>(_kResetAtKey);
+    if (!mounted) return;
+    setState(() {
+      _lastResetAt = (s == null || s.trim().isEmpty) ? null : DateTime.tryParse(s);
+    });
+  }
+
   @override
   void dispose() {
     _stopSpeakingSilently();
     tts.TtsService.instance.speaking.removeListener(_speakingListener);
+    _anim.dispose();
     super.dispose();
   }
 
   // ---- Progress / Daten -----------------------------------------------------
-  int _progressCount(BuildContext context) {
-    final prov = context.read<JournalEntriesProvider>();
-    return prov.entries.where(_isReflection).length;
+
+  int _progressFrom(JournalEntriesProvider journal) {
+    final List<jm.JournalEntry> all = journal.entries.where(_isReflection).toList();
+    if (_lastResetAt == null) {
+      return all.length.clamp(0, StoryScreen.neededReflections);
+    }
+    final n = all.where((e) => e.createdAt.isAfter(_lastResetAt!)).length;
+    return n.clamp(0, StoryScreen.neededReflections);
   }
 
-  List<jm.JournalEntry> _lastNReflections(BuildContext context, int n) {
-    final prov = context.read<JournalEntriesProvider>();
+  List<jm.JournalEntry> _lastNReflectionsSinceReset(
+    JournalEntriesProvider prov,
+    int n,
+  ) {
     final all = prov.entries.where(_isReflection).toList()
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-    return all.take(n).toList();
+
+    if (_lastResetAt == null) {
+      return all.take(n).toList();
+    }
+    final afterReset = all.where((e) => e.createdAt.isAfter(_lastResetAt!)).toList();
+    return afterReset.take(n).toList();
   }
 
-  bool _isReflection(jm.JournalEntry e) {
-    // Primär über 'kind' (EntryKind)
-    try {
-      return e.kind == jm.EntryKind.reflection;
-    } catch (_) {
-      // Optional: legacy Enum unterstützen, falls vorhanden
-      try {
-        // ignore: unnecessary_cast
-        return e.type == jm.JournalType.reflection;
-      } catch (_) {
-        return false;
-      }
-    }
-  }
+  bool _isReflection(jm.JournalEntry e) => e.kind == jm.EntryKind.reflection;
 
   // ---- Story-Generierung ----------------------------------------------------
   Future<void> _generateStory() async {
+    if (!mounted) return;
+
+    final prov = context.read<JournalEntriesProvider>();
+    final progress = _progressFrom(prov);
+    if (progress < StoryScreen.neededReflections) {
+      HapticFeedback.selectionClick();
+      setState(() => _error =
+          'Noch nicht genug Reflexionen ($progress/${StoryScreen.neededReflections}).');
+      return;
+    }
+
     setState(() {
       _loading = true;
       _error = null;
@@ -113,15 +162,17 @@ class _StoryScreenState extends State<StoryScreen> {
     });
 
     try {
-      final recent = _lastNReflections(context, StoryScreen.neededReflections);
+      await _feelDelay(200);
+
+      final recent = _lastNReflectionsSinceReset(prov, StoryScreen.neededReflections);
       final topics = await _deriveTopics(recent);
 
-      if (topics.isEmpty) {
+      if (!mounted) return;
+      if (topics.isEmpty || recent.length < StoryScreen.neededReflections) {
         throw Exception('Nicht genug Inhalte für eine Kurzgeschichte.');
       }
 
-      // sanfter Übergang / Teaser
-      await Future<void>.delayed(const Duration(milliseconds: 650));
+      await _feelDelay(420);
 
       final story = await GuidanceService.instance.story(
         entryIds: recent.map((e) => e.id).toList(),
@@ -130,17 +181,24 @@ class _StoryScreenState extends State<StoryScreen> {
       );
 
       if (!mounted) return;
+
+      final ok = ((story.title.trim().isNotEmpty) || (story.body.trim().isNotEmpty));
+      if (!ok) {
+        throw Exception('Story-Service ohne Inhalt geantwortet.');
+      }
+
       setState(() {
         _story = story;
         _loading = false;
       });
 
       zw.ZenToast.show(context, 'Geschichte erstellt');
+      HapticFeedback.selectionClick();
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = e.toString();
+        _error = _friendlyError(e);
       });
     }
   }
@@ -151,7 +209,6 @@ class _StoryScreenState extends State<StoryScreen> {
       final q = (e.aiQuestion ?? '').trim();
       if (q.isNotEmpty) set.add(_compact(q));
 
-      // Content-Mix statt e.text:
       final content = [
         e.thoughtText,
         e.userAnswer,
@@ -166,23 +223,31 @@ class _StoryScreenState extends State<StoryScreen> {
       if (content.isEmpty) continue;
 
       try {
-        final tags = await GuidanceService.instance.suggestTags(content);
+        final dynamic svc = GuidanceService.instance;
+        final tags = await (svc.suggestTags(content) as Future<List<String>>);
         set.addAll(tags.map(_compact));
-      } catch (_) {
-        // Tags optional – robust gegen Ausfälle bleiben
-      }
+      } catch (_) {/* optional */}
     }
     final topics = set.where((t) => t.length >= 2).take(6).toList();
     if (topics.isEmpty) topics.add('Selbstfürsorge');
     return topics;
   }
 
-  String _compact(String s) => s
-      .replaceAll(RegExp(r'\s+'), ' ')
-      .replaceAll(RegExp(r'[\.!?]'), '')
-      .trim();
+  String _compact(String s) =>
+      s.replaceAll(RegExp(r'\s+'), ' ').replaceAll(RegExp(r'[\.!?]'), '').trim();
 
-  // ---- SAVE: Kurzgeschichte -> Journal (EntryKind.story) --------------------
+  String _friendlyError(Object e) {
+    final raw = e.toString();
+    if (raw.contains('Nicht genug Inhalte')) {
+      return 'Nicht genug Inhalte für eine Kurzgeschichte.';
+    }
+    return 'Da hakte etwas. Bitte versuch’s gleich nochmal.';
+  }
+
+  Future<void> _feelDelay(int ms) =>
+      Future<void>.delayed(Duration(milliseconds: ms));
+
+  // ---- SAVE: Kurzgeschichte -> Journal -------------------------------------
   Future<void> _saveCurrentStory() async {
     final s = _story;
     if (s == null) return;
@@ -195,25 +260,35 @@ class _StoryScreenState extends State<StoryScreen> {
     try {
       final prov = context.read<JournalEntriesProvider>();
 
-      // Titel/Body sauber trimmen; Fallback-Titel falls leer
       final title = (s.title.trim().isEmpty) ? 'Kurzgeschichte' : s.title.trim();
       final body = s.body.trim();
+
+      if (body.isEmpty && title.isEmpty) {
+        zw.ZenToast.show(context, 'Kein Inhalt zum Speichern');
+        return;
+      }
 
       final saved = prov.addStory(
         title: title,
         body: body,
-        moodLabel: 'Neutral', // neutraler Default; Mood ist bei Story optional
+        moodLabel: 'Neutral',
         ts: DateTime.now(),
       );
 
+      final nowIso = DateTime.now().toUtc().toIso8601String();
+      await _store.saveSetting<String>(_kResetAtKey, nowIso);
+
+      if (!mounted) return;
       setState(() {
         _storySaved = true;
         _savedEntryId = saved.id;
+        _lastResetAt = DateTime.tryParse(nowIso);
       });
 
       zw.ZenToast.show(context, 'Ins Gedankenbuch gespeichert');
       HapticFeedback.selectionClick();
     } catch (_) {
+      if (!mounted) return;
       zw.ZenToast.show(context, 'Konnte nicht speichern');
     }
   }
@@ -233,7 +308,6 @@ class _StoryScreenState extends State<StoryScreen> {
       if (!mounted) return;
       if (!ok) {
         zw.ZenToast.show(context, 'Sprachausgabe nicht verfügbar');
-        return;
       }
     } catch (_) {
       if (!mounted) return;
@@ -264,15 +338,20 @@ class _StoryScreenState extends State<StoryScreen> {
     final hasContent = _story != null &&
         (_story!.title.trim().isNotEmpty || _story!.body.trim().isNotEmpty);
 
-    final isMobile = MediaQuery.of(context).size.width < 470;
-    final pandaSize = isMobile ? 88.0 : 112.0;
+    // Live-Progress
+    final prov = context.watch<JournalEntriesProvider>();
+    final progress = _progressFrom(prov);
+
+    // Top-Anchor wie im StartScreen (Panda sitzt sichtbar höher als Center)
+    final size = MediaQuery.of(context).size;
+    final double anchorTop = (size.height * _kHeroTopAnchorFactor)
+        .clamp(_kHeroTopAnchorMin, _kHeroTopAnchorMax);
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: overlay,
       child: Scaffold(
         extendBodyBehindAppBar: true,
         backgroundColor: Colors.transparent,
-        // Titel entfernt → kein „Kurzgeschichte“ ganz oben
         appBar: const zw.ZenAppBar(title: null, showBack: true),
         body: Stack(
           children: [
@@ -288,55 +367,116 @@ class _StoryScreenState extends State<StoryScreen> {
                 wash: .10,
               ),
             ),
+            // WICHTIG: nicht zentrieren, sondern nach oben verankern
             SafeArea(
-              child: Center(
+              child: Align(
+                alignment: Alignment.topCenter,
                 child: SingleChildScrollView(
                   physics: const BouncingScrollPhysics(),
-                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+                  padding: EdgeInsets.fromLTRB(16, anchorTop, 16, 24),
                   child: ConstrainedBox(
                     constraints: const BoxConstraints(maxWidth: 640),
-                    child: hasContent
-                        // --- Ergebnisansicht (ohne Panda-Header) ---
-                        ? _StoryCard(
-                            title: _story!.title.trim(),
-                            body: _story!.body.trim(),
-                            loading: _loading,
-                            speaking: _speaking,
-                            saved: _storySaved,
-                            onSave: _storySaved ? null : _saveCurrentStory,
-                            onToggleSpeak: _story == null ? null : _toggleSpeak,
-                            onStopSpeak: _speaking ? _stopSpeaking : null,
-                          )
-                        // --- Gate mit PandaHeader-Widget (keine fette Headline) ---
-                        : Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              zw.PandaHeader(
-                                title: 'Deine Kurzgeschichte',
-                                caption: 'Zeit hat keine Eile.',
-                                pandaSize: pandaSize,
-                                strongTitleGreen: true,
-                              ),
-                              const SizedBox(height: 8),
-                              _StoryGate(
-                                progress: _progressCount(context),
-                                loading: _loading,
-                                error: _error,
-                                onGenerate:
-                                    _loading ? null : () => _generateStory(),
-                              ),
-                            ],
-                          ),
+                    child: FadeTransition(
+                      opacity: _fadeIn,
+                      child: hasContent
+                          ? _StoryCard(
+                              title: _story!.title.trim(),
+                              body: _story!.body.trim(),
+                              loading: _loading,
+                              speaking: _speaking,
+                              saved: _storySaved,
+                              onSave: _storySaved ? null : _saveCurrentStory,
+                              onToggleSpeak: _story == null ? null : _toggleSpeak,
+                              onStopSpeak: _speaking ? _stopSpeaking : null,
+                            )
+                          : Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const _StoryHeroTitle(),
+                                // Abstand wie im StartScreen (zwischen Tagline und Content)
+                                SizedBox(
+                                  height: size.width < 420 ? 12 : 16,
+                                ),
+                                _StoryGate(
+                                  progress: progress,
+                                  loading: _loading,
+                                  error: _error,
+                                  onGenerate: _loading ? null : _generateStory,
+                                ),
+                              ],
+                            ),
+                    ),
                   ),
                 ),
               ),
             ),
 
-            // Lade-Overlay zentriert, überlagert den Inhalt dezent
-            if (_loading) const zw.ZenCenteredLoadingOverlay(),
+            if (_loading) const _LoadingOverlay(),
           ],
         ),
       ),
+    );
+  }
+}
+
+/// ====== HERO (Panda & Typo wie im StartScreen) ==============================
+class _StoryHeroTitle extends StatelessWidget {
+  const _StoryHeroTitle();
+
+  @override
+  Widget build(BuildContext context) {
+    final width = MediaQuery.of(context).size.width;
+    final narrow = width < 420;
+    final double pandaSize = narrow ? 160 : 200;
+
+    return Column(
+      children: [
+        Semantics(
+          image: true,
+          label: 'Panda mit Lesebrille liest ein Buch',
+          child: Container(
+            margin: EdgeInsets.only(bottom: narrow ? 10 : 12),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: zs.ZenColors.deepSage.withOpacity(.14),
+                  blurRadius: 28,
+                  spreadRadius: 2,
+                  offset: const Offset(0, 6),
+                ),
+              ],
+            ),
+            child: Image.asset(
+              kStoryPandaAsset,
+              width: pandaSize,
+              height: pandaSize,
+              fit: BoxFit.contain,
+              filterQuality: FilterQuality.high,
+              errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+            ),
+          ),
+        ),
+        // Titel + Tagline exakt wie im StartScreen
+        Text(
+          'Deine Kurzgeschichte',
+          textAlign: TextAlign.center,
+          style: zs.ZenTextStyles.h2.copyWith(
+            fontWeight: FontWeight.w800,
+            color: zs.ZenColors.deepSage,
+          ),
+        ),
+        SizedBox(height: narrow ? 4 : 6),
+        Text(
+          'Zeit hat keine Eile.',
+          textAlign: TextAlign.center,
+          style: zs.ZenTextStyles.subtitle.copyWith(
+            color: zs.ZenColors.jade,
+            fontWeight: FontWeight.w700,
+            height: 1.25,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -370,14 +510,20 @@ class _StoryGate extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Nur Instruktion – keine fette „Moment“-Headline mehr
-          Text(
-            done
-                ? 'Drücke den Button, wenn du bereit bist. Aus deinen letzten Gedanken entsteht jetzt eine kleine, warme Geschichte.'
-                : 'Sammle $needed kurze Reflexionen. Danach entsteht aus deinen Worten eine kleine, warme Geschichte nur für dich.',
-            textAlign: TextAlign.center,
-            style: zs.ZenTextStyles.body
-                .copyWith(color: zs.ZenColors.ink, height: 1.45),
+          Semantics(
+            container: true,
+            liveRegion: true,
+            label: done
+                ? 'Genug Reflexionen vorhanden. Du kannst deine Kurzgeschichte erstellen.'
+                : 'Noch ${needed - progress} Reflexionen bis zur Kurzgeschichte.',
+            child: Text(
+              done
+                  ? 'Wenn du bereit bist, entsteht aus deinen letzten Worten eine kleine, warme Geschichte.'
+                  : 'Sammle $needed kurze Reflexionen. Danach entsteht aus deinen Worten eine kleine, warme Geschichte nur für dich.',
+              textAlign: TextAlign.center,
+              style: zs.ZenTextStyles.body
+                  .copyWith(color: zs.ZenColors.ink, height: 1.45),
+            ),
           ),
           const SizedBox(height: 16),
           _CapsuleProgress(total: needed, value: progress.clamp(0, needed)),
@@ -391,14 +537,12 @@ class _StoryGate extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
-
-          // CTA – dezent, gekürztes Label
           SizedBox(
             width: 320,
             child: done
                 ? _DezenterCtaButton.icon(
                     icon: Icons.auto_stories_rounded,
-                    label: 'Therapeutische Kurzgeschichte',
+                    label: 'Kurzgeschichte erstellen',
                     onPressed: loading ? null : onGenerate,
                   )
                 : ElevatedButton.icon(
@@ -409,8 +553,7 @@ class _StoryGate extends StatelessWidget {
                         : () {
                             HapticFeedback.selectionClick();
                             Navigator.of(context).push(
-                              MaterialPageRoute(
-                                  builder: (_) => ReflectionScreen()),
+                              MaterialPageRoute(builder: (_) => const ReflectionScreen()),
                             );
                           },
                     style: ElevatedButton.styleFrom(
@@ -421,14 +564,17 @@ class _StoryGate extends StatelessWidget {
                     ),
                   ),
           ),
-
           if (error != null && error!.trim().isNotEmpty) ...[
             const SizedBox(height: 12),
-            Text(
-              error!,
-              textAlign: TextAlign.center,
-              style: zs.ZenTextStyles.caption
-                  .copyWith(color: zs.ZenColors.cherry),
+            Semantics(
+              liveRegion: true,
+              label: 'Fehler',
+              child: Text(
+                error!,
+                textAlign: TextAlign.center,
+                style: zs.ZenTextStyles.caption
+                    .copyWith(color: zs.ZenColors.cherry),
+              ),
             ),
           ],
         ],
@@ -442,7 +588,7 @@ class _DezenterCtaButton extends StatelessWidget {
   final VoidCallback? onPressed;
   final IconData? icon;
 
-  const _DezenterCtaButton({super.key, required this.label})
+  const _DezenterCtaButton({required this.label})
       : icon = null,
         onPressed = null;
   const _DezenterCtaButton.icon({required this.icon, required this.label, this.onPressed});
@@ -474,7 +620,7 @@ class _DezenterCtaButton extends StatelessWidget {
     return OutlinedButton(
       onPressed: onPressed,
       style: OutlinedButton.styleFrom(
-        side: BorderSide(color: zs.ZenColors.jade.withValues(alpha: .75), width: 1.1),
+        side: BorderSide(color: zs.ZenColors.jade.withOpacity(.75), width: 1.1),
         foregroundColor: zs.ZenColors.jade,
         minimumSize: const Size(0, 52),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -495,38 +641,81 @@ class _CapsuleProgress extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final filled = List<bool>.generate(total, (i) => i < value);
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        for (int i = 0; i < total; i++)
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 280),
-            curve: Curves.easeOutCubic,
-            width: 28,
-            height: 14,
-            margin: EdgeInsets.only(right: i == total - 1 ? 0 : 8),
-            decoration: BoxDecoration(
-              color: filled[i]
-                  ? zs.ZenColors.jade.withValues(alpha: .22)
-                  : zs.ZenColors.surfaceAlt,
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(
+    return Semantics(
+      label: 'Fortschritt $value von $total',
+      value: '$value',
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          for (int i = 0; i < total; i++)
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 240),
+              curve: Curves.easeOutCubic,
+              width: 28,
+              height: 14,
+              margin: EdgeInsets.only(right: i == total - 1 ? 0 : 8),
+              decoration: BoxDecoration(
                 color: filled[i]
-                    ? zs.ZenColors.jade.withValues(alpha: .55)
-                    : zs.ZenColors.outline,
+                    ? zs.ZenColors.jade.withOpacity(.22)
+                    : zs.ZenColors.surfaceAlt,
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(
+                  color: filled[i]
+                      ? zs.ZenColors.jade.withOpacity(.55)
+                      : zs.ZenColors.outline,
+                ),
+                boxShadow: filled[i]
+                    ? [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(.06),
+                          blurRadius: 6,
+                          offset: const Offset(0, 2),
+                        ),
+                      ]
+                    : null,
               ),
-              boxShadow: filled[i]
-                  ? [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: .06),
-                        blurRadius: 6,
-                        offset: const Offset(0, 2),
-                      ),
-                    ]
-                  : null,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// ====== LOADING OVERLAY =====================================================
+class _LoadingOverlay extends StatelessWidget {
+  const _LoadingOverlay();
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned.fill(
+      child: IgnorePointer(
+        child: Container(
+          color: Colors.black.withOpacity(.06),
+          alignment: Alignment.center,
+          child: const zw.ZenGlassCard(
+            borderRadius: BorderRadius.all(zs.ZenRadii.l),
+            topOpacity: .26,
+            bottomOpacity: .10,
+            borderOpacity: .18,
+            padding: EdgeInsets.fromLTRB(16, 14, 16, 14),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  height: 18,
+                  width: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                SizedBox(width: 10),
+                Text(
+                  'ZenYourself holt sein Buch heraus …',
+                  style: TextStyle(fontSize: 14.5, color: zs.ZenColors.inkStrong),
+                ),
+              ],
             ),
           ),
-      ],
+        ),
+      ),
     );
   }
 }
@@ -593,7 +782,6 @@ class _StoryCard extends StatelessWidget {
             spacing: 10,
             runSpacing: 10,
             children: [
-              // NEU: Speichern
               _StoryAction(
                 icon: saved ? Icons.bookmark_added_rounded : Icons.bookmark_add_rounded,
                 label: saved ? 'Gespeichert' : 'Kurzgeschichte speichern',
@@ -629,9 +817,19 @@ class _StoryCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 6),
-          Text(
-            'Hinweis: Bleibt lokal. Teilen ist optional.',
-            style: zs.ZenTextStyles.caption.copyWith(color: zs.ZenColors.inkSubtle),
+          const Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.info_outline_rounded, size: 16, color: zs.ZenColors.inkSubtle),
+              SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  'Tipp: Speichere die Kurzgeschichte ins Gedankenbuch – sonst ist sie später nicht mehr sichtbar.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 12.5, color: zs.ZenColors.inkSubtle),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -669,7 +867,10 @@ class _StoryAction extends StatelessWidget {
       child: OutlinedButton.icon(
         onPressed: onTap,
         icon: Icon(icon, color: zs.ZenColors.jade),
-        label: Text(label),
+        label: Text(
+          label,
+          overflow: TextOverflow.ellipsis,
+        ),
         style: OutlinedButton.styleFrom(
           foregroundColor: zs.ZenColors.jade,
           side: const BorderSide(color: zs.ZenColors.jade, width: 1.1),

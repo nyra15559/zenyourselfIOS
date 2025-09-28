@@ -1,6 +1,6 @@
 // lib/services/whisper_service.dart
 //
-// WhisperService — Streaming STT Bridge v1.1 (prod-safe, reentrancy-proof)
+// WhisperService — Streaming STT Bridge v1.2 (prod-safe, reentrancy-proof)
 // -----------------------------------------------------------------------------
 // Zweck
 // • Einheitliche Streaming-Schnittstelle für Live-Spracherkennung (STT).
@@ -10,23 +10,17 @@
 //
 // Eigenschaften
 // • Idempotentes start/stop/pause/resume; Schutz gegen Reentrancy.
-// • Simulationsmodus nur via Parameter (simulate: true) — Debug-Builds nutzen
-//   *nicht* automatisch die Simulation (damit Native-Tests in Debug möglich sind).
-// • Optionale Native-Bridge via MethodChannel (channelName: 'zen.whisper' by default).
-//   Erwartete Platform-Methoden:
-//     - start({ locale: 'de_DE' | 'en_US' | ... }) -> void
-//     - stop() -> String? (Audio-Dateipfad oder null)
-//     - pause() / resume() -> void
-//   Und native Events über EventChannel (default 'zen.whisper/events') (type,value):
+// • Simulationsmodus via Konstruktor-Flag (simulate: true).
+// • Optionale Native-Bridge via MethodChannel (default: 'zen.whisper')
+//   + EventChannel (default: 'zen.whisper/events') mit Events:
 //     - {type:'partial', value:'...'}
-//     - {type:'final', value:'...'}
-//     - {type:'level', value:0.0..1.0}
+//     - {type:'final',   value:'...'}
+//     - {type:'level',   value:0.0..1.0}
 //
-// Usage (Prod):
-//   final ws = WhisperService(simulate: false);
-//   speech.attachWhisper(ws);
-//   await speech.start(locale: 'de_DE'); // SpeechService startet/stoppt WhisperService mit
-//
+// Hinweise
+// • Auf Web & Plattformen ohne Channels wird automatisch in einen
+//   no-crash Modus gewechselt (Simulation falls aktiviert, sonst still).
+// • level$ ist 0.0..1.0 normalisiert.
 // -----------------------------------------------------------------------------
 
 import 'dart:async';
@@ -64,10 +58,8 @@ class WhisperService implements SpeechTranscriber {
 
   @override
   Stream<String> get partial$ => _partialCtrl.stream;
-
   @override
   Stream<String> get final$ => _finalCtrl.stream;
-
   @override
   Stream<double> get level$ => _levelCtrl.stream;
 
@@ -85,7 +77,10 @@ class WhisperService implements SpeechTranscriber {
   Timer? _levelTick;
   Timer? _simuTimer;
 
-  DateTime? _startedAt;
+  // Anti-Dedupe für sehr schnelle doppelte Finals aus dem Native-Layer
+  String? _lastFinal;
+  DateTime? _lastFinalAt;
+  static const _kDedupWindow = Duration(milliseconds: 300);
 
   // ---------------- Lifecycle ----------------
 
@@ -95,18 +90,18 @@ class WhisperService implements SpeechTranscriber {
     if (_active) return;
     _active = true;
     _paused = false;
-    _startedAt = DateTime.now();
 
-    // Pegel-Jitter / Native-Level starten
     _startLevelTicker();
 
-    if (_simulate) {
-      _startSimulation();
+    if (_simulate || kIsWeb) {
+      // Web: Channels sind oft nicht vorhanden → Simulation nur wenn explizit gewünscht.
+      if (_simulate) _startSimulation();
+      _debug('[WhisperService] start (simulate:$_simulate web:$kIsWeb)');
       return;
     }
 
-    // Native Events (falls implementiert)
     try {
+      // Native Events (falls implementiert)
       _nativeSub = _eventChannel.receiveBroadcastStream().listen(
         (evt) {
           try {
@@ -125,7 +120,7 @@ class WhisperService implements SpeechTranscriber {
                   break;
               }
             } else if (evt is String) {
-              // Fallback: einfache String-Finals
+              // Fallback: reine String-Events als final
               _pushFinal(evt);
             }
           } catch (e) {
@@ -143,6 +138,8 @@ class WhisperService implements SpeechTranscriber {
       });
     } catch (e) {
       _debug('[WhisperService] start failed → ${e.runtimeType}: $e');
+      // Kein harter Fail – Service bleibt aktiv (Level-Ticker läuft), UI kann weiterleben.
+      // Simulation bewusst NICHT automatisch aktivieren (Prod-Transparenz).
     }
   }
 
@@ -158,15 +155,21 @@ class WhisperService implements SpeechTranscriber {
     await _nativeSub?.cancel();
     _nativeSub = null;
 
-    if (_simulate) {
+    if (_simulate || kIsWeb) {
+      _lastFinal = null;
+      _lastFinalAt = null;
       return null;
     }
 
     try {
       final res = await _methodChannel.invokeMethod<String?>('stop');
+      _lastFinal = null;
+      _lastFinalAt = null;
       return res;
     } catch (e) {
       _debug('[WhisperService] stop failed: $e');
+      _lastFinal = null;
+      _lastFinalAt = null;
       return null;
     }
   }
@@ -177,8 +180,8 @@ class WhisperService implements SpeechTranscriber {
     if (!_active || _paused) return;
     _paused = true;
 
-    if (_simulate) {
-      // Simulation: nichts weiter tun (Ticker bleibt für sanften Level-Jitter)
+    if (_simulate || kIsWeb) {
+      // Simulation: nichts weiter tun (Level-Ticker läuft weiter, aber wir deckeln Level)
       return;
     }
     try {
@@ -194,7 +197,7 @@ class WhisperService implements SpeechTranscriber {
     if (!_active || !_paused) return;
     _paused = false;
 
-    if (_simulate) {
+    if (_simulate || kIsWeb) {
       return;
     }
     try {
@@ -223,11 +226,24 @@ class WhisperService implements SpeechTranscriber {
   void _pushFinal(String text) {
     final t = text.trim();
     if (t.isEmpty) return;
+
+    // leichte Dedupe-Schranke gegen doppelte Finals vom Native-Layer
+    final now = DateTime.now();
+    if (_lastFinal == t &&
+        _lastFinalAt != null &&
+        now.difference(_lastFinalAt!).abs() <= _kDedupWindow) {
+      return;
+    }
+    _lastFinal = t;
+    _lastFinalAt = now;
+
     if (!_finalCtrl.isClosed) _finalCtrl.add(t);
   }
 
   void _pushLevel(double v) {
-    final clamped = v.clamp(0.0, 1.0);
+    // Bei Pause den Level herunterfahren, aber nicht komplett 0 (ruhige UI).
+    final target = _paused ? 0.04 : v;
+    final clamped = target.clamp(0.0, 1.0);
     if (!_levelCtrl.isClosed) _levelCtrl.add(clamped);
   }
 
@@ -235,15 +251,16 @@ class WhisperService implements SpeechTranscriber {
 
   void _startLevelTicker() {
     _stopLevelTicker();
-    // Sanfter Pegel mit ~120ms für ruhiges UI
     final rnd = Random();
     _levelTick = Timer.periodic(const Duration(milliseconds: 120), (_) {
       if (!_active) return;
+
       if (_paused) {
         _pushLevel(0.04);
         return;
       }
-      // Dreiecks-Welle mit leichtem Rauschen
+
+      // Dreiecks-Welle + leichtes Rauschen (ruhige Bewegung für UI)
       final ms = DateTime.now().millisecondsSinceEpoch;
       final phase = (ms % 1600) / 1600.0; // 0..1
       final tri = phase < 0.5 ? (phase * 2) : (2 - phase * 2);
@@ -307,9 +324,7 @@ class WhisperService implements SpeechTranscriber {
   }
 
   Future<void> _closeSafely(StreamController c) async {
-    try {
-      await c.close();
-    } catch (_) {}
+    try { await c.close(); } catch (_) {}
   }
 
   void _debug(Object msg) {

@@ -1,6 +1,7 @@
 // lib/features/journal/journal_day_screen.dart
 //
-// JournalDayScreen — Oxford-Zen v6.29 (SenStyleDart, ruhig & konsistent)
+// JournalDayScreen — Oxford-Zen v6.30 (SenStyleDart, ruhig & konsistent)
+// Update: 2025-09-13
 // --------------------------------------------------------------------
 // • Tages-Detailansicht mit PandaHeader und Glas-Karte für Kennzahlen.
 // • 7-Tage-Sparkline (Provider.moodSparkline) und kompakte Stat-Badges.
@@ -8,14 +9,11 @@
 // • Einträge als Mini-Story-Karten (JournalEntryCard) inkl. Aktionen.
 // • Teilen: Tageszusammenfassung in Zwischenablage.
 // • A11y: semantische Labels, ruhige Kontraste.
-//
-// Abhängigkeiten:
-//   models/journal_entry.dart      als jm
-//   providers/journal_entries_provider.dart als jp
-//   shared/zen_style.dart          (ZenColors, ZenTextStyles, …)
-//   shared/ui/zen_widgets.dart     (ZenBackdrop, ZenGlassCard, PandaHeader)
-//   widgets/journal_entry_card.dart
-//   reflection/reflection_screen.dart
+// • Fixes:
+//   - RefreshIndicator ruft nun provider.restore() (sanftes Pull-to-refresh).
+//   - Einheitlicher Provider-API-Call: removeById(...) statt remove(...).
+//   - Null-sicher bei moodLabel in BottomSheet.
+//   - CustomPaint: kein Size.infinite (nimmt Eltern-Constraints → vermeidet Layout-Issues).
 
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
@@ -105,10 +103,11 @@ class _JournalDayScreenState extends State<JournalDayScreen>
               wash: .10,
             ),
           ),
-          RefreshIndicator(
+          RefreshIndicator.adaptive(
             color: ZenColors.deepSage,
             onRefresh: () async {
-              await Future<void>.delayed(const Duration(milliseconds: 300));
+              await context.read<jp.JournalEntriesProvider>().restore(); // sanft
+              HapticFeedback.selectionClick();
             },
             child: CustomScrollView(
               physics: const BouncingScrollPhysics(
@@ -162,7 +161,7 @@ class _JournalDayScreenState extends State<JournalDayScreen>
                         background: _deleteBg(),
                         confirmDismiss: (_) => _confirmDeleteDialog(ctx),
                         onDismissed: (_) =>
-                            ctx.read<jp.JournalEntriesProvider>().remove(e.id),
+                            ctx.read<jp.JournalEntriesProvider>().removeById(e.id),
                         child: Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 12),
                           child: JournalEntryCard(
@@ -178,7 +177,7 @@ class _JournalDayScreenState extends State<JournalDayScreen>
                                   await _confirmDeleteDialog(ctx) ?? false;
                               if (!ok) return;
                               // ignore: use_build_context_synchronously
-                              ctx.read<jp.JournalEntriesProvider>().remove(e.id);
+                              ctx.read<jp.JournalEntriesProvider>().removeById(e.id);
                             },
                           ),
                         ),
@@ -537,9 +536,9 @@ class _Sparkline extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Größe kommt von der umgebenden SizedBox (64px Höhe, volle Breite)
     return CustomPaint(
       painter: _SparklinePainter(values: values),
-      size: Size.infinite,
     );
   }
 }
@@ -640,7 +639,7 @@ class _DayMetrics {
     int m = 0;
     for (final e in entries) {
       final label = e.moodLabel; // vom Model aus Tags abgeleitet
-      final score = _moodMap[label];
+      final score = _moodMap[label ?? ''];
       if (score != null) {
         sum += score;
         m++;
@@ -744,8 +743,10 @@ class _EntryBottomSheet extends StatelessWidget {
           const SizedBox(height: 12),
           Row(
             children: [
-              Text(entry.moodLabel.isNotEmpty ? entry.moodLabel : '—',
-                  style: ZenTextStyles.caption.copyWith(color: ZenColors.ink)),
+              Text(
+                (entry.moodLabel ?? '').isNotEmpty ? (entry.moodLabel ?? '') : '—',
+                style: ZenTextStyles.caption.copyWith(color: ZenColors.ink),
+              ),
               const Spacer(),
               TextButton.icon(
                 icon: const Icon(Icons.delete_outline),
@@ -758,7 +759,7 @@ class _EntryBottomSheet extends StatelessWidget {
                           false;
                   if (!ok) return;
                   // ignore: use_build_context_synchronously
-                  context.read<jp.JournalEntriesProvider>().remove(entry.id);
+                  context.read<jp.JournalEntriesProvider>().removeById(entry.id);
                   // ignore: use_build_context_synchronously
                   Navigator.of(context).pop();
                 },

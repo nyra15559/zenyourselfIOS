@@ -8,7 +8,6 @@
 // • Öffentlicher Serializer: PersistenceSerializer (separate Datei)
 // • ⚠️ Journey-Kompat: static kGhostMode + static instance (KVStore)
 
-import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 

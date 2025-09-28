@@ -1,100 +1,102 @@
 // lib/models/journal_entry.dart
 //
-// JournalEntry Model — Oxford-Zen v3.9
+// JournalEntry — kanonisches Model (v5.2 • 2025-09-13)
 // -----------------------------------------------------------------------------
-// • Einheitliches Modell: EntryKind { reflection, journal, story }.
-// • Robust: fromJson()/fromMap() akzeptieren String ODER Map, inkl. Legacy-Keys.
-// • Legacy-Shims: JournalType, .type, .text, .moodLabel bleiben erhalten.
-// • Titel-Pipeline: computedTitle + withAutoTitle() (nicht-destruktiv).
-// • UI-Hilfen: badge (Label+Icon), previewText(), metaLine().
-// • Zeit: createdAt wird intern als UTC gehalten; createdAtLocal liefert lokale Zeit.
-// • Extras: Sortier-/Filter-Helfer & kleine Utils (ohne neue Abhängigkeiten).
+// Ziele (Projektregeln v6zenyourself):
+// • Einheitliches Datenmodell für alle Entry-Typen (reflection, journal, story)
+// • Rückwärtskompatibel zu alten Saves (tolerantes fromMap, Legacy-Aliases)
+// • Stabile Persistenz: storyBody wird NIE gekürzt/entfernt
+// • Titel-Pipeline: withAutoTitleIfEmpty() überschreibt nie vorhandene Titel
+// • Framework-frei (KEIN flutter/material.dart import)
+// • UI-Kompat: computedTitle/metaLine/badge + Alias withAutoTitle()
+//
+// Wichtige Felder (Inhalt):
+//  - thoughtText (Dein Gedanke), aiQuestion (Leitfrage), userAnswer (Antwort)
+//  - storyTitle / storyTeaser / storyBody (Volltext)
+//  - tags (inkl. mood:/moodScore:), hidden (Soft-Hide), sourceRef
+//
+// Lizenz: ZenYourself (v6zenyourself) — Oxford–Zen Style
 
 import 'dart:convert';
-import 'package:flutter/material.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Moderne Arten von Journaleinträgen.
+/// Art des Eintrags in Journal/Gedankenbuch.
 enum EntryKind { reflection, journal, story }
 
-/// ⚠️ Legacy-Shim (für bestehenden Code).
-@Deprecated('Use EntryKind instead')
-enum JournalType { reflection, journal, story }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Kind helpers (robust / i18n)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Robust: akzeptiert null / dynamische Eingaben.
-EntryKind entryKindFromString(dynamic value) {
-  final s = value?.toString().toLowerCase().trim() ?? '';
-  switch (s) {
-    // Reflection
-    case 'reflection':
-    case 'reflexion':
-    case 'reflektion':
-    case 'reflection_entry':
-      return EntryKind.reflection;
-
-    // Journal / Note
-    case 'journal':
-    case 'gedanke':
-    case 'tagebuch':
-    case 'note':
-    case 'entry':
-      return EntryKind.journal;
-
-    // Story
-    case 'story':
-    case 'kurzgeschichte':
-    case 'short_story':
-      return EntryKind.story;
-
-    default:
-      return EntryKind.journal; // neutrale Grundform
+extension EntryKindX on EntryKind {
+  /// Stabiler Key für Persistenz/Badges.
+  String get key {
+    switch (this) {
+      case EntryKind.reflection:
+        return 'reflection';
+      case EntryKind.journal:
+        return 'journal';
+      case EntryKind.story:
+        return 'story';
+    }
   }
-}
 
-/// Lokalisierte Typ-Bezeichnung.
-String entryKindToString(EntryKind kind, {String locale = 'de'}) {
-  final de = locale.toLowerCase().startsWith('de');
-  switch (kind) {
-    case EntryKind.reflection:
-      return de ? 'Reflexion' : 'reflection';
-    case EntryKind.journal:
-      return de ? 'Tagebuch' : 'journal';
-    case EntryKind.story:
-      return de ? 'Kurzgeschichte' : 'story';
+  /// Menschlicher Label-Text (DE).
+  String get labelDe {
+    switch (this) {
+      case EntryKind.reflection:
+        return 'Reflexion';
+      case EntryKind.journal:
+        return 'Gedanke';
+      case EntryKind.story:
+        return 'Kurzgeschichte';
+    }
   }
-}
 
-/// Leichtgewichtige Badge-Info (UI-Hilfe).
-class EntryBadge {
-  final String label;
-  final IconData icon;
-  const EntryBadge({required this.label, required this.icon});
-}
+  /// Icon/Badge-Key (UI wählt Icon/Farbe selbst).
+  String get iconKey {
+    switch (this) {
+      case EntryKind.reflection:
+        return 'icon.reflection';
+      case EntryKind.journal:
+        return 'icon.journal';
+      case EntryKind.story:
+        return 'icon.story';
+    }
+  }
 
-EntryBadge badgeForEntryKind(EntryKind kind, {String locale = 'de'}) {
-  switch (kind) {
-    case EntryKind.reflection:
-      return EntryBadge(
-        label: entryKindToString(kind, locale: locale),
-        icon: Icons.psychology_alt_outlined,
-      );
-    case EntryKind.journal:
-      return EntryBadge(
-        label: entryKindToString(kind, locale: locale),
-        icon: Icons.menu_book_outlined,
-      );
-    case EntryKind.story:
-      return EntryBadge(
-        label: entryKindToString(kind, locale: locale),
-        icon: Icons.auto_stories_outlined,
-      );
+  /// Badge-Key (für konsistente Badges).
+  String get badgeKey {
+    switch (this) {
+      case EntryKind.reflection:
+        return 'badge.reflection';
+      case EntryKind.journal:
+        return 'badge.journal';
+      case EntryKind.story:
+        return 'badge.story';
+    }
+  }
+
+  /// Robust aus String/Dynamik herstellen (tolerant, DE/EN).
+  static EntryKind fromAny(dynamic value) {
+    final s = value?.toString().trim().toLowerCase() ?? '';
+    switch (s) {
+      case 'reflection':
+      case 'reflexion':
+      case 'reflektion':
+      case 'reflection_entry':
+        return EntryKind.reflection;
+      case 'journal':
+      case 'gedanke':
+      case 'tagebuch':
+      case 'note':
+      case 'entry':
+        return EntryKind.journal;
+      case 'story':
+      case 'kurzgeschichte':
+      case 'short_story':
+        return EntryKind.story;
+      default:
+        return EntryKind.journal;
+    }
   }
 }
 
@@ -102,30 +104,32 @@ EntryBadge badgeForEntryKind(EntryKind kind, {String locale = 'de'}) {
 // Model
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Zentrales Journal-Model (UI-nah, aber framework-frei).
+/// Kanonischer Journal-Eintrag.
+/// Framework-frei, damit überall nutzbar (Provider/UI/Services).
 class JournalEntry {
   // Basis
   final String id;
   final EntryKind kind;
   final DateTime createdAt; // UTC
 
-  // Meta
+  // Generischer Titel/Subtitel (für Card/Header)
   final String? title;
   final String? subtitle;
 
-  // Journal / Reflexion
-  final String? thoughtText; // „Dein Gedanke“
-  final String? aiQuestion; // Leitfrage(n)
-  final String? userAnswer; // Antwort
+  // Reflection-Felder
+  final String? thoughtText;   // „Dein Gedanke …“
+  final String? aiQuestion;    // Panda-Leitfrage (kursiv in der View)
+  final String? userAnswer;    // Deine Antwort (grün)
 
-  // Story
-  final String? storyTitle;
-  final String? storyTeaser;
+  // Story-Felder
+  final String? storyTitle;    // Überschrift der Story
+  final String? storyTeaser;   // kurzer Teaser (für Card-Preview)
+  final String? storyBody;     // VOLLTEXT — wird nie beschnitten
 
-  // Flags & Zusatz
-  final List<String> tags;
-  final bool hidden; // Soft-Hide
-  final String? sourceRef; // z. B. Session/Remote-ID
+  // Meta
+  final List<String> tags;     // automatische/manuelle Tags
+  final bool hidden;           // Soft-Hide-Flag
+  final String? sourceRef;     // z. B. Session-ID, Worker, Import-Quelle
 
   const JournalEntry({
     required this.id,
@@ -138,37 +142,37 @@ class JournalEntry {
     this.userAnswer,
     this.storyTitle,
     this.storyTeaser,
-    this.tags = const <String>[],
+    this.storyBody,
+    this.tags = const [],
     this.hidden = false,
     this.sourceRef,
   });
 
-  // ───────── Factories
+  // ─────────────────────── Fabriken (Bequemlichkeit) ───────────────────────
 
-  /// Fabrik: Journal (Tagebuch).
   factory JournalEntry.journal({
     required String id,
     DateTime? createdAt,
     String? title,
     String? subtitle,
     String? thoughtText,
-    List<String> tags = const <String>[],
+    List<String> tags = const [],
     bool hidden = false,
     String? sourceRef,
-  }) =>
-      JournalEntry(
-        id: id,
-        kind: EntryKind.journal,
-        createdAt: (createdAt ?? DateTime.now()).toUtc(),
-        title: title,
-        subtitle: subtitle,
-        thoughtText: thoughtText,
-        tags: tags,
-        hidden: hidden,
-        sourceRef: sourceRef,
-      );
+  }) {
+    return JournalEntry(
+      id: id,
+      kind: EntryKind.journal,
+      createdAt: (createdAt ?? DateTime.now()).toUtc(),
+      title: title,
+      subtitle: subtitle,
+      thoughtText: thoughtText,
+      tags: tags,
+      hidden: hidden,
+      sourceRef: sourceRef,
+    );
+  }
 
-  /// Fabrik: Reflexion.
   factory JournalEntry.reflection({
     required String id,
     DateTime? createdAt,
@@ -177,155 +181,102 @@ class JournalEntry {
     String? thoughtText,
     String? aiQuestion,
     String? userAnswer,
-    List<String> tags = const <String>[],
+    List<String> tags = const [],
     bool hidden = false,
     String? sourceRef,
-  }) =>
-      JournalEntry(
-        id: id,
-        kind: EntryKind.reflection,
-        createdAt: (createdAt ?? DateTime.now()).toUtc(),
-        title: title,
-        subtitle: subtitle,
-        thoughtText: thoughtText,
-        aiQuestion: aiQuestion,
-        userAnswer: userAnswer,
-        tags: tags,
-        hidden: hidden,
-        sourceRef: sourceRef,
-      );
+  }) {
+    return JournalEntry(
+      id: id,
+      kind: EntryKind.reflection,
+      createdAt: (createdAt ?? DateTime.now()).toUtc(),
+      title: title,
+      subtitle: subtitle,
+      thoughtText: thoughtText,
+      aiQuestion: aiQuestion,
+      userAnswer: userAnswer,
+      tags: tags,
+      hidden: hidden,
+      sourceRef: sourceRef,
+    );
+  }
 
-  /// Fabrik: Story.
   factory JournalEntry.story({
     required String id,
     DateTime? createdAt,
     String? title,
     String? storyTitle,
     String? storyTeaser,
-    List<String> tags = const <String>[],
+    String? storyBody,
+    List<String> tags = const [],
     bool hidden = false,
     String? sourceRef,
-  }) =>
-      JournalEntry(
-        id: id,
-        kind: EntryKind.story,
-        createdAt: (createdAt ?? DateTime.now()).toUtc(),
-        title: title,
-        storyTitle: storyTitle,
-        storyTeaser: storyTeaser,
-        tags: tags,
-        hidden: hidden,
-        sourceRef: sourceRef,
-      );
+  }) {
+    return JournalEntry(
+      id: id,
+      kind: EntryKind.story,
+      createdAt: (createdAt ?? DateTime.now()).toUtc(),
+      title: title,
+      storyTitle: storyTitle,
+      storyTeaser: storyTeaser,
+      storyBody: storyBody,
+      tags: tags,
+      hidden: hidden,
+      sourceRef: sourceRef,
+    );
+  }
 
-  // ─────────────────────── UI-Hilfen ───────────────────────
+  // ─────────────────────── UI-Hilfen (framework-frei) ───────────────────────
 
-  /// Lokale Zeit.
+  /// Lokale Zeit für Anzeige.
   DateTime get createdAtLocal => createdAt.toLocal();
 
-  /// Badge (Label + Icon).
-  EntryBadge get badge => badgeForEntryKind(kind);
-
-  /// Legacy-Shim: alter Enum.
-  @Deprecated('Use .kind instead')
-  JournalType get type => JournalType.values[kind.index];
-
-  /// Kurzer Inhaltstext:
-  /// - Reflexion: bevorzugt userAnswer, sonst thoughtText
+  /// Kurzer Preview-Text (3-Zeilen-geeignet).
+  /// - Reflexion: bevorzugt userAnswer, sonst aiQuestion/thoughtText
   /// - Journal: thoughtText
-  /// - Story: storyTeaser (oder storyTitle)
-  String get text {
+  /// - Story: teaser → title → erste Wörter aus body
+  String previewText() {
     switch (kind) {
       case EntryKind.reflection:
-        return _safe(userAnswer).isNotEmpty
-            ? _safe(userAnswer)
-            : _safe(thoughtText);
+        final a = _safe(userAnswer);
+        if (a.isNotEmpty) return a;
+        final q = _safe(aiQuestion);
+        if (q.isNotEmpty) return q;
+        return _safe(thoughtText);
       case EntryKind.journal:
         return _safe(thoughtText);
       case EntryKind.story:
-        final teaser = _safe(storyTeaser);
-        return teaser.isNotEmpty ? teaser : _safe(storyTitle);
+        final t = _safe(storyTeaser);
+        if (t.isNotEmpty) return t;
+        final st = _safe(storyTitle);
+        if (st.isNotEmpty) return st;
+        return _firstWords(_safe(storyBody), 10) ?? '';
     }
   }
 
-  /// Mood-Label aus Tags (`mood:<Label>`), z. B. „Neutral“.
-  String? get moodLabel {
-    for (final t in tags) {
-      final s = t.trim();
-      if (s.startsWith('mood:')) {
-        final v = s.substring(5).trim();
-        return v.isEmpty ? null : v;
-      }
-    }
-    return null;
-  }
+  /// Nicht-destruktiv: setzt `title` nur, wenn aktuell leer.
+  JournalEntry withAutoTitleIfEmpty() {
+    if (_nonEmpty(title)) return this;
 
-  /// Optionaler numerischer Mood-Score aus Tags (`moodScore:<0..4>`).
-  int? get moodScore {
-    for (final t in tags) {
-      final s = t.trim();
-      if (s.startsWith('moodScore:')) {
-        final v = int.tryParse(s.substring(10).trim());
-        if (v != null) return v.clamp(0, 4);
-      }
-    }
-    return null;
-  }
-
-  /// Titel, falls `title` leer ist – je nach Typ sinnvoll befüllt.
-  /// (ohne Präfixe wie „Tagebuch:“ etc.)
-  String get computedTitle {
-    if (_isNotEmpty(title)) return title!.trim();
-    switch (kind) {
-      case EntryKind.journal:
-        if (_isNotEmpty(thoughtText)) return _firstWords(thoughtText!, 6);
-        return 'Tagebuch';
-      case EntryKind.reflection:
-        if (_isNotEmpty(userAnswer)) return _firstWords(userAnswer!, 8);
-        if (_isNotEmpty(aiQuestion)) return _firstWords(aiQuestion!, 6);
-        return 'Reflexion';
-      case EntryKind.story:
-        if (_isNotEmpty(storyTitle)) return storyTitle!.trim();
-        return 'Kurzgeschichte';
-    }
-  }
-
-  /// Nicht-destruktiv: setzt `title` auf `computedTitle`, wenn leer.
-  JournalEntry withAutoTitle() =>
-      _isNotEmpty(title) ? this : copyWith(title: computedTitle);
-
-  /// Kompakter 3-Zeilen-Preview-Text (für Cards).
-  String previewText({String locale = 'de'}) {
+    String? candidate;
     switch (kind) {
       case EntryKind.reflection:
-        final q = _isNotEmpty(aiQuestion) ? _italic(_safe(aiQuestion)) : '';
-        final a = _safe(userAnswer);
-        final t = _joinNonEmpty([q, a], sep: ' ');
-        return t.isEmpty ? entryKindToString(kind, locale: locale) : t;
+        candidate = _firstNonEmpty([userAnswer, aiQuestion, thoughtText]);
+        break;
       case EntryKind.journal:
-        return _safe(thoughtText).isNotEmpty
-            ? _safe(thoughtText)
-            : entryKindToString(kind, locale: locale);
+        candidate = _firstNonEmpty([thoughtText, subtitle]);
+        break;
       case EntryKind.story:
-        final t = _safe(storyTitle).isNotEmpty
-            ? _safe(storyTitle)
-            : entryKindToString(kind, locale: locale);
-        final z = _safe(storyTeaser);
-        return _joinNonEmpty([t, z], sep: ' — ');
+        candidate = _firstNonEmpty([
+          storyTitle,
+          storyTeaser,
+          _firstWords(storyBody, 6),
+        ]);
+        break;
     }
-  }
+    candidate ??= kind.labelDe;
 
-  /// Meta-Zeile wie „Mo., 08.09., 17:26 — Kurzgeschichte“ (ohne Intl-Dependency).
-  String metaLine({String locale = 'de'}) {
-    final dt = createdAtLocal;
-    final de = locale.toLowerCase().startsWith('de');
-    final wd = de ? _deWeekday(dt.weekday) : _enWeekday(dt.weekday);
-    final dd = _two(dt.day);
-    final mm = _two(dt.month);
-    final hh = _two(dt.hour);
-    final mi = _two(dt.minute);
-    final date = de ? '$wd, $dd.$mm., $hh:$mi' : '$wd, $mm/$dd, $hh:$mi';
-    return '$date — ${entryKindToString(kind, locale: locale)}';
+    final tidied = _tidyTitle(candidate);
+    return copyWith(title: tidied);
   }
 
   // ─────────────────────── Copy / Equality ───────────────────────
@@ -341,6 +292,7 @@ class JournalEntry {
     String? userAnswer,
     String? storyTitle,
     String? storyTeaser,
+    String? storyBody,
     List<String>? tags,
     bool? hidden,
     String? sourceRef,
@@ -356,7 +308,8 @@ class JournalEntry {
       userAnswer: userAnswer ?? this.userAnswer,
       storyTitle: storyTitle ?? this.storyTitle,
       storyTeaser: storyTeaser ?? this.storyTeaser,
-      tags: tags ?? this.tags,
+      storyBody: storyBody ?? this.storyBody,
+      tags: tags ?? List<String>.from(this.tags),
       hidden: hidden ?? this.hidden,
       sourceRef: sourceRef ?? this.sourceRef,
     );
@@ -364,157 +317,267 @@ class JournalEntry {
 
   @override
   String toString() =>
-      'JournalEntry(id:$id, kind:$kind, createdAt:$createdAt, title:${title ?? ''})';
+      'JournalEntry(${kind.key} • $id • ${createdAt.toIso8601String()} • "${title ?? '-'}")';
 
   @override
   bool operator ==(Object other) =>
-      identical(this, other) || (other is JournalEntry && other.id == id);
+      identical(this, other) ||
+      (other is JournalEntry && other.id == id);
 
   @override
   int get hashCode => id.hashCode;
 
   // ─────────────────────── (De)Serialisierung ───────────────────────
 
-  Map<String, dynamic> toMap() => <String, dynamic>{
-        'id': id,
-        'kind': kind.toString().split('.').last,
-        'createdAt': createdAt.toUtc().toIso8601String(),
-        'title': title,
-        'subtitle': subtitle,
-        'thoughtText': thoughtText,
-        'aiQuestion': aiQuestion,
-        'userAnswer': userAnswer,
-        'storyTitle': storyTitle,
-        'storyTeaser': storyTeaser,
-        'tags': tags,
-        'hidden': hidden,
-        'sourceRef': sourceRef,
-      }..removeWhere((_, v) => v == null);
+  Map<String, dynamic> toMap() {
+    return <String, dynamic>{
+      'id': id,
+      'kind': kind.key,
+      'createdAt': createdAt.toUtc().toIso8601String(),
+      'title': title,
+      'subtitle': subtitle,
+      'thoughtText': thoughtText,
+      'aiQuestion': aiQuestion,
+      'userAnswer': userAnswer,
+      'storyTitle': storyTitle,
+      'storyTeaser': storyTeaser,
+      'storyBody': storyBody, // WICHTIG: niemals kürzen/entfernen
+      'tags': tags,
+      'hidden': hidden,
+      'sourceRef': sourceRef,
+    }..removeWhere((_, v) => v == null);
+  }
 
-  String toJson() => json.encode(toMap());
+  String toJson() => jsonEncode(toMap());
 
-  /// ⚠️ Tolerant: akzeptiert String **oder** Map.
-  static JournalEntry fromJson(dynamic source) {
-    try {
-      if (source is String) {
-        final obj = json.decode(source);
-        if (obj is Map<String, dynamic>) return fromMap(obj);
-        if (obj is Map) return fromMap(obj.cast<String, dynamic>());
-      } else if (source is Map<String, dynamic>) {
-        return fromMap(source);
-      } else if (source is Map) {
-        return fromMap(source.cast<String, dynamic>());
+  /// Toleranter Parser: akzeptiert alte/abweichende Keys.
+  /// Entfernt KEINE Inhalte (insb. storyBody bleibt).
+  static JournalEntry fromMap(Map<String, dynamic> map) {
+    // Helpers
+    String? s0(dynamic v) => v?.toString();
+    bool b(dynamic v) {
+      if (v is bool) return v;
+      if (v is num) return v != 0;
+      if (v is String) {
+        final t = v.trim().toLowerCase();
+        return t == 'true' || t == '1' || t == 'yes' || t == 'y';
       }
-    } catch (_) {/* fallthrough */}
+      return false;
+    }
+
+    // kind
+    final rawKind = s0(map['kind']) ?? s0(map['type']);
+    final kind = rawKind != null
+        ? EntryKindX.fromAny(rawKind)
+        : EntryKindX.fromAny(_inferKindKey(map));
+
+    // createdAt
+    DateTime created;
+    final rawCreated = map['createdAt'] ??
+        map['created_at'] ??
+        map['ts'] ??
+        map['timestamp'] ??
+        map['created'] ??
+        map['date'];
+    created = _toDateUtc(rawCreated) ?? DateTime.now().toUtc();
+
+    // tags
+    final tags = <String>[];
+    final rawTags = map['tags'] ?? map['tag'];
+    if (rawTags is List) {
+      for (final t in rawTags) {
+        final s = s0(t)?.trim();
+        if (s != null && s.isNotEmpty) tags.add(s);
+      }
+    } else if (rawTags is String && rawTags.trim().isNotEmpty) {
+      tags.addAll(rawTags.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty));
+    }
+
+    // Legacy mood → in Tags spiegeln, falls noch nicht vorhanden
+    final legacyMoodLabel = s0(map['mood']) ?? s0(map['moodLabel']);
+    if (legacyMoodLabel != null &&
+        !tags.any((t) => t.trim().toLowerCase().startsWith('mood:'))) {
+      tags.add('mood:${legacyMoodLabel.trim()}');
+    }
+    final legacyMoodScore = _toInt(map['moodScore']);
+    if (legacyMoodScore != null &&
+        !tags.any((t) => t.trim().toLowerCase().startsWith('moodscore:'))) {
+      final clamped = legacyMoodScore.clamp(0, 4);
+      tags.add('moodScore:$clamped');
+    }
+
+    // Build
+    final entry = JournalEntry(
+      id: s0(map['id']) ?? _genIdFallback(created),
+      kind: kind,
+      createdAt: created,
+      title: s0(map['title']) ?? s0(map['label']),
+      subtitle: s0(map['subtitle']) ?? s0(map['subTitle']) ?? s0(map['sub']),
+      thoughtText: s0(map['thoughtText']) ?? s0(map['text']) ?? s0(map['body']),
+      aiQuestion: s0(map['aiQuestion']) ?? s0(map['question']) ?? s0(map['prompt']),
+      userAnswer: s0(map['userAnswer']) ?? s0(map['answer']) ?? s0(map['response']),
+      storyTitle: s0(map['storyTitle']) ?? s0(map['story_title']) ?? s0(map['storyName']),
+      storyTeaser: s0(map['storyTeaser']) ?? s0(map['story_teaser']) ?? s0(map['teaser']),
+      storyBody: s0(map['storyBody']) ?? s0(map['story_body']) ?? s0(map['content']),
+      tags: tags,
+      hidden: b(map['hidden']) ||
+          b(map['isHidden']) ||
+          b(map['softHidden']),
+      sourceRef: s0(map['sourceRef']) ?? s0(map['source']) ?? s0(map['session']) ?? s0(map['remoteId']),
+    );
+
+    return entry.withAutoTitleIfEmpty();
+  }
+
+  static JournalEntry fromJson(dynamic source) {
+    if (source is String) {
+      final obj = jsonDecode(source);
+      if (obj is Map<String, dynamic>) return fromMap(obj);
+      if (obj is Map) return fromMap(obj.cast<String, dynamic>());
+      throw const FormatException('JournalEntry.fromJson: JSON object expected');
+    } else if (source is Map<String, dynamic>) {
+      return fromMap(source);
+    } else if (source is Map) {
+      return fromMap(source.cast<String, dynamic>());
+    }
     throw const FormatException('JournalEntry.fromJson expects String or Map');
   }
 
-  /// Tolerant gegenüber fehlenden/unbekannten Feldern (+ Legacy-Mapping).
-  static JournalEntry fromMap(Map<String, dynamic> map) {
-    // ---- ID
-    final String id = _asString(map['id']) ?? _genId();
+  // ─────────────────────── Utils ───────────────────────
 
-    // ---- Zeit
-    final DateTime createdAt = _toDate(map['createdAt']) ??
-        _toDate(map['ts']) ??
-        _toDate(map['timestamp']) ??
-        _toDate(map['created']) ??
-        _toDate(map['created_at']) ??
-        _toDate(map['date']) ??
-        DateTime.now().toUtc();
+  static String _inferKindKey(Map<String, dynamic> map) {
+    // Heuristik zur Migration alter Datensätze
+    final hasStory = (map.containsKey('storyBody') ||
+        map.containsKey('story_title') ||
+        map.containsKey('story_body') ||
+        map.containsKey('storyTeaser'));
+    if (hasStory) return 'story';
 
-    // ---- Kind
-    EntryKind kind;
-    final kRaw = _asString(map['kind']) ?? _asString(map['type']);
-    if (_isNotEmpty(kRaw)) {
-      kind = entryKindFromString(kRaw);
-    } else if (_toBool(map['isReflection']) == true) {
-      kind = EntryKind.reflection;
-    } else if (_toBool(map['isStory']) == true) {
-      kind = EntryKind.story;
-    } else if (_toBool(map['isJournal']) == true || _toBool(map['isNote']) == true) {
-      kind = EntryKind.journal;
-    } else {
-      // Heuristik
-      kind = inferKind(
-        aiQuestion: _asString(map['aiQuestion']) ?? _asString(map['question']),
-        userAnswer: _asString(map['userAnswer']) ?? _asString(map['answer']),
-        storyTitle: _asString(map['storyTitle']),
-        storyTeaser: _asString(map['storyTeaser']),
-        thoughtText: _asString(map['thoughtText']) ?? _asString(map['text']),
-      );
-    }
+    final hasReflection =
+        map.containsKey('aiQuestion') || map.containsKey('userAnswer') || map.containsKey('question');
+    if (hasReflection) return 'reflection';
 
-    // ---- Basis-/Inhaltsfelder (mit Legacy-Aliases)
-    final title = _asString(map['title']) ?? _asString(map['label']);
-    final subtitle = _asMaybeString(map, ['subtitle', 'subTitle']);
-    final thoughtText =
-        _asString(map['thoughtText']) ?? _asString(map['text']) ?? _asString(map['body']);
-    final aiQuestion =
-        _asString(map['aiQuestion']) ?? _asString(map['question']) ?? _asString(map['prompt']);
-    final userAnswer =
-        _asString(map['userAnswer']) ?? _asString(map['answer']) ?? _asString(map['response']);
-    final storyTitle = _asString(map['storyTitle']); // bewusst NICHT title überschreiben
-    final storyTeaser = _asString(map['storyTeaser']) ?? _asString(map['teaser']);
-
-    // ---- Tags (inkl. Legacy-Einbettungen)
-    final tags = <String>{
-      ..._asStringList(map['tags']),
-      ..._asStringList(map['tag']),
-    };
-
-    // Mood Label/Score in Tags nachziehen, falls nicht vorhanden
-    final legacyMoodLabel = _asMaybeString(map, ['mood', 'moodLabel']);
-    if (_isNotEmpty(legacyMoodLabel) && !tags.any((t) => t.trim().startsWith('mood:'))) {
-      tags.add('mood:${legacyMoodLabel!.trim()}');
-    }
-    final legacyMoodScore = _asInt(map['moodScore']);
-    if (legacyMoodScore != null && !tags.any((t) => t.trim().startsWith('moodScore:'))) {
-      tags.add('moodScore:${legacyMoodScore.clamp(0, 4)}');
-    }
-
-    // ---- Hidden / Source
-    final hidden = _toBool(map['hidden']) ??
-        _toBool(map['isHidden']) ??
-        _toBool(map['softHidden']) ??
-        false;
-
-    final sourceRef = _asMaybeString(map, ['sourceRef', 'source', 'sessionId', 'remoteId']);
-
-    return JournalEntry(
-      id: id,
-      kind: kind,
-      createdAt: createdAt,
-      title: title,
-      subtitle: subtitle,
-      thoughtText: thoughtText,
-      aiQuestion: aiQuestion,
-      userAnswer: userAnswer,
-      storyTitle: storyTitle,
-      storyTeaser: storyTeaser,
-      tags: tags.toList(growable: false),
-      hidden: hidden,
-      sourceRef: sourceRef,
-    );
+    return 'journal';
   }
 
-  /// Heuristik für alte Saves ohne `kind`.
-  static EntryKind inferKind({
-    String? aiQuestion,
-    String? userAnswer,
-    String? storyTitle,
-    String? storyTeaser,
-    String? thoughtText,
-  }) {
-    if (_isNotEmpty(storyTitle) || _isNotEmpty(storyTeaser)) return EntryKind.story;
-    if (_isNotEmpty(aiQuestion) || _isNotEmpty(userAnswer)) return EntryKind.reflection;
-    if (_isNotEmpty(thoughtText)) return EntryKind.journal;
-    return EntryKind.journal;
+  static DateTime? _toDateUtc(dynamic v) {
+    if (v == null) return null;
+    if (v is DateTime) return v.toUtc();
+    if (v is num) {
+      final val = v.toInt();
+      final isSec = val.abs() < 1000000000000;
+      final ms = isSec ? val * 1000 : val;
+      return DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true);
+    }
+    if (v is String) {
+      final s = v.trim();
+      if (s.isEmpty) return null;
+      final n = num.tryParse(s);
+      if (n != null) return _toDateUtc(n);
+      return DateTime.tryParse(s)?.toUtc();
+    }
+    return null;
   }
+
+  static int? _toInt(dynamic v) {
+    if (v == null) return null;
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    if (v is String) return int.tryParse(v.trim());
+    return null;
+  }
+
+  static String? _firstNonEmpty(List<String?> items) {
+    for (final s in items) {
+      if (s != null) {
+        final t = s.trim();
+        if (t.isNotEmpty) return t;
+      }
+    }
+    return null;
+  }
+
+  static String? _firstWords(String? text, int n) {
+    if (text == null) return null;
+    final t = text.trim();
+    if (t.isEmpty) return null;
+    final words = t.split(RegExp(r'\s+'));
+    final take = words.take(n).join(' ');
+    return words.length > n ? '$take …' : take;
+  }
+
+  static String _tidyTitle(String raw) {
+    var t = raw.trim();
+    // Zero-Width/Steuerzeichen entfernen
+    t = t
+        .replaceAll(RegExp(r'[\u200B-\u200F\uFEFF]'), '')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    if (t.length > 140) t = '${t.substring(0, 137)}…';
+    return t;
+  }
+
+  static String _genIdFallback(DateTime createdUtc) =>
+      'je_${createdUtc.microsecondsSinceEpoch}';
+
+  static bool _nonEmpty(String? s) => s != null && s.trim().isNotEmpty;
+
+  static String _safe(String? s) => s?.trim() ?? '';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Collection helpers (Sorting/Filtering) — optional, aber praktisch in Providern
+// UI/Compat-Erweiterungen (framework-frei)
+// ─────────────────────────────────────────────────────────────────────────────
+
+extension JournalEntryUiCompatX on JournalEntry {
+  /// Alias für ältere Aufrufer (Card erwartet withAutoTitle()).
+  JournalEntry withAutoTitle() => withAutoTitleIfEmpty();
+
+  /// Berechneter Titel ohne Mutation.
+  /// Nutzt vorhandenen Titel, sonst heuristisch (Antwort → Frage → Gedanke …) und tidy.
+  String get computedTitle {
+    if (JournalEntry._nonEmpty(title)) return title!.trim();
+
+    String? candidate;
+    switch (kind) {
+      case EntryKind.reflection:
+        candidate = JournalEntry._firstNonEmpty([userAnswer, aiQuestion, thoughtText]);
+        break;
+      case EntryKind.journal:
+        candidate = JournalEntry._firstNonEmpty([thoughtText, subtitle]);
+        break;
+      case EntryKind.story:
+        candidate = JournalEntry._firstNonEmpty([
+          storyTitle,
+          storyTeaser,
+          JournalEntry._firstWords(storyBody, 6),
+        ]);
+        break;
+    }
+    candidate ??= kind.labelDe;
+    return JournalEntry._tidyTitle(candidate);
+  }
+
+  /// Meta-Zeile für Karten: „Do., 07.09., 19:05 — <Typ>“
+  String metaLine() {
+    final d = createdAtLocal;
+    const wd = ['Mo.', 'Di.', 'Mi.', 'Do.', 'Fr.', 'Sa.', 'So.'];
+    final weekday = wd[(d.weekday - 1).clamp(0, 6)];
+    String two(int n) => n.toString().padLeft(2, '0');
+    final dd = two(d.day);
+    final mm = two(d.month);
+    final hh = two(d.hour);
+    final mi = two(d.minute);
+    return '$weekday, $dd.$mm., $hh:$mi — ${kind.labelDe}';
+  }
+
+  /// Framework-freier Badge: Label + Icon-Key (UI mappt Key → IconData).
+  ({String label, String iconKey}) get badge =>
+      (label: kind.labelDe, iconKey: kind.iconKey);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Collection helpers (Sorting/Filtering) — optional, aber praktisch
 // ─────────────────────────────────────────────────────────────────────────────
 
 extension JournalEntryListX on Iterable<JournalEntry> {
@@ -529,115 +592,6 @@ extension JournalEntryListX on Iterable<JournalEntry> {
   List<JournalEntry> ofKind(EntryKind k) => where((e) => e.kind == k).toList();
 
   /// Titel automatisch füllen, wenn leer.
-  List<JournalEntry> withAutoTitles() => map((e) => e.withAutoTitle()).toList();
+  List<JournalEntry> withAutoTitles() =>
+      map((e) => e.withAutoTitleIfEmpty()).toList();
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Helpers (privat)
-// ─────────────────────────────────────────────────────────────────────────────
-
-bool _isNotEmpty(String? s) => (s != null) && s.trim().isNotEmpty;
-
-String _safe(String? s) => s?.trim() ?? '';
-
-String _joinNonEmpty(List<String> parts, {String sep = ' '}) =>
-    parts.where((p) => p.trim().isNotEmpty).join(sep).trim();
-
-String _firstWords(String s, int n, {String prefix = ''}) {
-  final normalized = s.trim().replaceAll(RegExp(r'\s+'), ' ');
-  if (normalized.isEmpty) return prefix.isNotEmpty ? prefix.trim() : '';
-  final words = normalized.split(' ');
-  final take = words.take(n).join(' ');
-  return prefix + take + (words.length > n ? '…' : '');
-}
-
-DateTime? _toDate(dynamic v) {
-  if (v == null) return null;
-  if (v is DateTime) return v.toUtc();
-  if (v is num) {
-    final val = v.toInt();
-    // Heuristik: < 10^12 = Sekunden, sonst Millisekunden
-    final isSec = val.abs() < 1000000000000;
-    final ms = isSec ? val * 1000 : val;
-    return DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true);
-  }
-  if (v is String) {
-    final s = v.trim();
-    if (s.isEmpty) return null;
-    final numVal = num.tryParse(s);
-    if (numVal != null) return _toDate(numVal);
-    return DateTime.tryParse(s)?.toUtc();
-  }
-  return null;
-}
-
-bool? _toBool(dynamic v) {
-  if (v == null) return null;
-  if (v is bool) return v;
-  if (v is num) return v != 0;
-  if (v is String) {
-    final s = v.toLowerCase().trim();
-    if (s == 'true' || s == '1' || s == 'yes' || s == 'y') return true;
-    if (s == 'false' || s == '0' || s == 'no' || s == 'n') return false;
-  }
-  return null;
-}
-
-String? _asString(dynamic v) {
-  if (v == null) return null;
-  if (v is String) return v;
-  return v.toString();
-}
-
-String? _asMaybeString(Map<String, dynamic> map, List<String> keys) {
-  for (final k in keys) {
-    final v = map[k];
-    final s = _asString(v);
-    if (_isNotEmpty(s)) return s!.trim();
-  }
-  return null;
-}
-
-int? _asInt(dynamic v) {
-  if (v == null) return null;
-  if (v is int) return v;
-  if (v is num) return v.toInt();
-  if (v is String) return int.tryParse(v.trim());
-  return null;
-}
-
-List<String> _asStringList(dynamic v) {
-  if (v == null) return const <String>[];
-  if (v is List) {
-    return v
-        .map((e) => _asString(e))
-        .where((s) => s != null && s.trim().isNotEmpty)
-        .map((s) => s!.trim())
-        .toList(growable: false);
-  }
-  if (v is String) {
-    // Kommagetrennt (Legacy) akzeptieren
-    return v
-        .split(',')
-        .map((e) => e.trim())
-        .where((s) => s.isNotEmpty)
-        .toList(growable: false);
-  }
-  return const <String>[];
-}
-
-/// Markdown-ähnliche Kursiv-Andeutung (für Preview).
-String _italic(String s) => '*$s*';
-
-/// Einfache lokale ID (falls kein Backend-UUID vorhanden).
-String _genId() => 'je_${DateTime.now().microsecondsSinceEpoch}';
-
-String _two(int x) => x < 10 ? '0$x' : '$x';
-
-String _deWeekday(int w) =>
-    const ['Mo.', 'Di.', 'Mi.', 'Do.', 'Fr.', 'Sa.', 'So.'][_wdIndex(w)];
-String _enWeekday(int w) =>
-    const ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][_wdIndex(w)];
-
-int _wdIndex(int w) => ((w % 7) + 6) % 7; // 1..7 → 0..6 (Mo..So)
-// ─────────────────────────────────────────────────────────────────────────────

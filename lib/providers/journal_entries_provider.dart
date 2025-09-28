@@ -1,6 +1,6 @@
 // lib/providers/journal_entries_provider.dart
 //
-// JournalEntriesProvider — Oxford-Zen Pro v9.0 (kanonisch, zusammengeführt)
+// JournalEntriesProvider — Oxford-Zen Pro v9.2 (kanonisch, zusammengeführt)
 // ----------------------------------------------------------------------
 // • Ein Store für ALLE Entry-Typen (EntryKind-first), DESC by createdAt
 // • CRUD/Upsert/Batch + Persistence-Hooks (load/save) mit Microtask-Save
@@ -10,6 +10,12 @@
 // • Pro-Metriken (activeDays, reflectionsCount, averageMood, sparkline)
 // • Suche, Range, Export/Import (tolerant)
 // • Stabil: O(1)-Lookup per ID-Index, stabile Sortierung
+// • NEU in v9.2: storyBody wird sauber persistiert (addEntry/addStory), niemals gekürzt
+//
+// Projektregeln (wichtig):
+// • JournalEntry.storyBody wird NIE gekürzt/entfernt.
+// • Sortierung ist immer DESC by createdAt; bei Gleichstand stabil über ID.
+// • Soft-Hide nur session-lokal (_hiddenIds), nicht persistent.
 
 import 'dart:async';
 import 'dart:convert';
@@ -256,6 +262,7 @@ class JournalEntriesProvider with ChangeNotifier {
     String? userAnswer,
     String? storyTitle,
     String? storyTeaser,
+    String? storyBody, // NEU in v9.2: Volltext kann gesetzt werden
     List<String> tags = const <String>[],
     bool hidden = false,
     String? sourceRef,
@@ -291,10 +298,11 @@ class JournalEntriesProvider with ChangeNotifier {
       userAnswer: userAnswer,
       storyTitle: storyTitle,
       storyTeaser: storyTeaser,
+      storyBody: storyBody, // WICHTIG: direkt in Model speichern
       tags: tags,
       hidden: hidden,
       sourceRef: sourceRef,
-    );
+    ).withAutoTitleIfEmpty();
 
     final idx = _idIndex[newId];
     if (idx != null) {
@@ -319,7 +327,7 @@ class JournalEntriesProvider with ChangeNotifier {
     addEntry(
       kind: EntryKind.journal,
       createdAt: created,
-      thoughtText: text.trim(),
+      thoughtText: text.trim().isEmpty ? null : text.trim(),
       tags: _tagsWithMood(moodLabel),
     );
   }
@@ -359,6 +367,7 @@ class JournalEntriesProvider with ChangeNotifier {
     );
   }
 
+  /// Story hinzufügen — **mit** Volltext-Body.
   JournalEntry addStory({
     required String title,
     required String body,
@@ -374,6 +383,7 @@ class JournalEntriesProvider with ChangeNotifier {
       createdAt: created,
       storyTitle: title.trim(),
       storyTeaser: teaser,
+      storyBody: body, // NEU in v9.2: Volltext persistieren
       tags: _tagsWithMood(moodLabel),
     );
   }
@@ -499,6 +509,7 @@ class JournalEntriesProvider with ChangeNotifier {
     String? userAnswer,
     String? storyTitle,
     String? storyTeaser,
+    String? storyBody, // v9.2: Body kann explizit aktualisiert werden
     List<String>? tags,
     EntryKind? kind,
     DateTime? createdAt,
@@ -517,6 +528,7 @@ class JournalEntriesProvider with ChangeNotifier {
       userAnswer: userAnswer ?? cur.userAnswer,
       storyTitle: storyTitle ?? cur.storyTitle,
       storyTeaser: storyTeaser ?? cur.storyTeaser,
+      storyBody: storyBody ?? cur.storyBody, // NICHT kürzen!
       tags: tags ?? cur.tags,
       kind: kind ?? cur.kind,
       createdAt: (createdAt ?? cur.createdAt).toUtc(),
@@ -780,7 +792,10 @@ class JournalEntriesProvider with ChangeNotifier {
     required bool persist,
   }) {
     if (sort) {
-      _entries.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      _entries.sort((a, b) {
+        final c = b.createdAt.compareTo(a.createdAt);
+        return c != 0 ? c : b.id.compareTo(a.id);
+      });
       _reindex();
     } else if (_idIndex.length != _entries.length) {
       _reindex();
@@ -876,7 +891,10 @@ class JournalEntriesProvider with ChangeNotifier {
       map[e.id] = e;
     }
     final list = map.values.toList();
-    list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    list.sort((a, b) {
+      final c = b.createdAt.compareTo(a.createdAt);
+      return c != 0 ? c : b.id.compareTo(a.id);
+    });
     return list;
   }
 
@@ -989,7 +1007,7 @@ class JournalDayGroup {
 
 // Interner Datenträger für listVisible() UI-Gruppierung
 class _DayGroup {
-  final DateTime dateOnly; // Mit 00:00:00
+  final DateTime dateOnly; // mit 00:00:00
   final List<JournalEntry> items;
   const _DayGroup(this.dateOnly, this.items);
 }

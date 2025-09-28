@@ -1,27 +1,30 @@
 // lib/features/impulse/impulse_screen.dart
 //
-// ImpulseScreen — Oxford Zen Pro v3.2 (breath coach + mood assets + worker-ready)
+// ImpulseScreen — Oxford Zen Pro v3.5 (breath coach + mood assets + worker-ready)
 // -------------------------------------------------------------------------------
-// - Kategorien: Atmung, Meditation, PMR, Mikro
-// - Breath-Coach mit animiertem Kreis, Phasenanzeige, Zyklen
-// - Mood-Assets als Hintergründe (cloud, leaf, rain, sun, swirl, reflect, paper, startbilder)
-// - Audio robust (SoundscapeManager oder just_audio Fallback)
-// - Worker-Schnittstelle vorbereitet: _loadFromWorker()
-// - Fehlerfreie Build: Ticker-Import, nur vorhandene Styles/Farben
+// Changes (v3.5):
+// • Provider: sicheres `_maybeRead<T>()` statt nicht vorhandenem `Provider.maybeOf`.
+// • Import-Konflikt gelöst: `zen_style.dart` alias `zs`, `ZenGlassCard` nur aus ui.
+// • Stable Flutter APIs: überall `.withOpacity(...)`.
+// • PageView reset nur bei nicht-leerer Liste.
+// • BreathCoach: createTicker() + sauberes stop()/dispose().
+//
 
 import 'dart:ui' show ImageFilter;
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart'; // ✅ für Ticker
+import 'package:flutter/scheduler.dart'; // Ticker
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:just_audio/just_audio.dart' show AudioPlayer;
 
-import '../../shared/zen_style.dart';
-import '../../shared/ui/zen_widgets.dart';
+import '../../shared/zen_style.dart' as zs hide ZenGlassCard; // ← Konflikt vermeiden
+import '../../shared/ui/zen_widgets.dart'
+    show ZenBackdrop, ZenGlassCard, ZenAppBar, ZenToast;
 import '../../audio/soundscape_manager.dart';
 import '../../providers/journal_entries_provider.dart';
-import '../../models/journal_entry.dart' as jm;
 
 const Duration _animShort = Duration(milliseconds: 160);
 const Duration _animMed = Duration(milliseconds: 260);
@@ -31,12 +34,12 @@ enum ImpulseKind { breath, meditation, pmr, micro }
 class ZenImpulse {
   final String title;
   final String text;
-  final String image;
-  final String? audio;
+  final String image; // Asset-Pfad
+  final String? audio; // Asset-Pfad (optional)
   final ImpulseKind kind;
   final BreathPattern? breath;
 
-  const ZenImpulse({
+  ZenImpulse({
     required this.title,
     required this.text,
     required this.image,
@@ -50,7 +53,7 @@ class ZenImpulse {
 class BreathPattern {
   final List<_Phase> phases;
   final int cycles;
-  const BreathPattern({required this.phases, this.cycles = 4});
+  BreathPattern({required this.phases, this.cycles = 4});
 
   static BreathPattern box({int seconds = 4, int cycles = 4}) => BreathPattern(
         phases: [
@@ -119,24 +122,25 @@ class _ImpulseScreenState extends State<ImpulseScreen>
       audio: 'assets/audio/clouds_ambience.mp3',
       breath: BreathPattern.box(),
     ),
-    const ZenImpulse(
+    ZenImpulse(
       kind: ImpulseKind.meditation,
       title: 'Der innere Garten',
-      text: 'Stell dir deinen Geist als Garten vor.',
+      text: 'Stell dir deinen Geist als Garten vor. Gehe langsam durch ihn.',
       image: 'assets/panda_moods/mood_sun.png',
       audio: 'assets/audio/birds_garden.mp3',
     ),
-    const ZenImpulse(
+    ZenImpulse(
       kind: ImpulseKind.pmr,
       title: 'Schultern lockern',
-      text: 'Heb die Schultern, halte kurz, lass sinken.',
+      text: 'Heb die Schultern, halte kurz, lass sinken. Wiederhole sanft.',
       image: 'assets/panda_moods/mood_rain.png',
       audio: 'assets/audio/neutral_flow.mp3',
     ),
-    const ZenImpulse(
+    ZenImpulse(
       kind: ImpulseKind.micro,
       title: 'Kleine Freundlichkeit',
-      text: 'Wem — oder dir selbst — schenkst du heute eine winzige Freundlichkeit?',
+      text:
+          'Wem — oder dir selbst — schenkst du heute eine winzige Freundlichkeit?',
       image: 'assets/panda_moods/mood_swirl.png',
       audio: 'assets/audio/sunshine_zen.mp3',
     ),
@@ -152,7 +156,7 @@ class _ImpulseScreenState extends State<ImpulseScreen>
     _glowCtrl =
         AnimationController(vsync: this, duration: const Duration(seconds: 3))
           ..repeat(reverse: true);
-    // Später: Worker laden
+    // Optional: Worker lädt dynamische Impulse → ersetzt _all
     //_loadFromWorker();
   }
 
@@ -174,10 +178,19 @@ class _ImpulseScreenState extends State<ImpulseScreen>
     }
   }
 
+  // provider optional lesen (Null, wenn nicht registriert)
+  T? _maybeRead<T>(BuildContext context) {
+    try {
+      return Provider.of<T>(context, listen: false);
+    } catch (_) {
+      return null;
+    }
+  }
+
   // Audio-Logik
   Future<void> _playAudio(ZenImpulse imp) async {
     try {
-      final ssm = context.read<SoundscapeManager?>();
+      final ssm = _maybeRead<SoundscapeManager>(context);
       if (ssm != null && imp.audio != null) {
         await ssm.play(imp.audio!, fadeIn: 1.0);
         ZenToast.show(context, 'Audio gestartet');
@@ -185,8 +198,12 @@ class _ImpulseScreenState extends State<ImpulseScreen>
       }
     } catch (_) {}
     try {
+      if ((imp.audio ?? '').isEmpty) {
+        ZenToast.show(context, 'Kein Audio verfügbar');
+        return;
+      }
       _fallbackPlayer ??= AudioPlayer();
-      await _fallbackPlayer!.setAsset(imp.audio ?? 'assets/audio/neutral_flow.mp3');
+      await _fallbackPlayer!.setAsset(imp.audio!);
       await _fallbackPlayer!.play();
     } catch (_) {
       ZenToast.show(context, 'Audio nicht verfügbar');
@@ -199,15 +216,11 @@ class _ImpulseScreenState extends State<ImpulseScreen>
 
   Future<void> _saveAsJournal(ZenImpulse imp) async {
     try {
-      final p = context.read<JournalEntriesProvider>();
-      final entry = jm.JournalEntry.journal(
-        id: 'imp_${DateTime.now().microsecondsSinceEpoch}',
-        title: imp.title,
-        thoughtText: imp.text,
-        tags: const ['source:impulse'],
-      );
-      p.add(entry);
+      final p = Provider.of<JournalEntriesProvider>(context, listen: false);
+      final merged = '${imp.title}\n\n${imp.text}'.trim();
+      p.addDiary(text: merged);
       ZenToast.show(context, 'Als Tagebuch gespeichert');
+      HapticFeedback.selectionClick();
     } catch (_) {}
   }
 
@@ -224,6 +237,7 @@ class _ImpulseScreenState extends State<ImpulseScreen>
   @override
   Widget build(BuildContext context) {
     final current = _impulses.isNotEmpty ? _impulses[_index] : null;
+
     return Scaffold(
       extendBodyBehindAppBar: true,
       appBar: ZenAppBar(
@@ -231,37 +245,60 @@ class _ImpulseScreenState extends State<ImpulseScreen>
         showBack: true,
         actions: [
           IconButton(
-            icon: const Icon(Icons.library_music_rounded, color: ZenColors.jade),
-            onPressed: () => context.read<SoundscapeManager?>()?.toggle(),
+            tooltip: 'Soundscape',
+            icon: const Icon(Icons.library_music_rounded, color: zs.ZenColors.jade),
+            onPressed: () {
+              final ssm = _maybeRead<SoundscapeManager>(context);
+              ssm?.toggle();
+            },
           ),
         ],
       ),
       body: Stack(
         children: [
+          // Stimmungs-Asset als Hintergrund
           Positioned.fill(
             child: _SafeBg(asset: current?.image ?? 'assets/paper_texture.png'),
           ),
-          const Positioned.fill(
+          // Dezent gefärbter Screen-Gradient
+          Positioned.fill(
             child: DecoratedBox(
-              decoration: BoxDecoration(gradient: ZenGradients.screen),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.white.withOpacity(.82),
+                    Colors.white.withOpacity(.66),
+                    Colors.white.withOpacity(.58),
+                  ],
+                ),
+              ),
             ),
           ),
+          // Sanfter Blur (non-const, da ImageFilter.blur nicht const ist)
           Positioned.fill(
             child: BackdropFilter(
               filter: ImageFilter.blur(sigmaX: 2, sigmaY: 2),
               child: const SizedBox.shrink(),
             ),
           ),
+
           SafeArea(
             child: Column(
               children: [
                 _FilterChips(
                   value: _filter,
-                  onChanged: (k) => setState(() {
-                    _filter = k;
-                    _index = 0;
-                    _page.jumpToPage(0);
-                  }),
+                  onChanged: (k) {
+                    HapticFeedback.selectionClick();
+                    setState(() {
+                      _filter = k;
+                      _index = 0;
+                      if (_impulses.isNotEmpty) {
+                        _page.jumpToPage(0);
+                      }
+                    });
+                  },
                 ),
                 Expanded(
                   child: PageView.builder(
@@ -283,18 +320,36 @@ class _ImpulseScreenState extends State<ImpulseScreen>
                   child: Row(
                     children: [
                       Expanded(
-                        child: ZenOutlineButton(
-                          label: 'Teilen',
-                          icon: Icons.ios_share_rounded,
-                          onPressed: current == null ? null : () => _share(current),
+                        child: OutlinedButton.icon(
+                          icon: const Icon(Icons.ios_share_rounded),
+                          label: const Text('Teilen'),
+                          onPressed:
+                              current == null ? null : () => _share(current),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: zs.ZenColors.jade,
+                            side: const BorderSide(
+                                color: zs.ZenColors.jade, width: 1.1),
+                            shape: const RoundedRectangleBorder(
+                              borderRadius:
+                                  BorderRadius.all(zs.ZenRadii.m),
+                            ),
+                            minimumSize: const Size(0, 44),
+                          ),
                         ),
                       ),
                       const SizedBox(width: 8),
                       Expanded(
-                        child: ZenPrimaryButton(
-                          label: 'Nächster Impuls',
-                          icon: Icons.refresh_rounded,
+                        child: ElevatedButton.icon(
+                          icon: const Icon(Icons.refresh_rounded),
+                          label: const Text('Nächster Impuls'),
                           onPressed: _impulses.isEmpty ? null : _next,
+                          style: ElevatedButton.styleFrom(
+                            minimumSize: const Size(0, 44),
+                            shape: const RoundedRectangleBorder(
+                              borderRadius:
+                                  BorderRadius.all(zs.ZenRadii.m),
+                            ),
+                          ),
                         ),
                       ),
                     ],
@@ -309,12 +364,13 @@ class _ImpulseScreenState extends State<ImpulseScreen>
   }
 }
 
-// --- Subwidgets (FilterChips, CardBody, BreathCoach etc.) ---
+// ─────────────────────────── Subwidgets ───────────────────────────
 
 class _FilterChips extends StatelessWidget {
   final ImpulseKind value;
   final ValueChanged<ImpulseKind> onChanged;
   const _FilterChips({required this.value, required this.onChanged});
+
   @override
   Widget build(BuildContext context) {
     Widget chip(ImpulseKind k, String label, IconData icon) {
@@ -324,18 +380,42 @@ class _FilterChips extends StatelessWidget {
         child: FilterChip(
           selected: selected,
           onSelected: (_) => onChanged(k),
-          label: Text(label),
-          avatar: Icon(icon, size: 18),
+          showCheckmark: false,
+          label: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon,
+                  size: 16,
+                  color:
+                      selected ? zs.ZenColors.jade : zs.ZenColors.jadeMid),
+              const SizedBox(width: 6),
+              Text(label),
+            ],
+          ),
+          selectedColor: zs.ZenColors.jade.withOpacity(.10),
+          side: BorderSide(
+            color: selected
+                ? zs.ZenColors.jade.withOpacity(.55)
+                : zs.ZenColors.outline,
+          ),
+          shape: const StadiumBorder(),
+          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          visualDensity: VisualDensity.compact,
         ),
       );
     }
-    return Wrap(
-      children: [
-        chip(ImpulseKind.breath, 'Atmung', Icons.air),
-        chip(ImpulseKind.meditation, 'Meditation', Icons.self_improvement),
-        chip(ImpulseKind.pmr, 'PMR', Icons.accessibility_new),
-        chip(ImpulseKind.micro, 'Mikro', Icons.flash_on),
-      ],
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
+      child: Wrap(
+        alignment: WrapAlignment.center,
+        children: [
+          chip(ImpulseKind.breath, 'Atmung', Icons.air),
+          chip(ImpulseKind.meditation, 'Meditation', Icons.self_improvement),
+          chip(ImpulseKind.pmr, 'PMR', Icons.accessibility_new),
+          chip(ImpulseKind.micro, 'Mikro', Icons.flash_on),
+        ],
+      ),
     );
   }
 }
@@ -343,30 +423,102 @@ class _FilterChips extends StatelessWidget {
 class _ImpulseCardBody extends StatelessWidget {
   final ZenImpulse impulse;
   final VoidCallback onPlay, onSave, onShare;
-  const _ImpulseCardBody({required this.impulse, required this.onPlay, required this.onSave, required this.onShare});
+
+  const _ImpulseCardBody({
+    required this.impulse,
+    required this.onPlay,
+    required this.onSave,
+    required this.onShare,
+  });
+
   @override
   Widget build(BuildContext context) {
-    return ZenCard(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(impulse.title, style: ZenTextStyles.h2),
-          const SizedBox(height: 8),
-          Text(impulse.text, textAlign: TextAlign.center),
-          const SizedBox(height: 12),
-          if (impulse.breath != null)
-            _BreathCoach(pattern: impulse.breath!, onPlay: onPlay)
-          else
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                _AudioButton(onPressed: onPlay),
-                const SizedBox(width: 8),
-                ZenOutlineButton(label: 'Als Tagebuch', icon: Icons.bookmark, onPressed: onSave),
-              ],
+    final tt = Theme.of(context).textTheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: ZenGlassCard(
+        borderRadius: const BorderRadius.all(zs.ZenRadii.xl),
+        padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+        topOpacity: .26,
+        bottomOpacity: .10,
+        borderOpacity: .18,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              impulse.title,
+              style: zs.ZenTextStyles.h2.copyWith(
+                color: zs.ZenColors.deepSage,
+                fontWeight: FontWeight.w800,
+              ),
+              textAlign: TextAlign.center,
             ),
-        ],
+            const SizedBox(height: 8),
+            Text(
+              impulse.text,
+              style: tt.bodyMedium?.copyWith(
+                color: zs.ZenColors.inkStrong,
+                height: 1.35,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 14),
+
+            // Breath-Coach oder Standard-Actions
+            if (impulse.breath != null)
+              _BreathCoach(pattern: impulse.breath!, onPlay: onPlay)
+            else
+              Wrap(
+                alignment: WrapAlignment.center,
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.music_note),
+                    label: const Text('Audio'),
+                    onPressed: onPlay,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: zs.ZenColors.jade,
+                      side: const BorderSide(
+                          color: zs.ZenColors.jade, width: 1.1),
+                      shape: const RoundedRectangleBorder(
+                        borderRadius: BorderRadius.all(zs.ZenRadii.m),
+                      ),
+                      minimumSize: const Size(0, 44),
+                    ),
+                  ),
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.bookmark_add_outlined),
+                    label: const Text('Als Tagebuch'),
+                    onPressed: onSave,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: zs.ZenColors.jade,
+                      side: const BorderSide(
+                          color: zs.ZenColors.jade, width: 1.1),
+                      shape: const RoundedRectangleBorder(
+                        borderRadius: BorderRadius.all(zs.ZenRadii.m),
+                      ),
+                      minimumSize: const Size(0, 44),
+                    ),
+                  ),
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.ios_share_rounded),
+                    label: const Text('Teilen'),
+                    onPressed: onShare,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: zs.ZenColors.jade,
+                      side: const BorderSide(
+                          color: zs.ZenColors.jade, width: 1.1),
+                      shape: const RoundedRectangleBorder(
+                        borderRadius: BorderRadius.all(zs.ZenRadii.m),
+                      ),
+                      minimumSize: const Size(0, 44),
+                    ),
+                  ),
+                ],
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -376,12 +528,14 @@ class _BreathCoach extends StatefulWidget {
   final BreathPattern pattern;
   final VoidCallback onPlay;
   const _BreathCoach({required this.pattern, required this.onPlay});
+
   @override
   State<_BreathCoach> createState() => _BreathCoachState();
 }
 
-class _BreathCoachState extends State<_BreathCoach> with SingleTickerProviderStateMixin {
-  late final Ticker _ticker; // ✅ jetzt gefunden
+class _BreathCoachState extends State<_BreathCoach>
+    with SingleTickerProviderStateMixin {
+  late final Ticker _ticker;
   bool _running = false;
   int _cycle = 0, _phaseIndex = 0, _elapsedMs = 0;
 
@@ -391,7 +545,7 @@ class _BreathCoachState extends State<_BreathCoach> with SingleTickerProviderSta
   @override
   void initState() {
     super.initState();
-    _ticker = Ticker((d) {
+    _ticker = createTicker((d) {
       if (!_running) return;
       setState(() {
         _elapsedMs += d.inMilliseconds;
@@ -401,7 +555,12 @@ class _BreathCoachState extends State<_BreathCoach> with SingleTickerProviderSta
           if (_phaseIndex >= widget.pattern.phases.length) {
             _phaseIndex = 0;
             _cycle++;
-            if (_cycle >= widget.pattern.cycles) _running = false;
+            if (_cycle >= widget.pattern.cycles) {
+              _running = false;
+              ZenToast.show(context, 'Atemrunde beendet');
+              // sauber stoppen, damit kein Leerlauf-Ticker weiterläuft
+              _ticker.stop();
+            }
           }
         }
       });
@@ -410,62 +569,165 @@ class _BreathCoachState extends State<_BreathCoach> with SingleTickerProviderSta
 
   @override
   void dispose() {
-    _ticker.dispose();
+    try {
+      _ticker.stop();
+      _ticker.dispose();
+    } catch (_) {}
     super.dispose();
   }
 
   void _start() {
+    HapticFeedback.selectionClick();
     setState(() {
-      _cycle = 0; _phaseIndex = 0; _elapsedMs = 0; _running = true;
+      _cycle = 0;
+      _phaseIndex = 0;
+      _elapsedMs = 0;
+      _running = true;
     });
-    _ticker.start();
+    if (!_ticker.isActive) _ticker.start();
   }
 
-  void _stop() { setState(() => _running = false); _ticker.stop(); }
+  void _stop() {
+    setState(() => _running = false);
+    _ticker.stop();
+  }
 
   @override
   Widget build(BuildContext context) {
+    final leftSec = ((_phaseMsTotal - _elapsedMs) / 1000).ceil();
+    final progress = _phaseMsTotal == 0
+        ? 0.0
+        : (_elapsedMs.clamp(0, _phaseMsTotal) / _phaseMsTotal);
+
     return Column(
       children: [
-        Text('${_phase.label} • ${(_phaseMsTotal - _elapsedMs) ~/ 1000}s'),
-        const SizedBox(height: 8),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
+        // animierter Kreis
+        SizedBox(
+          width: 164,
+          height: 164,
+          child: TweenAnimationBuilder<double>(
+            tween: Tween(begin: 0, end: progress),
+            duration: _animShort,
+            builder: (_, v, __) {
+              return Stack(
+                fit: StackFit.expand,
+                children: [
+                  CustomPaint(
+                    painter: _CirclePainter(progress: v),
+                  ),
+                  Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(_phase.label,
+                            style: zs.ZenTextStyles.subtitle
+                                .copyWith(color: zs.ZenColors.inkStrong)),
+                        const SizedBox(height: 4),
+                        Text('$leftSec s',
+                            style: zs.ZenTextStyles.caption
+                                .copyWith(color: zs.ZenColors.jadeMid)),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 10),
+        Text('Zyklus ${_cycle + 1} / ${widget.pattern.cycles}',
+            style:
+                zs.ZenTextStyles.caption.copyWith(color: zs.ZenColors.inkSubtle)),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
           children: [
-            ZenOutlineButton(label: _running ? 'Stop' : 'Start', icon: _running ? Icons.stop : Icons.play_arrow, onPressed: _running ? _stop : _start),
-            const SizedBox(width: 8),
-            ZenOutlineButton(label: 'Audio', icon: Icons.music_note, onPressed: widget.onPlay),
+            OutlinedButton.icon(
+              icon: Icon(_running ? Icons.stop : Icons.play_arrow),
+              label: Text(_running ? 'Stop' : 'Start'),
+              onPressed: _running ? _stop : _start,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: zs.ZenColors.jade,
+                side: const BorderSide(color: zs.ZenColors.jade, width: 1.1),
+                shape: const RoundedRectangleBorder(
+                  borderRadius: BorderRadius.all(zs.ZenRadii.m),
+                ),
+                minimumSize: const Size(0, 44),
+              ),
+            ),
+            OutlinedButton.icon(
+              icon: const Icon(Icons.music_note),
+              label: const Text('Audio'),
+              onPressed: widget.onPlay,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: zs.ZenColors.jade,
+                side: const BorderSide(color: zs.ZenColors.jade, width: 1.1),
+                shape: const RoundedRectangleBorder(
+                  borderRadius: BorderRadius.all(zs.ZenRadii.m),
+                ),
+                minimumSize: const Size(0, 44),
+              ),
+            ),
           ],
-        )
+        ),
       ],
     );
   }
 }
 
-class _AudioButton extends StatelessWidget {
-  final VoidCallback onPressed;
-  const _AudioButton({required this.onPressed});
+class _CirclePainter extends CustomPainter {
+  final double progress; // 0..1
+  _CirclePainter({required this.progress});
+
   @override
-  Widget build(BuildContext context) {
-    return ZenOutlineButton(label: 'Audio', icon: Icons.play_arrow, onPressed: onPressed);
+  void paint(Canvas canvas, Size size) {
+    final c = size.center(Offset.zero);
+    final r = size.shortestSide / 2 - 6;
+
+    final bg = Paint()
+      ..color = zs.ZenColors.mist.withOpacity(.80)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 10;
+
+    final fg = Paint()
+      ..color = zs.ZenColors.jade
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = 10;
+
+    // Außenkreis (ruhig)
+    canvas.drawCircle(c, r, bg);
+
+    // Fortschritt (0..1 → Winkel)
+    final sweep = 2 * math.pi * progress;
+    final rect = Rect.fromCircle(center: c, radius: r);
+    canvas.drawArc(rect, -math.pi / 2, sweep, false, fg);
   }
+
+  @override
+  bool shouldRepaint(covariant _CirclePainter old) =>
+      old.progress != progress;
 }
 
 class _Dots extends StatelessWidget {
   final int count, index;
   const _Dots({required this.count, required this.index});
   @override
-  Widget build(BuildContext context) => Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: List.generate(
-          count,
-          (i) => Container(
-            margin: const EdgeInsets.all(3),
-            width: i == index ? 10 : 8,
-            height: i == index ? 10 : 8,
-            decoration: BoxDecoration(
-              color: i == index ? ZenColors.jade : ZenColors.cloud,
-              shape: BoxShape.circle,
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: List.generate(
+            count,
+            (i) => AnimatedContainer(
+              duration: _animShort,
+              margin: const EdgeInsets.all(3),
+              width: i == index ? 10 : 8,
+              height: i == index ? 10 : 8,
+              decoration: BoxDecoration(
+                color: i == index ? zs.ZenColors.jade : zs.ZenColors.cloud,
+                shape: BoxShape.circle,
+              ),
             ),
           ),
         ),
@@ -477,6 +739,11 @@ class _SafeBg extends StatelessWidget {
   const _SafeBg({required this.asset});
   @override
   Widget build(BuildContext context) {
-    return Image.asset(asset, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const DecoratedBox(decoration: BoxDecoration(color: Colors.black12)));
+    return Image.asset(
+      asset,
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) =>
+          const DecoratedBox(decoration: BoxDecoration(color: Colors.white)),
+    );
   }
 }

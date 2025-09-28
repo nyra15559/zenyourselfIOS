@@ -1,15 +1,13 @@
 // lib/shared/ui/zen_widgets.dart
 //
-// Oxford–Zen UI Widgets (v6.70 · 2025-09-09)
+// Oxford–Zen UI Widgets (v6.90 · 2025-09-17)
 // ---------------------------------------------------------------------------
-// • ZenAppScaffold: optionaler Backdrop, responsive Max-Width.
-// • ZenSafeImage.asset: robustes Asset-Image mit Fallback (kein Crash).
-// • ZenAppBar: integrierter, parametrisierbarer Top-Fade (ohne externe Overlays).
-// • PandaHeader: feiner Rhythmus, dezenter Schatten, perfekter Mittelpunkt-Moment.
-// • Glass/Card/Input: Randkonsistenz (immer Weiß, wie in zen_style Primitives).
-// • Buttons/Chips konsistent zu Tokens in zen_style.dart.
-// • Sanfter „Milch“-Regler im Backdrop (milk) für mehr Tiefe/Weichheit.
-// • Keine breaking changes zu v6.40; API bleibt kompatibel.
+// WICHTIG – Vereinheitlichung v6.1 (ohne neue Dateien):
+// • Glas: Blur σ=18, bg White @0.20, border White @0.22, Shadow (0,8,20,0.10), Radius 20
+// • Header: Panda→Titel 12 px, Titel→Caption 6 px, Caption Ink @70% (nicht italic)
+// • CTA: Höhe 48, Stadium→Radius wie L, konsistentes Padding
+// • Scaffold: Default Max-Width 680, Padding 24 (Grid 8/16/24/32)
+// • Keine Breaking Changes: öffentliche API unverändert, nur Defaults/Styles justiert
 //
 // Abhängigkeiten (pubspec):
 //   lottie: ^3.3.1
@@ -27,6 +25,13 @@ export '../../shared/zen_style.dart'
 
 /// interne Animations-Dauer (vereinheitlicht)
 const Duration _animMed = Duration(milliseconds: 240);
+
+// -------- Oxford–Zen v6.1 Style Defaults (lokal, keine zusätzlichen Dateien) -----
+const double _kGlassBlur = 18.0;
+const double _kGlassBgOpacity = 0.20;
+const double _kGlassBorderOpacity = 0.22;
+final BoxShadow _kGlassShadow =
+    BoxShadow(color: Colors.black.withOpacity(0.10), blurRadius: 20, offset: const Offset(0, 8));
 
 /// ======================================================================
 /// ZEN APP SCAFFOLD — optionaler Backdrop & responsive Breite
@@ -58,8 +63,8 @@ class ZenAppScaffold extends StatelessWidget {
     this.appBar,
     required this.body,
     this.backdropAsset,
-    this.maxBodyWidth = 720,
-    this.bodyPadding = const EdgeInsets.fromLTRB(16, 12, 16, 24),
+    this.maxBodyWidth = 680, // v6.1
+    this.bodyPadding = const EdgeInsets.fromLTRB(24, 24, 24, 24), // v6.1
     this.backdropWash,
     this.backdropSaturation,
     this.backdropGlow,
@@ -89,7 +94,6 @@ class ZenAppScaffold extends StatelessWidget {
               saturation: backdropSaturation ?? .95,
               glow: backdropGlow ?? .28,
               vignette: backdropVignette ?? .12,
-              // „Milchigkeit“ etwas erhöhen, damit es sichtbar weicher wirkt
               milk: (backdropMilk ?? .10).clamp(0.0, 1.0),
             )
           else
@@ -243,27 +247,27 @@ class PandaHeader extends StatelessWidget {
       child: Column(
         children: [
           _AnimatedPandaGlow(size: pandaSize),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12), // v6.1
           Text(
             title,
             textAlign: TextAlign.center,
             maxLines: 2,
             style: tt.headlineMedium!.copyWith(
-              fontSize: 28,
+              fontSize: 26, // etwas ruhiger
               color: strongTitleGreen ? ZenColors.deepSage : ZenColors.inkStrong,
-              fontWeight: FontWeight.w900,
-              letterSpacing: 0.05,
+              fontWeight: FontWeight.w700, // v6.1 (semibold)
+              letterSpacing: 0.10, // v6.1
               shadows: [
                 Shadow(
-                  blurRadius: 6,
-                  color: Colors.black.withOpacity(.06),
-                  offset: const Offset(0, 2),
+                  blurRadius: 4,
+                  color: Colors.black.withOpacity(.05),
+                  offset: const Offset(0, 1),
                 ),
               ],
             ),
           ),
           if (caption != null) ...[
-            const SizedBox(height: 5),
+            const SizedBox(height: 6), // v6.1
             Opacity(
               opacity: 0.92,
               child: Text(
@@ -271,8 +275,9 @@ class PandaHeader extends StatelessWidget {
                 textAlign: TextAlign.center,
                 style: ZenTextStyles.caption.copyWith(
                   fontSize: 14.5,
-                  color: ZenColors.sage,
-                  fontStyle: FontStyle.italic,
+                  // Oxford-Zen v6.1: ruhige Tagline in Ink @70%, nicht italic
+                  color: const Color(0xFF1A1A1A).withOpacity(.70),
+                  fontStyle: FontStyle.normal,
                 ),
               ),
             ),
@@ -298,9 +303,8 @@ class _AnimatedPandaGlowState extends State<_AnimatedPandaGlow>
   @override
   void initState() {
     super.initState();
-    _glow =
-        AnimationController(vsync: this, duration: const Duration(seconds: 3))
-          ..repeat(reverse: true);
+    _glow = AnimationController(vsync: this, duration: const Duration(seconds: 3))
+      ..repeat(reverse: true);
   }
 
   @override
@@ -319,19 +323,17 @@ class _AnimatedPandaGlowState extends State<_AnimatedPandaGlow>
           shape: BoxShape.circle,
           boxShadow: [
             BoxShadow(
-              color: ZenColors.deepSage
-                  .withOpacity(0.10 + 0.17 * _glow.value),
+              color: ZenColors.deepSage.withOpacity(0.10 + 0.17 * _glow.value),
               blurRadius: 30 + 16 * _glow.value,
               spreadRadius: 4 + 5 * _glow.value,
             ),
           ],
         ),
         child: ZenSafeImage.asset(
-          'assets/panda.png',
+          'assets/star_pa.png',
           width: widget.size,
           height: widget.size,
-          fallback:
-              const Icon(Icons.pets, color: ZenColors.deepSage, size: 42),
+          fallback: const Icon(Icons.pets, color: ZenColors.deepSage, size: 42),
         ),
       ),
     );
@@ -347,7 +349,7 @@ class ZenGlassCard extends StatelessWidget {
   final EdgeInsetsGeometry margin;
   final BorderRadius borderRadius;
 
-  /// Obere/untere Licht-Schicht (0..1)
+  /// Obere/untere Licht-Schicht (0..1) — behalten für Backwards-Compat
   final double topOpacity;
   final double bottomOpacity;
 
@@ -360,14 +362,13 @@ class ZenGlassCard extends StatelessWidget {
     this.padding = const EdgeInsets.all(ZenSpacing.l),
     this.margin = EdgeInsets.zero,
     this.borderRadius = const BorderRadius.all(ZenRadii.l),
-    this.topOpacity = .24,
-    this.bottomOpacity = .10,
-    this.borderOpacity = .14,
+    this.topOpacity = _kGlassBgOpacity,
+    this.bottomOpacity = _kGlassBgOpacity,
+    this.borderOpacity = _kGlassBorderOpacity,
   });
 
   @override
   Widget build(BuildContext context) {
-    // Randkonsistenz wie in den Glas-Primitives: immer Weiß mit Alpha
     final borderColor = Colors.white.withOpacity(borderOpacity);
 
     return Padding(
@@ -376,32 +377,28 @@ class ZenGlassCard extends StatelessWidget {
         borderRadius: borderRadius,
         child: Stack(
           children: [
+            // Vereinheitlichter Blur
             BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+              filter: ImageFilter.blur(sigmaX: _kGlassBlur, sigmaY: _kGlassBlur),
               child: const SizedBox.shrink(),
             ),
+            // Einheitlicher „Weißfilm“ (statt wechselnder Gradients)
             Positioned.fill(
               child: IgnorePointer(
                 ignoring: true,
                 child: DecoratedBox(
                   decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.white.withOpacity(topOpacity),
-                        Colors.white.withOpacity(bottomOpacity),
-                      ],
-                    ),
+                    color: Colors.white.withOpacity(_kGlassBgOpacity),
                   ),
                 ),
               ),
             ),
+            // Border + Shadow + Inhalt
             Container(
               decoration: BoxDecoration(
                 borderRadius: borderRadius,
                 border: Border.all(color: borderColor, width: 1),
-                boxShadow: ZenShadows.card,
+                boxShadow: [_kGlassShadow], // v6.1
               ),
               padding: padding,
               child: child,
@@ -414,7 +411,7 @@ class ZenGlassCard extends StatelessWidget {
 }
 
 /// ======================================================================
-/// GLASS INPUT — rahmt Textfelder im Glas-Stil
+/// GLASS INPUT — rahmt Textfelder im Glas-Stil (ein Layer, klare Kante)
 /// ======================================================================
 class ZenGlassInput extends StatelessWidget {
   final Widget child;
@@ -424,7 +421,7 @@ class ZenGlassInput extends StatelessWidget {
   const ZenGlassInput({
     super.key,
     required this.child,
-    this.padding = const EdgeInsets.fromLTRB(12, 10, 12, 10),
+    this.padding = const EdgeInsets.fromLTRB(14, 12, 14, 12), // v6.1
     this.borderRadius,
   });
 
@@ -437,19 +434,18 @@ class ZenGlassInput extends StatelessWidget {
       child: Stack(
         children: [
           BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+            filter: ImageFilter.blur(sigmaX: _kGlassBlur, sigmaY: _kGlassBlur),
             child: const SizedBox.shrink(),
           ),
           Container(
             decoration: BoxDecoration(
               borderRadius: br,
-              // dezentes Weiß als Glasfilm (konstant, wie in Primitives)
-              color: Colors.white.withOpacity(.10),
+              color: Colors.white.withOpacity(_kGlassBgOpacity),
               border: Border.all(
-                color: Colors.white.withOpacity(.16),
-                width: 1.2,
+                color: Colors.white.withOpacity(_kGlassBorderOpacity),
+                width: 1,
               ),
-              boxShadow: const [ZenShadows.glow],
+              boxShadow: [_kGlassShadow],
             ),
             padding: padding,
             child: child,
@@ -776,7 +772,7 @@ class ZenPrimaryButton extends StatelessWidget {
     required this.label,
     this.onPressed,
     this.icon,
-    this.height = 52,
+    this.height = 48, // v6.1
     this.width,
   });
 
@@ -843,8 +839,7 @@ class ZenOutlineButton extends StatelessWidget {
         ],
         Text(
           label,
-          style:
-              TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: c),
+          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: c),
         ),
       ],
     );
@@ -902,12 +897,10 @@ class ZenGhostButtonDanger extends StatelessWidget {
   Widget build(BuildContext context) {
     return TextButton.icon(
       onPressed: onPressed,
-      icon:
-          const Icon(Icons.delete_outline, size: 18, color: Colors.redAccent),
-      label: const Text(
-        'Löschen',
-        style:
-            TextStyle(fontWeight: FontWeight.w700, color: Colors.redAccent),
+      icon: const Icon(Icons.delete_outline, size: 18, color: Colors.redAccent),
+      label: Text(
+        label, // fix: benutze übergebenes Label (z. B. „Löschen“)
+        style: const TextStyle(fontWeight: FontWeight.w700, color: Colors.redAccent),
       ),
       style: TextButton.styleFrom(
         minimumSize: const Size(0, 40),
@@ -1034,8 +1027,8 @@ class ZenChoiceChip extends StatelessWidget {
       ),
       selected: selected,
       onSelected: onSelected,
-      side:
-          BorderSide(color: selected ? green.withOpacity(.55) : Colors.transparent),
+      side: BorderSide(
+          color: selected ? green.withOpacity(.55) : Colors.transparent),
       selectedColor: green.withOpacity(.10),
       backgroundColor: isDark
           ? Colors.white.withOpacity(.06)
@@ -1220,8 +1213,7 @@ class ZenInfoBar extends StatelessWidget {
       decoration: BoxDecoration(
         color: c,
         borderRadius: const BorderRadius.all(ZenRadii.m),
-        border:
-            Border.all(color: ZenColors.jade.withOpacity(.20)),
+        border: Border.all(color: ZenColors.jade.withOpacity(.20)),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       child: Row(
@@ -1243,8 +1235,8 @@ class ZenInfoBar extends StatelessWidget {
               ),
               child: Text(
                 actionLabel!,
-                style: const TextStyle(
-                    fontWeight: FontWeight.w700, color: ZenColors.jade),
+                style:
+                    const TextStyle(fontWeight: FontWeight.w700, color: ZenColors.jade),
               ),
             ),
         ],
@@ -1275,8 +1267,7 @@ class ZenTextFieldAction extends StatelessWidget {
       icon: Icon(icon, size: 18, color: ZenColors.jade),
       label: Text(
         label,
-        style:
-            const TextStyle(fontWeight: FontWeight.w700, color: ZenColors.jade),
+        style: const TextStyle(fontWeight: FontWeight.w700, color: ZenColors.jade),
       ),
       style: OutlinedButton.styleFrom(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -1569,8 +1560,7 @@ class ZenDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     return Dialog(
       backgroundColor: ZenColors.surface,
-      shape:
-          const RoundedRectangleBorder(borderRadius: BorderRadius.all(ZenRadii.m)),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.all(ZenRadii.m)),
       child: child,
     );
   }
