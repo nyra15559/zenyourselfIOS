@@ -1,13 +1,13 @@
 // lib/features/pro/pro_screen.dart
 //
-// ProScreen — Oxford Journey Board (v3.2 · 2025-09-13)
+// ProScreen — Oxford Journey Board (v3.5 · 2025-09-30)
 // ------------------------------------------------------------------
 // Fixes & Updates
 // • ✅ AnimatedPandaGlow: korrektes createState() + ruhiger Glow.
-// • ✅ Stable Flutter APIs: überall .withOpacity statt .withValues.
+// • ✅ Stable Flutter APIs: überall .withValues(alpha: …) statt .withOpacity.
 // • ✅ Alias-Imports: zen_style.dart hidden (Backdrop/Glass/AppBar in ui).
 // • 🛡️ Export bleibt try/catch + Snackbars (wie vorher).
-// • 🐼 Panda-Header, Glas-Bubbles & KPIs unverändert im Oxford-Stil.
+// • 🐼 Panda-Header, Glas-Bubbles & KPIs im Oxford-Stil verfeinert.
 //
 
 import 'dart:ui';
@@ -137,7 +137,7 @@ class ProScreen extends StatelessWidget {
                             shadows: [
                               Shadow(
                                 blurRadius: 8,
-                                color: Colors.black.withOpacity(.08),
+                                color: Colors.black.withValues(alpha: .08),
                                 offset: const Offset(0, 2),
                               ),
                             ],
@@ -324,23 +324,23 @@ class ProScreen extends StatelessWidget {
                                     semanticsLabel:
                                         'Monatsdaten als CSV exportieren',
                                     onTap: () {
-                                        try {
-                                          AnonExportWidget.exportAsCSV(
-                                            context,
-                                            moodEntries,
-                                          );
-                                        } catch (_) {
-                                          ScaffoldMessenger.of(context)
-                                              .showSnackBar(
-                                            const SnackBar(
-                                              content: Text(
-                                                'CSV-Export nicht möglich. Bitte später erneut versuchen.',
-                                              ),
-                                              behavior:
-                                                  SnackBarBehavior.floating,
+                                      try {
+                                        AnonExportWidget.exportAsCSV(
+                                          context,
+                                          moodEntries,
+                                        );
+                                      } catch (_) {
+                                        ScaffoldMessenger.of(context)
+                                            .showSnackBar(
+                                          const SnackBar(
+                                            content: Text(
+                                              'CSV-Export nicht möglich. Bitte später erneut versuchen.',
                                             ),
-                                          );
-                                        }
+                                            behavior:
+                                                SnackBarBehavior.floating,
+                                          ),
+                                        );
+                                      }
                                     },
                                   ),
                                   // Video-Export ist ausgeblendet (Roadmap)
@@ -480,8 +480,10 @@ class ProScreen extends StatelessWidget {
           child: ListTile(
             dense: true,
             contentPadding: EdgeInsets.zero,
-            leading: Icon(Icons.bubble_chart_rounded,
-                color: zs.ZenColors.deepSage.withOpacity(0.86)),
+            leading: Icon(
+              Icons.bubble_chart_rounded,
+              color: zs.ZenColors.deepSage.withValues(alpha: 0.86),
+            ),
             title: Text(
               _bestReflectionTextJournal(e),
               style: tt.bodyMedium!.copyWith(
@@ -508,8 +510,10 @@ class ProScreen extends StatelessWidget {
         child: ListTile(
           dense: true,
           contentPadding: EdgeInsets.zero,
-          leading: Icon(Icons.bubble_chart_rounded,
-              color: zs.ZenColors.deepSage.withOpacity(0.86)),
+          leading: Icon(
+            Icons.bubble_chart_rounded,
+            color: zs.ZenColors.deepSage.withValues(alpha: 0.86),
+          ),
           title: Text(
             _bestReflectionTextLegacy(e),
             style: tt.bodyMedium!.copyWith(
@@ -606,7 +610,7 @@ class _AnimatedPandaGlowState extends State<AnimatedPandaGlow>
           boxShadow: [
             BoxShadow(
               color: zs.ZenColors.deepSage
-                  .withOpacity(0.10 + 0.17 * _glowController.value),
+                  .withValues(alpha: 0.10 + 0.17 * _glowController.value),
               blurRadius: 30 + 16 * _glowController.value,
               spreadRadius: 4 + 5 * _glowController.value,
             ),
@@ -642,21 +646,22 @@ class _ZenMoodBar extends StatelessWidget {
           height: 18 + (e?.moodScore ?? 1) * 4.0,
           margin: const EdgeInsets.symmetric(horizontal: 3),
           decoration: BoxDecoration(
-            color:
-                e == null ? Colors.grey.withOpacity(0.12) : e.color.withOpacity(0.96),
+            color: e == null
+                ? Colors.grey.withValues(alpha: 0.12)
+                : e.color.withValues(alpha: 0.96),
             borderRadius: BorderRadius.circular(10),
             boxShadow: [
               if (e != null)
                 BoxShadow(
-                  color: e.color.withOpacity(0.10),
+                  color: e.color.withValues(alpha: 0.10),
                   blurRadius: 9,
                   offset: const Offset(0, 2),
                 ),
             ],
             border: Border.all(
               color: e == null
-                  ? Colors.grey.withOpacity(0.16)
-                  : e.color.withOpacity(0.35),
+                  ? Colors.grey.withValues(alpha: 0.16)
+                  : e.color.withValues(alpha: 0.35),
               width: 1.1,
             ),
           ),
@@ -696,7 +701,7 @@ class _ZenMoodBarSeries extends StatelessWidget {
       children: List.generate(7, (i) {
         final val = i < norm.length ? norm[i] : null;
         final color = val == null
-            ? Colors.grey.withOpacity(0.12)
+            ? Colors.grey.withValues(alpha: 0.12)
             : (val >= 3.0
                 ? zs.ZenColors.deepSage
                 : (val >= 2.0 ? zs.ZenColors.sage : Colors.grey));
@@ -706,20 +711,22 @@ class _ZenMoodBarSeries extends StatelessWidget {
           height: 18 + (val ?? 1) * 4.0,
           margin: const EdgeInsets.symmetric(horizontal: 3),
           decoration: BoxDecoration(
-            color: val == null ? Colors.grey.withOpacity(0.12) : color.withOpacity(0.96),
+            color: val == null
+                ? Colors.grey.withValues(alpha: 0.12)
+                : color.withValues(alpha: 0.96),
             borderRadius: BorderRadius.circular(10),
             boxShadow: [
               if (val != null)
                 BoxShadow(
-                  color: color.withOpacity(0.10),
+                  color: color.withValues(alpha: 0.10),
                   blurRadius: 9,
                   offset: const Offset(0, 2),
                 ),
             ],
             border: Border.all(
               color: val == null
-                  ? Colors.grey.withOpacity(0.16)
-                  : color.withOpacity(0.35),
+                  ? Colors.grey.withValues(alpha: 0.16)
+                  : color.withValues(alpha: 0.35),
               width: 1.1,
             ),
           ),
@@ -733,8 +740,9 @@ class _ZenMoodBarSeries extends StatelessWidget {
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 12.5,
-                      color:
-                          (val >= 3.0) ? Colors.white : zs.ZenColors.deepSage,
+                      color: (val >= 3.0)
+                          ? Colors.white
+                          : zs.ZenColors.deepSage,
                     ),
                   ),
                 ),
@@ -778,8 +786,8 @@ class ZenMoodGraphSeries extends StatelessWidget {
                 show: true,
                 gradient: LinearGradient(
                   colors: [
-                    zs.ZenColors.sage.withOpacity(0.16),
-                    Colors.white.withOpacity(0.10),
+                    zs.ZenColors.sage.withValues(alpha: 0.16),
+                    Colors.white.withValues(alpha: 0.10),
                   ],
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
@@ -813,7 +821,7 @@ class ZenMoodGraphSeries extends StatelessWidget {
 Widget _vSep() => Container(
       width: 1.6,
       height: 37,
-      color: zs.ZenColors.sage.withOpacity(0.18),
+      color: zs.ZenColors.sage.withValues(alpha: 0.18),
     );
 
 // Statistik-Kachel
@@ -834,7 +842,7 @@ class _ProStatTile extends StatelessWidget {
     return Column(
       children: [
         CircleAvatar(
-          backgroundColor: zs.ZenColors.sage.withOpacity(0.18),
+          backgroundColor: zs.ZenColors.sage.withValues(alpha: 0.18),
           radius: 20.5,
           child: Icon(icon, color: zs.ZenColors.sage, size: 20.5),
         ),
@@ -907,9 +915,6 @@ extension ListTakeLast<T> on List<T> {
 }
 
 // ---- Helper zur Provider-Analyse -------------------------------------------
-
-bool _isReflectionEntry(jm.JournalEntry e) =>
-    e.kind == jm.EntryKind.reflection;
 
 const Map<String, double> _moodScoreMap = {
   // Label → Score (−2 … +2)

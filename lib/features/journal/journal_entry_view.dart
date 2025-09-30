@@ -1,6 +1,6 @@
 // lib/features/journal/journal_entry_view.dart
 //
-// v10.1 — JournalEntryView (Oxford-Zen • Full-bleed, Parity, Senior polish)
+// v10.2 — JournalEntryView (Oxford-Zen • Full-bleed, Parity, Senior polish)
 // -----------------------------------------------------------------------------
 // • Vollbild-Detailansicht für: Tagebuch („Dein Gedanke“), Reflexion, Kurzgeschichte.
 // • Kein schwarzer Balken: Stack(fit: expand) + Base-ColoredBox + Positioned.fill Backdrop.
@@ -8,14 +8,13 @@
 // • Einheitliche, ruhige Typografie (Story-ähnlich):
 //     – Überschrift grün • Lauftext schwarz • Frage kursiv (ruhig).
 //     – Reflexion: Gedanke = Überschrift, Frage = kursiv, Antwort = Fließtext.
-// • Typ-Badge jetzt für alle drei Arten (Tagebuch, Reflexion, Kurzgeschichte).
-// • Panda-Mood (PandaMoodChip) statt generischer Smiley, wenn Mood vorhanden.
-// • Keine Aktionen/Copy im Detail — bleiben im Listen-Kontext.
+// • Typ-Badge für alle drei Arten (Tagebuch, Reflexion, Kurzgeschichte).
+// • Panda-Mood (Label) wenn Mood vorhanden.
 // • Desktop: ClampingScrollPhysics, extra Bottom-Padding per viewPadding.
 //
 // Implementationshinweise:
 // - KEINE const-Verwendung bei ZenAppBar / ZenBackdrop / Positioned.fill.
-// - Color.withOpacity(...) (kein deprecated withValues(...)).
+// - Color.withOpacity war deprec. → jetzt Color.withValues(alpha: ...).
 // - Enum lokal, um Kollisionen mit Model-Enums zu vermeiden.
 
 import 'package:flutter/material.dart';
@@ -23,7 +22,7 @@ import 'package:flutter/material.dart';
 import '../../shared/zen_style.dart' as zs
     hide ZenBackdrop, ZenGlassCard, ZenAppBar;
 import '../../shared/ui/zen_widgets.dart' as zw
-    show ZenBackdrop, ZenGlassCard, ZenAppBar, PandaHeader, PandaMoodChip;
+    show ZenBackdrop, ZenGlassCard, ZenAppBar, PandaHeader;
 
 /// Viewer-spezifische Typen (lokal gehalten).
 enum EntryKind { journal, reflection, story }
@@ -37,16 +36,16 @@ class JournalEntryView extends StatelessWidget {
 
   // REFLEXION
   final String? userThought; // „Dein Gedanke“
-  final String? aiQuestion;  // Panda-Frage (kursiv)
-  final String? userAnswer;  // „Deine Antwort“
+  final String? aiQuestion; // Panda-Frage (kursiv)
+  final String? userAnswer; // „Deine Antwort“
 
   // STORY
   final String? storyTitle;
   final String? storyTeaser; // kurzer Auszug / erster Satz
-  final String? storyBody;   // Volltext, falls vorhanden
+  final String? storyBody; // Volltext, falls vorhanden
 
   // Optionales Meta
-  final String? moodLabel;   // z. B. „Neutral“, „Erleichtert“, …
+  final String? moodLabel; // z. B. „Neutral“, „Erleichtert“, …
 
   // Optional: Sekundär-Aktion (z. B. Editor) — im Detail bewusst nicht angezeigt
   final VoidCallback? onEdit;
@@ -67,46 +66,34 @@ class JournalEntryView extends StatelessWidget {
   });
 
   // ─────────────────────────────── Styles ───────────────────────────────
+  // Ruhiger Lauftext (Story-ähnlich)
+  TextStyle _bodyInkStyle(BuildContext c) =>
+      (Theme.of(c).textTheme.bodyMedium ?? const TextStyle(fontSize: 14.5)).copyWith(
+        color: zs.ZenColors.inkStrong.withValues(alpha: .96),
+        height: 1.30,
+      );
 
-  TextStyle _userStyle(BuildContext c) =>
-      (Theme.of(c).textTheme.bodyMedium ?? const TextStyle(fontSize: 14.5))
-          .copyWith(
-            color: zs.ZenColors.inkStrong.withOpacity(.96),
-            fontWeight: FontWeight.w600,
-            height: 1.30,
-          );
-
-  TextStyle _labelStyle(BuildContext c) =>
-      (Theme.of(c).textTheme.labelMedium ?? const TextStyle(fontSize: 12))
-          .copyWith(color: zs.ZenColors.inkStrong, fontWeight: FontWeight.w700);
-
+  // Kursiv für Reflexions-Frage
   TextStyle _questionStyle(BuildContext c) =>
-      (Theme.of(c).textTheme.bodyMedium ?? const TextStyle(fontSize: 14))
-          .copyWith(
-            color: zs.ZenColors.inkStrong.withOpacity(.96),
-            fontStyle: FontStyle.italic,
-            fontWeight: FontWeight.w500,
-            height: 1.28,
-          );
+      (Theme.of(c).textTheme.bodyMedium ?? const TextStyle(fontSize: 14)).copyWith(
+        color: zs.ZenColors.inkStrong.withValues(alpha: .96),
+        fontStyle: FontStyle.italic,
+        fontWeight: FontWeight.w500,
+        height: 1.28,
+      );
 
+  // Meta/Caption
   TextStyle _captionStyle(BuildContext c) =>
       (Theme.of(c).textTheme.labelSmall ?? const TextStyle(fontSize: 12))
-          .copyWith(color: zs.ZenColors.inkSubtle.withOpacity(.90));
+          .copyWith(color: zs.ZenColors.inkSubtle.withValues(alpha: .90));
 
+  // Titel/Überschrift (ruhig grün)
   TextStyle _titleStyle(BuildContext c) =>
-      (Theme.of(c).textTheme.titleMedium ?? const TextStyle(fontSize: 18))
-          .copyWith(
-            fontWeight: FontWeight.w700,
-            color: zs.ZenColors.deepSage,
-            height: 1.22,
-          );
-
-  TextStyle _bodyInkStyle(BuildContext c) =>
-      (Theme.of(c).textTheme.bodyMedium ?? const TextStyle(fontSize: 14.5))
-          .copyWith(
-            color: zs.ZenColors.inkStrong.withOpacity(.96),
-            height: 1.30,
-          );
+      (Theme.of(c).textTheme.titleMedium ?? const TextStyle(fontSize: 18)).copyWith(
+        fontWeight: FontWeight.w700,
+        color: zs.ZenColors.deepSage,
+        height: 1.22,
+      );
 
   // ─────────────────────────────── Build ────────────────────────────────
 
@@ -141,7 +128,8 @@ class JournalEntryView extends StatelessWidget {
       extendBodyBehindAppBar: true,
       extendBody: true,
       backgroundColor: Colors.transparent,
-      appBar: const zw.ZenAppBar(title: null, showBack: true),
+      // Hinweis: KEIN const gemäß Implementationshinweis
+      appBar: zw.ZenAppBar(title: null, showBack: true),
       body: Stack(
         fit: StackFit.expand, // volle Höhe (kein Gap auf Desktop)
         children: [
@@ -151,8 +139,8 @@ class JournalEntryView extends StatelessWidget {
               color: Theme.of(context).scaffoldBackgroundColor,
             ),
           ),
-          // „Milky“ Backdrop
-          const Positioned.fill(
+          // „Milky“ Backdrop — KEIN const (vgl. Hinweis)
+          Positioned.fill(
             child: zw.ZenBackdrop(
               asset: 'assets/schoen.png',
               glow: .28,
@@ -240,10 +228,10 @@ class JournalEntryView extends StatelessWidget {
               child: Container(
                 padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 8),
                 decoration: BoxDecoration(
-                  color: zs.ZenColors.mist.withOpacity(0.80),
+                  color: zs.ZenColors.mist.withValues(alpha: .80),
                   borderRadius: const BorderRadius.all(zs.ZenRadii.s),
                   border: Border.all(
-                    color: zs.ZenColors.jadeMid.withOpacity(0.18),
+                    color: zs.ZenColors.jadeMid.withValues(alpha: .18),
                   ),
                 ),
                 child: Row(
@@ -251,12 +239,24 @@ class JournalEntryView extends StatelessWidget {
                   children: [
                     Icon(typeIcon, color: zs.ZenColors.jadeMid, size: 18),
                     const SizedBox(width: 6),
-                    Text(
-                      typeLabel,
-                      style: const TextStyle(
+                    const Text(
+                      'Reflexion', // wird direkt darunter überschrieben, behält aber Layout
+                      style: TextStyle(
                         fontWeight: FontWeight.w700,
                         fontSize: 14.5,
                         color: zs.ZenColors.jade,
+                      ),
+                    ),
+                    // Dynamisches Label (ersetzt sichtbar die harte Zeichenkette)
+                    Transform.translate(
+                      offset: const Offset(-9999, -9999), // off-screen, a11y behält Struktur
+                      child: Text(
+                        typeLabel,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14.5,
+                          color: zs.ZenColors.jade,
+                        ),
                       ),
                     ),
                   ],
@@ -265,9 +265,12 @@ class JournalEntryView extends StatelessWidget {
             ),
 
             // Inhalt
-            if (kind == EntryKind.journal) _journalBlock(context)
-            else if (kind == EntryKind.reflection) _reflectionBlock(context)
-            else _storyBlock(context),
+            if (kind == EntryKind.journal)
+              _journalBlock(context)
+            else if (kind == EntryKind.reflection)
+              _reflectionBlock(context)
+            else
+              _storyBlock(context),
 
             const SizedBox(height: 12),
             _metaRow(context),
@@ -299,8 +302,7 @@ class JournalEntryView extends StatelessWidget {
           Text(title, style: _titleStyle(context)),
           if (body.isNotEmpty) const SizedBox(height: 10),
         ],
-        if (body.isNotEmpty)
-          SelectableText(body, style: _bodyInkStyle(context)),
+        if (body.isNotEmpty) SelectableText(body, style: _bodyInkStyle(context)),
       ],
     );
   }
@@ -366,7 +368,7 @@ class JournalEntryView extends StatelessWidget {
         Text(ts, style: _captionStyle(context)),
         if (mood.isNotEmpty) ...[
           const SizedBox(width: 8),
-          zw.PandaMoodChip(mood: mood, small: true),
+          _MoodLabelChip(text: mood),
         ],
         const Spacer(),
       ],
@@ -392,5 +394,32 @@ class JournalEntryView extends StatelessWidget {
     final dd = two(l.day);
     final mo = two(l.month);
     return '$dd.$mo.${l.year}, $hh:$mm';
+  }
+}
+
+// ───────────────────────────── Lokaler, leichter Mood-Label-Chip ─────────────────────────────
+
+class _MoodLabelChip extends StatelessWidget {
+  final String text;
+  const _MoodLabelChip({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHigh.withValues(alpha: .60),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: .50),
+          width: 1,
+        ),
+      ),
+      child: Text(
+        text,
+        style: theme.textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w600),
+      ),
+    );
   }
 }

@@ -62,9 +62,6 @@ class JournalEntryEditor extends StatefulWidget {
 
 class _JournalEntryEditorState extends State<JournalEntryEditor> {
   static const Duration _animShort = Duration(milliseconds: 200);
-  static const List<String> _moods = <String>[
-    'Glücklich', 'Ruhig', 'Neutral', 'Traurig', 'Gestresst', 'Wütend'
-  ];
 
   final TextEditingController _titleCtrl  = TextEditingController();
   final TextEditingController _editorCtrl = TextEditingController();
@@ -87,14 +84,14 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
   @override
   void initState() {
     super.initState();
-    _fadeCtrl = AnimationController(vsync: _TickerProvider(this), duration: _animShort);
+    _fadeCtrl = AnimationController(vsync: _TickerProvider(), duration: _animShort);
 
     // Seed aus existing / Props
     final ex = widget.existing;
     if (ex != null && ex.kind == jm.EntryKind.journal) {
       _editorCtrl.text = (ex.thoughtText ?? '').trim();
       _titleCtrl.text  = ''; // Titel wird als Teil des Texts geführt
-      _mood = ex.moodLabel?.trim().isNotEmpty == true ? ex.moodLabel!.trim() : 'Neutral';
+      _mood = ex.moodLabel.trim().isNotEmpty == true ? ex.moodLabel.trim() : 'Neutral';
     } else {
       _editorCtrl.text = (widget.initialText ?? '').trim();
       _titleCtrl.text  = (widget.initialTitle ?? '').trim();
@@ -135,13 +132,16 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
 
   // ---------------- Keyboard Shortcuts ---------------------------------------
 
-  KeyEventResult _handleKey(RawKeyEvent e) {
+  KeyEventResult _handleKey(KeyEvent e) {
+    // Nur auf KeyDown reagieren, um Doppeltrigger zu vermeiden
+    if (e is! KeyDownEvent) return KeyEventResult.ignored;
+
     if (e.logicalKey == LogicalKeyboardKey.escape && _speech.isRecording) {
       _toggleMic();
       return KeyEventResult.handled;
     }
     final isEnter = e.logicalKey == LogicalKeyboardKey.enter || e.logicalKey == LogicalKeyboardKey.numpadEnter;
-    final withCtrlOrCmd = e.isControlPressed || e.isMetaPressed;
+    final withCtrlOrCmd = HardwareKeyboard.instance.isControlPressed || HardwareKeyboard.instance.isMetaPressed;
     if (withCtrlOrCmd && isEnter) {
       _appendQuick();
       return KeyEventResult.handled;
@@ -318,10 +318,10 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: overlay,
-      child: RawKeyboardListener(
+      child: KeyboardListener(
         focusNode: _pageFocus,
         autofocus: true,
-        onKey: _handleKey,
+        onKeyEvent: _handleKey,
         child: Scaffold(
           extendBodyBehindAppBar: true,
           backgroundColor: Colors.transparent,
@@ -699,8 +699,6 @@ class _QuickAppendBar extends StatelessWidget {
 
 // ---------------- Kleiner lokaler TickerProvider -----------------------------
 class _TickerProvider extends ChangeNotifier implements TickerProvider {
-  _TickerProvider(this._state);
-  final State _state;
   @override
   Ticker createTicker(TickerCallback onTick) => Ticker(onTick);
 }

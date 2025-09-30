@@ -1,7 +1,7 @@
 // lib/features/reflection/reflection_widgets.dart
 // Part: UI-Widgets (library: reflection_screen)
 // -----------------------------------------------------------------------------
-// Oxford–Zen v6.6 — Reflection UI (closure-gated, calm type)
+// Oxford–Zen v6.7 — Reflection UI (closure-gated, calm type, 2025-appear)
 // - Completion/Mood nur wenn round.allowClosure == true && !round.hasPendingQuestion
 // - Letzte Leitfrage wird unterdrückt, sobald Abschluss aktiv (Mood-Phase)
 // - Optional: mood_intro-Blase vor Abschluss-Karte, falls vorhanden
@@ -10,22 +10,26 @@
 //   • RepaintBoundary an zentralen Cards (ohne const-Fehler)
 //   • Tooltips + Kopieren via Long-Press/Right-Click, barrierearme Semantics
 //   • Stabilere Text-Layouts (maxWidth, TextScale-Clamp bei Chips)
+//   • NEU (2025): _ZenAppear (Fade+Slide+Scale) für sanftes Einblenden
 // -----------------------------------------------------------------------------
-part of reflection_screen;
+// ignore_for_file: unused_element_parameter
+
+part of 'reflection_screen.dart';
 
 // Tokens / constants
-const _kRadiusPill = BorderRadius.all(Radius.circular(999));
-const _kRadius14   = BorderRadius.all(Radius.circular(14));
-const _kRadius16   = BorderRadius.all(Radius.circular(16));
-const _kRadius18   = BorderRadius.all(Radius.circular(18));
+const _kRadius14 = BorderRadius.all(Radius.circular(14));
+const _kRadius16 = BorderRadius.all(Radius.circular(16));
+const _kRadius18 = BorderRadius.all(Radius.circular(18));
 
-const _kGlassTop    = .20;
+const _kGlassTop = .20;
 const _kGlassBottom = .20;
 const _kGlassBorder = .22;
 
-const _kInk       = ZenColors.ink;
+const _kInk = ZenColors.ink;
 const _kInkStrong = ZenColors.inkStrong;
-const _kJade      = ZenColors.jade;
+const _kJade = ZenColors.jade;
+
+const _kAnimShort = Duration(milliseconds: 240);
 
 bool get _isDesktop {
   switch (defaultTargetPlatform) {
@@ -35,6 +39,76 @@ bool get _isDesktop {
       return true;
     default:
       return false;
+  }
+}
+
+/// ---------------------------------------------------------------------------
+/// 2025-Level: sanfte Appear-Animation (Fade + Slide + minimal Scale)
+/// - Selbstverwalteter Controller, triggert einmalig in initState.
+/// - Optionaler Delay für leichtes Staggering.
+/// ---------------------------------------------------------------------------
+class _ZenAppear extends StatefulWidget {
+  final Widget child;
+  final Duration? delay;
+  final Offset slide; // von -> nach (standard leicht von links)
+  final double beginScale;
+
+  const _ZenAppear({
+    required this.child,
+    this.delay,
+    this.slide = const Offset(-0.03, 0.0),
+    this.beginScale = 0.985,
+  });
+
+  @override
+  State<_ZenAppear> createState() => _ZenAppearState();
+}
+
+class _ZenAppearState extends State<_ZenAppear>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c =
+      AnimationController(vsync: this, duration: _kAnimShort);
+  late final Animation<double> _fade =
+      CurvedAnimation(parent: _c, curve: Curves.easeOutCubic);
+  late final Animation<Offset> _slideAnim = Tween<Offset>(
+    begin: widget.slide,
+    end: Offset.zero,
+  ).chain(CurveTween(curve: Curves.easeOutCubic)).animate(_c);
+  late final Animation<double> _scale = Tween<double>(
+    begin: widget.beginScale,
+    end: 1.0,
+  ).chain(CurveTween(curve: Curves.easeOutCubic)).animate(_c);
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.delay == null || widget.delay == Duration.zero) {
+      _c.forward();
+    } else {
+      Future.delayed(widget.delay!, () {
+        if (mounted) _c.forward();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: _fade,
+      child: SlideTransition(
+        position: _slideAnim,
+        child: ScaleTransition(
+          scale: _scale,
+          child: widget.child,
+        ),
+      ),
+    );
   }
 }
 
@@ -54,11 +128,13 @@ class _ReflectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return PandaHeader(
-      title: title,
-      caption: subtitle.trim().isEmpty ? null : subtitle,
-      pandaSize: pandaSize,
-      strongTitleGreen: true,
+    return _ZenAppear(
+      child: PandaHeader(
+        title: title,
+        caption: subtitle.trim().isEmpty ? null : subtitle,
+        pandaSize: pandaSize,
+        strongTitleGreen: true,
+      ),
     );
   }
 }
@@ -69,8 +145,6 @@ class _IntroBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final tt = Theme.of(context).textTheme;
-
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 680),
@@ -146,49 +220,59 @@ class _RoundThread extends StatelessWidget {
   // User bubble
   Widget _buildUserBubble(BuildContext context, String title, String body) {
     final tt = Theme.of(context).textTheme;
-    final tooltip = _isDesktop ? 'Rechtsklick zum Kopieren' : 'Lange drücken zum Kopieren';
+    final tooltip =
+        _isDesktop ? 'Rechtsklick zum Kopieren' : 'Lange drücken zum Kopieren';
 
     return Align(
       alignment: Alignment.centerRight,
       child: ConstrainedBox(
         constraints: BoxConstraints(maxWidth: maxWidth),
-        child: Tooltip(
-          message: tooltip,
-          child: GestureDetector(
-            onLongPress: () => _copyToClipboard(context, body),
-            onSecondaryTap: () => _copyToClipboard(context, body),
-            child: Semantics(
-              label: '$title: $body',
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: _kRadius18,
-                  border: Border.all(color: Colors.black.withOpacity(.06), width: 1),
-                  boxShadow: const [
-                    BoxShadow(color: Color(0x14000000), blurRadius: 18, offset: Offset(0, 10)),
-                  ],
-                ),
-                padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: tt.labelSmall?.copyWith(
-                        color: _kInk.withOpacity(.75),
-                        fontWeight: FontWeight.w700,
+        child: _ZenAppear(
+          // User-Bubble leicht schneller
+          delay: const Duration(milliseconds: 60),
+          child: Tooltip(
+            message: tooltip,
+            child: GestureDetector(
+              onLongPress: () => _copyToClipboard(context, body),
+              onSecondaryTap: () => _copyToClipboard(context, body),
+              child: Semantics(
+                label: '$title: $body',
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: _kRadius18,
+                    border:
+                        Border.all(color: Colors.black.withValues(alpha: .06), width: 1),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Color(0x14000000),
+                        blurRadius: 18,
+                        offset: Offset(0, 10),
                       ),
-                    ),
-                    const SizedBox(height: 6),
-                    SelectableText(
-                      body,
-                      style: tt.bodyLarge?.copyWith(
-                        color: _kInkStrong,
-                        fontWeight: FontWeight.w600,
-                        height: 1.35,
+                    ],
+                  ),
+                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: tt.labelSmall?.copyWith(
+                          color: _kInk.withValues(alpha: .75),
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: 6),
+                      SelectableText(
+                        body,
+                        style: tt.bodyLarge?.copyWith(
+                          color: _kInkStrong,
+                          fontWeight: FontWeight.w600,
+                          height: 1.35,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -204,9 +288,10 @@ class _RoundThread extends StatelessWidget {
     _PandaStep s, {
     required bool showTyping,
     bool suppressQuestion = false,
+    Duration appearDelay = Duration.zero,
   }) {
-    final tt = Theme.of(context).textTheme;
-    final tooltip = _isDesktop ? 'Rechtsklick zum Kopieren' : 'Lange drücken zum Kopieren';
+    final tooltip =
+        _isDesktop ? 'Rechtsklick zum Kopieren' : 'Lange drücken zum Kopieren';
 
     final buffer = StringBuffer();
     if (s.mirror.trim().isNotEmpty) buffer.writeln(s.mirror.trim());
@@ -222,19 +307,22 @@ class _RoundThread extends StatelessWidget {
     return Center(
       child: ConstrainedBox(
         constraints: BoxConstraints(maxWidth: maxWidth),
-        child: Tooltip(
-          message: tooltip,
-          child: GestureDetector(
-            onLongPress: () => _copyToClipboard(context, copyAll),
-            onSecondaryTap: () => _copyToClipboard(context, copyAll),
-            child: const RepaintBoundary(
-              child: ZenGlassCard(
-                padding: EdgeInsets.fromLTRB(16, 14, 16, 12),
-                topOpacity: _kGlassTop,
-                bottomOpacity: _kGlassBottom,
-                borderOpacity: _kGlassBorder,
-                borderRadius: _kRadius18,
-                child: _PandaCardInner(),
+        child: _ZenAppear(
+          delay: appearDelay,
+          child: Tooltip(
+            message: tooltip,
+            child: GestureDetector(
+              onLongPress: () => _copyToClipboard(context, copyAll),
+              onSecondaryTap: () => _copyToClipboard(context, copyAll),
+              child: const RepaintBoundary(
+                child: ZenGlassCard(
+                  padding: EdgeInsets.fromLTRB(16, 14, 16, 12),
+                  topOpacity: _kGlassTop,
+                  bottomOpacity: _kGlassBottom,
+                  borderOpacity: _kGlassBorder,
+                  borderRadius: _kRadius18,
+                  child: _PandaCardInner(),
+                ),
               ),
             ),
           ),
@@ -249,10 +337,7 @@ class _RoundThread extends StatelessWidget {
 
     // Abschluss-Phase aktiv? -> suppressQuestion für die letzte Panda-Karte setzen
     final bool closureActive =
-        round.answered &&
-        round.allowClosure &&
-        !round.hasPendingQuestion &&
-        !round.hasMood;
+        round.answered && round.allowClosure && !round.hasPendingQuestion && !round.hasMood;
 
     // Benutzer-Gedanke
     final userText = round.userInput.trim();
@@ -261,10 +346,11 @@ class _RoundThread extends StatelessWidget {
       children.add(const SizedBox(height: 10));
     }
 
-    // Panda-Schritte
+    // Panda-Schritte (mit leichtem Stagger)
     for (int i = 0; i < round.steps.length; i++) {
       final s = round.steps[i];
       final isLastStep = i == round.steps.length - 1;
+      final stagger = Duration(milliseconds: 60 * (i.clamp(0, 3)));
 
       children.add(
         _PandaStepScope(
@@ -276,6 +362,7 @@ class _RoundThread extends StatelessWidget {
             s,
             showTyping: isLast && isTyping && isLastStep,
             suppressQuestion: closureActive && isLastStep,
+            appearDelay: stagger,
           ),
         ),
       );
@@ -318,42 +405,60 @@ class _RoundThread extends StatelessWidget {
       final intro = (round.moodIntro ?? '').trim();
       if (intro.isNotEmpty) {
         children
-          ..add(_MoodIntroBubble(text: intro, maxWidth: maxWidth))
+          ..add(
+            _ZenAppear(
+              delay: const Duration(milliseconds: 60),
+              child: _MoodIntroBubble(text: intro, maxWidth: maxWidth),
+            ),
+          )
           ..add(const SizedBox(height: 10));
       }
 
       children
-        ..add(_CompletionCard(maxWidth: maxWidth))
+        ..add(
+          _ZenAppear(
+            delay: const Duration(milliseconds: 100),
+            child: _CompletionCard(maxWidth: maxWidth),
+          ),
+        )
         ..add(const SizedBox(height: 10))
-        ..add(_MoodChooserInline(onSelected: onSelectMood, maxWidth: maxWidth))
+        ..add(
+          _ZenAppear(
+            delay: const Duration(milliseconds: 140),
+            child: _MoodChooserInline(onSelected: onSelectMood, maxWidth: maxWidth),
+          ),
+        )
         ..add(const SizedBox(height: 10));
     }
 
     // Actions nach Mood
     if (round.answered && round.hasMood) {
       children.add(
-        AnimatedSwitcher(
-          duration: const Duration(milliseconds: 180),
-          child: Wrap(
-            key: ValueKey('actions_${round.id}'),
-            spacing: 10,
-            runSpacing: 8,
-            alignment: WrapAlignment.center,
-            children: [
-              if (onSave != null)
-                ZenPrimaryButton(
-                  label: 'Ins Gedankenbuch speichern',
-                  icon: Icons.bookmark_added_rounded,
-                  onPressed: onSave!,
-                ),
-              if (onDelete != null)
-                ZenOutlineButton(
-                  label: 'Löschen',
-                  icon: Icons.delete_outline_rounded,
-                  onPressed: onDelete!,
-                  color: _kInkStrong,
-                ),
-            ],
+        _ZenAppear(
+          delay: const Duration(milliseconds: 80),
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 180),
+            child: Wrap(
+              key: ValueKey('actions_${round.id}'),
+              spacing: 10,
+              runSpacing: 8,
+              alignment: WrapAlignment.center,
+              children: [
+                if (onSave != null)
+                  ZenPrimaryButton(
+                    label: 'Ins Gedankenbuch speichern',
+                    icon: Icons.bookmark_added_rounded,
+                    onPressed: onSave!,
+                  ),
+                if (onDelete != null)
+                  ZenOutlineButton(
+                    label: 'Löschen',
+                    icon: Icons.delete_outline_rounded,
+                    onPressed: onDelete!,
+                    color: _kInkStrong,
+                  ),
+              ],
+            ),
           ),
         ),
       );
@@ -363,7 +468,12 @@ class _RoundThread extends StatelessWidget {
     if ((safetyText ?? '').isNotEmpty) {
       children
         ..add(const SizedBox(height: 10))
-        ..add(_SafetyNote(text: safetyText!, maxWidth: maxWidth));
+        ..add(
+          _ZenAppear(
+            delay: const Duration(milliseconds: 60),
+            child: _SafetyNote(text: safetyText!, maxWidth: maxWidth),
+          ),
+        );
     }
 
     return Padding(
@@ -390,7 +500,7 @@ class _DividerThin extends StatelessWidget {
     return Container(
       height: 1,
       decoration: BoxDecoration(
-        color: Colors.black.withOpacity(.10),
+        color: Colors.black.withValues(alpha: .10),
         borderRadius: BorderRadius.circular(1),
       ),
     );
@@ -404,7 +514,9 @@ class _ReflectionHint extends StatelessWidget {
     return const Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        ExcludeSemantics(child: Icon(Icons.self_improvement, size: 16, color: Colors.black54)),
+        ExcludeSemantics(
+          child: Icon(Icons.self_improvement, size: 16, color: Colors.black54),
+        ),
         SizedBox(width: 6),
         Expanded(
           child: Text(
@@ -424,7 +536,6 @@ class _SafetyNote extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final tt = Theme.of(context).textTheme;
     return Semantics(
       label: 'Sicherheits-Hinweis',
       child: Center(
@@ -455,7 +566,6 @@ class _CompletionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final tt = Theme.of(context).textTheme;
     return Center(
       child: ConstrainedBox(
         constraints: BoxConstraints(maxWidth: maxWidth),
@@ -509,7 +619,10 @@ class _MoodChooserInline extends StatelessWidget {
                   label: 'Speichern',
                   icon: Icons.bookmark_added_rounded,
                   onPressed: () async {
-                    final m = await showPandaMoodPicker(context, title: 'Wähle deine Stimmung');
+                    final m = await showPandaMoodPicker(
+                      context,
+                      title: 'Wähle deine Stimmung',
+                    );
                     if (m != null && onSelected != null) {
                       onSelected!(_scoreForMood(m), m.labelDe);
                     }
@@ -527,37 +640,9 @@ class _MoodChooserInline extends StatelessWidget {
     final v = m.valence;
     if (v <= -0.60) return 0;
     if (v <= -0.20) return 1;
-    if (v <  0.20)  return 2;
-    if (v <  0.60)  return 3;
+    if (v < 0.20) return 2;
+    if (v < 0.60) return 3;
     return 4;
-  }
-}
-
-// Chips
-class _ChipsWrap extends StatelessWidget {
-  final List<String> items;
-  final void Function(String) onTap;
-
-  const _ChipsWrap({required this.items, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final scale = MediaQuery.of(context).textScaleFactor.clamp(0.9, 1.1);
-    return MediaQuery(
-      data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(scale.toDouble())),
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        alignment: WrapAlignment.center,
-        children: [
-          for (final t in items)
-            ZenChipGhost(
-              label: t.replaceAll(RegExp(r'\s*:\s*$'), ''),
-              onPressed: () => onTap(t),
-            ),
-        ],
-      ),
-    );
   }
 }
 
@@ -587,11 +672,23 @@ class _InputBar extends StatelessWidget {
 
     final List<BoxShadow> pulse = isRecording
         ? [
-            const BoxShadow(color: Color(0x1A000000), blurRadius: 14, offset: Offset(0, 4)),
-            BoxShadow(color: _kJade.withOpacity(0.30), blurRadius: 22, spreadRadius: 1.2),
+            const BoxShadow(
+              color: Color(0x1A000000),
+              blurRadius: 14,
+              offset: Offset(0, 4),
+            ),
+            BoxShadow(
+              color: _kJade.withValues(alpha: 0.30),
+              blurRadius: 22,
+              spreadRadius: 1.2,
+            ),
           ]
         : const [
-            BoxShadow(color: Color(0x15000000), blurRadius: 14, offset: Offset(0, 6)),
+            BoxShadow(
+              color: Color(0x15000000),
+              blurRadius: 14,
+              offset: Offset(0, 6),
+            ),
           ];
 
     return LayoutBuilder(
@@ -602,7 +699,9 @@ class _InputBar extends StatelessWidget {
           children: [
             Positioned.fill(
               child: IgnorePointer(
-                child: DecoratedBox(decoration: BoxDecoration(boxShadow: pulse)),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(boxShadow: pulse),
+                ),
               ),
             ),
             ZenGlassInput(
@@ -624,7 +723,8 @@ class _InputBar extends StatelessWidget {
                     keyboardType: TextInputType.multiline,
                     autocorrect: false,
                     enableSuggestions: true,
-                    spellCheckConfiguration: const SpellCheckConfiguration.disabled(),
+                    spellCheckConfiguration:
+                        const SpellCheckConfiguration.disabled(),
                     style: tt.bodyMedium!.copyWith(
                       color: _kInkStrong,
                       fontWeight: FontWeight.w600,
@@ -632,10 +732,12 @@ class _InputBar extends StatelessWidget {
                     cursorColor: _kJade,
                     decoration: InputDecoration(
                       hintText: hint,
-                      hintStyle: tt.bodyMedium!.copyWith(color: _kInk.withOpacity(.55)),
+                      hintStyle:
+                          tt.bodyMedium!.copyWith(color: _kInk.withValues(alpha: .55)),
                       border: InputBorder.none,
                       isCollapsed: true,
-                      suffixIconConstraints: BoxConstraints.tightFor(width: suffixW, height: 40),
+                      suffixIconConstraints:
+                          BoxConstraints.tightFor(width: suffixW, height: 40),
                       suffixIcon: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
@@ -646,32 +748,38 @@ class _InputBar extends StatelessWidget {
                               style: tt.bodySmall!.copyWith(
                                 fontSize: 12,
                                 color: overSoft
-                                    ? Colors.redAccent.withOpacity(.85)
-                                    : _kInk.withOpacity(.65),
+                                    ? Colors.redAccent.withValues(alpha: .85)
+                                    : _kInk.withValues(alpha: .65),
                                 fontWeight: FontWeight.w600,
                               ),
                               child: Text(
                                 '$used/$kInputSoftLimit',
-                                semanticsLabel: 'Zeichen: $used von $kInputSoftLimit',
+                                semanticsLabel:
+                                    'Zeichen: $used von $kInputSoftLimit',
                               ),
                             ),
                           ),
                           IconButton(
-                            tooltip: isRecording ? 'Aufnahme stoppen' : 'Sprechen',
+                            tooltip: isRecording
+                                ? 'Aufnahme stoppen'
+                                : 'Sprechen',
                             onPressed: onMicTap,
                             icon: Icon(
-                              isRecording ? Icons.stop_circle_rounded : Icons.mic_rounded,
+                              isRecording
+                                  ? Icons.stop_circle_rounded
+                                  : Icons.mic_rounded,
                               color: _kJade,
                             ),
                           ),
                           IconButton(
                             tooltip: 'Senden (Enter)',
-                            onPressed: (hasText && canSend && onSend != null) ? onSend : null,
+                            onPressed:
+                                (hasText && canSend && onSend != null) ? onSend : null,
                             icon: Icon(
                               Icons.send_rounded,
                               color: (hasText && canSend && onSend != null)
                                   ? _kJade
-                                  : _kJade.withOpacity(0.45),
+                                  : _kJade.withValues(alpha: 0.45),
                             ),
                           ),
                         ],
@@ -695,7 +803,8 @@ class _TypingDots extends StatefulWidget {
   State<_TypingDots> createState() => _TypingDotsState();
 }
 
-class _TypingDotsState extends State<_TypingDots> with SingleTickerProviderStateMixin {
+class _TypingDotsState extends State<_TypingDots>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _c = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 900),
@@ -716,19 +825,39 @@ class _TypingDotsState extends State<_TypingDots> with SingleTickerProviderState
         animation: _c,
         builder: (_, __) {
           double n(int i) => (sin((_c.value * 2 * pi) + (i * .8)) + 1) / 2;
+          final op0 = ((.35 + n(0) * .65) * .6).clamp(0.0, 1.0);
+          final op1 = ((.35 + n(1) * .65) * .6).clamp(0.0, 1.0);
+          final op2 = ((.35 + n(2) * .65) * .6).clamp(0.0, 1.0);
           return Row(
             mainAxisSize: MainAxisSize.min,
-            children: List.generate(3, (i) {
-              return Container(
+            children: [
+              Container(
                 width: 4,
-                height: 4 + 3 * n(i),
-                margin: EdgeInsets.only(right: i == 2 ? 0 : 3),
+                height: 4 + 3 * n(0),
+                margin: const EdgeInsets.only(right: 3),
                 decoration: BoxDecoration(
-                  color: Colors.black.withOpacity((.35 + n(i) * .65) * .6),
+                  color: Colors.black.withValues(alpha: op0),
                   shape: BoxShape.circle,
                 ),
-              );
-            }),
+              ),
+              Container(
+                width: 4,
+                height: 4 + 3 * n(1),
+                margin: const EdgeInsets.only(right: 3),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: op1),
+                  shape: BoxShape.circle,
+                ),
+              ),
+              Container(
+                width: 4,
+                height: 4 + 3 * n(2),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: op2),
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ],
           );
         },
       ),
@@ -800,7 +929,7 @@ class _PandaCardInner extends StatelessWidget {
         SelectableText(
           s.mirror.trim(),
           style: tt.bodyMedium?.copyWith(
-            color: _kInk.withOpacity(.87),
+            color: _kInk.withValues(alpha: .87),
             height: 1.35,
             fontWeight: FontWeight.w500,
           ),
@@ -816,7 +945,7 @@ class _PandaCardInner extends StatelessWidget {
         SelectableText(
           t,
           style: tt.bodyMedium?.copyWith(
-            color: _kInk.withOpacity(.87),
+            color: _kInk.withValues(alpha: .87),
             height: 1.34,
             fontWeight: FontWeight.w400,
           ),
@@ -892,7 +1021,7 @@ class _MoodIntroRow extends StatelessWidget {
           child: SelectableText(
             scope?.text ?? '',
             style: tt.bodyMedium?.copyWith(
-              color: _kInk.withOpacity(.87),
+              color: _kInk.withValues(alpha: .87),
               height: 1.35,
               fontWeight: FontWeight.w500,
             ),
@@ -913,10 +1042,16 @@ class _SafetyRow extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const ExcludeSemantics(
-          child: Icon(Icons.health_and_safety_rounded, color: Colors.orange, size: 18),
+          child: Icon(Icons.health_and_safety_rounded,
+              color: Colors.orange, size: 18),
         ),
         const SizedBox(width: 8),
-        Expanded(child: Text(scope?.text ?? '', style: tt.bodySmall?.copyWith(color: _kInk))),
+        Expanded(
+          child: Text(
+            scope?.text ?? '',
+            style: tt.bodySmall?.copyWith(color: _kInk),
+          ),
+        ),
       ],
     );
   }
@@ -926,7 +1061,6 @@ class _CompletionRow extends StatelessWidget {
   const _CompletionRow();
   @override
   Widget build(BuildContext context) {
-    final tt = Theme.of(context).textTheme;
     return const Row(
       children: [
         ExcludeSemantics(
@@ -937,27 +1071,12 @@ class _CompletionRow extends StatelessWidget {
           child: Text(
             'Gut gemacht 🐼✨ — du hast das Wichtigste festgehalten.',
             style: TextStyle(
-              // TextStyle kann const bleiben, Farbe nicht aus _kInkStrong ziehen:
-              // Wir überschreiben Farbe unten via DefaultTextStyle.merge
+              // Calm tone; Farbe kommt vom DefaultTextStyle außen
               fontWeight: FontWeight.w600,
               height: 1.25,
             ),
           ),
         ),
-      ],
-    );
-  }
-}
-
-class _TypingRowLegacy extends StatelessWidget {
-  const _TypingRowLegacy();
-  @override
-  Widget build(BuildContext context) {
-    return const Row(
-      children: [
-        _TypingDots(),
-        SizedBox(width: 8),
-        Text('Panda tippt …', style: TextStyle(color: Colors.black54)),
       ],
     );
   }
