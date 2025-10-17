@@ -1,0 +1,390 @@
+// lib/features/journal/journal_entry_view.dart
+//
+// v10.2 — JournalEntryView (Oxford-Zen • Full-bleed, Parity, Senior polish)
+// -----------------------------------------------------------------------------
+// • Vollbild-Detailansicht für: Tagebuch („Dein Gedanke“), Reflexion, Kurzgeschichte.
+// • Kein schwarzer Balken: Stack(fit: expand) + Base-ColoredBox + Positioned.fill Backdrop.
+// • „Milky“ Hintergrund via enableHaze:true (+ wash/glow/vignette).
+// • Einheitliche, ruhige Typografie (Story-ähnlich):
+//     – Überschrift grün • Lauftext schwarz • Frage kursiv (ruhig).
+//     – Reflexion: Gedanke = Überschrift, Frage = kursiv, Antwort = Fließtext.
+// • Typ-Badge für alle drei Arten (Tagebuch, Reflexion, Kurzgeschichte).
+// • Panda-Mood (PandaMoodChip) wenn Mood vorhanden.
+// • Desktop: ClampingScrollPhysics, extra Bottom-Padding per viewPadding.
+//
+// Implementationshinweise:
+// - KEINE const-Verwendung bei ZenAppBar / ZenBackdrop / Positioned.fill.
+// - Color.withOpacity war deprec. → jetzt Color.withValues(alpha: ...).
+// - Enum lokal, um Kollisionen mit Model-Enums zu vermeiden.
+
+import 'package:flutter/material.dart';
+
+import '../../shared/zen_style.dart' as zs
+    hide ZenBackdrop, ZenGlassCard, ZenAppBar;
+import '../../shared/ui/zen_widgets.dart' as zw
+    show ZenBackdrop, ZenGlassCard, ZenAppBar, PandaHeader, PandaMoodChip;
+
+/// Viewer-spezifische Typen (lokal gehalten).
+enum EntryKind { journal, reflection, story }
+
+class JournalEntryView extends StatelessWidget {
+  final EntryKind kind;
+  final DateTime createdAt;
+
+  // JOURNAL
+  final String? journalText;
+
+  // REFLEXION
+  final String? userThought; // „Dein Gedanke“
+  final String? aiQuestion;  // Panda-Frage (kursiv)
+  final String? userAnswer;  // „Deine Antwort“
+
+  // STORY
+  final String? storyTitle;
+  final String? storyTeaser; // kurzer Auszug / erster Satz
+  final String? storyBody;   // Volltext, falls vorhanden
+
+  // Optionales Meta
+  final String? moodLabel;   // z. B. „Neutral“, „Erleichtert“, …
+
+  // Optional: Sekundär-Aktion (z. B. Editor) — im Detail bewusst nicht angezeigt
+  final VoidCallback? onEdit;
+
+  const JournalEntryView({
+    super.key,
+    required this.kind,
+    required this.createdAt,
+    this.journalText,
+    this.userThought,
+    this.aiQuestion,
+    this.userAnswer,
+    this.storyTitle,
+    this.storyTeaser,
+    this.storyBody,
+    this.moodLabel,
+    this.onEdit,
+  });
+
+  // ─────────────────────────────── Styles ───────────────────────────────
+  // Ruhiger Lauftext (Story-ähnlich)
+  TextStyle _bodyInkStyle(BuildContext c) =>
+      (Theme.of(c).textTheme.bodyMedium ?? const TextStyle(fontSize: 14.5))
+          .copyWith(
+            color: zs.ZenColors.inkStrong.withValues(alpha: .96),
+            height: 1.30,
+          );
+
+  // Kursiv für Reflexions-Frage
+  TextStyle _questionStyle(BuildContext c) =>
+      (Theme.of(c).textTheme.bodyMedium ?? const TextStyle(fontSize: 14))
+          .copyWith(
+            color: zs.ZenColors.inkStrong.withValues(alpha: .96),
+            fontStyle: FontStyle.italic,
+            fontWeight: FontWeight.w500,
+            height: 1.28,
+          );
+
+  // Meta/Caption
+  TextStyle _captionStyle(BuildContext c) =>
+      (Theme.of(c).textTheme.labelSmall ?? const TextStyle(fontSize: 12))
+          .copyWith(color: zs.ZenColors.inkSubtle.withValues(alpha: .90));
+
+  // Titel/Überschrift (ruhig grün)
+  TextStyle _titleStyle(BuildContext c) =>
+      (Theme.of(c).textTheme.titleMedium ?? const TextStyle(fontSize: 18))
+          .copyWith(
+            fontWeight: FontWeight.w700,
+            color: zs.ZenColors.deepSage,
+            height: 1.22,
+          );
+
+  // ─────────────────────────────── Build ────────────────────────────────
+
+  @override
+  Widget build(BuildContext context) {
+    final isMobile = MediaQuery.of(context).size.width < 470;
+    final bottomSafe = MediaQuery.of(context).viewPadding.bottom;
+
+    final headerTitle = () {
+      switch (kind) {
+        case EntryKind.journal:
+          return 'Dein Gedanke';
+        case EntryKind.reflection:
+          return 'Deine Reflexion';
+        case EntryKind.story:
+          return 'Deine Kurzgeschichte';
+      }
+    }();
+
+    final headerCaption = () {
+      switch (kind) {
+        case EntryKind.journal:
+          return 'Ganz in Ruhe lesen.';
+        case EntryKind.reflection:
+          return 'Klarheit, Schritt für Schritt.';
+        case EntryKind.story:
+          return 'Eine kleine Reise in Worten.';
+      }
+    }();
+
+    return Scaffold(
+      extendBodyBehindAppBar: true,
+      extendBody: true,
+      backgroundColor: Colors.transparent,
+      // Hinweis: KEIN const gemäß Implementationshinweis
+      appBar: const zw.ZenAppBar(title: null, showBack: true),
+      body: Stack(
+        fit: StackFit.expand, // volle Höhe (kein Gap auf Desktop)
+        children: [
+          // Base-Fallback-Farbe (Ränder/HiDPI)
+          Positioned.fill(
+            child: ColoredBox(
+              color: Theme.of(context).scaffoldBackgroundColor,
+            ),
+          ),
+          // „Milky“ Backdrop — KEIN const (vgl. Hinweis)
+          const Positioned.fill(
+            child: zw.ZenBackdrop(
+              asset: 'assets/schoen.png',
+              glow: .28,
+              vignette: .12,
+              saturation: .95,
+              wash: .06,
+              enableHaze: true,
+            ),
+          ),
+          SafeArea(
+            child: SingleChildScrollView(
+              physics: const ClampingScrollPhysics(),
+              padding: EdgeInsets.fromLTRB(
+                zs.ZenSpacing.m,
+                20,
+                zs.ZenSpacing.m,
+                zs.ZenSpacing.l + bottomSafe, // extra Raum unten
+              ),
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 720),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      zw.PandaHeader(
+                        title: headerTitle,
+                        caption: headerCaption,
+                        pandaSize: isMobile ? 88 : 112,
+                        strongTitleGreen: true,
+                      ),
+                      const SizedBox(height: 12),
+                      _card(context),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─────────────────────────────── Card ────────────────────────────────
+
+  Widget _card(BuildContext context) {
+    // non-nullables: wir befüllen explizit für alle drei Fälle
+    late final IconData typeIcon;
+    late final String typeLabel;
+    switch (kind) {
+      case EntryKind.reflection:
+        typeIcon = Icons.psychology_alt_outlined;
+        typeLabel = 'Reflexion';
+        break;
+      case EntryKind.story:
+        typeIcon = Icons.auto_stories_outlined;
+        typeLabel = 'Kurzgeschichte';
+        break;
+      case EntryKind.journal:
+        typeIcon = Icons.menu_book_outlined;
+        typeLabel = 'Tagebuch';
+        break;
+    }
+
+    return Semantics(
+      container: true,
+      label: switch (kind) {
+        EntryKind.journal => 'Tagebuch',
+        EntryKind.reflection => 'Reflexion',
+        EntryKind.story => 'Kurzgeschichte',
+      },
+      child: zw.ZenGlassCard(
+        padding: const EdgeInsets.fromLTRB(22, 18, 22, 20),
+        borderRadius: const BorderRadius.all(zs.ZenRadii.xl),
+        topOpacity: .24,
+        bottomOpacity: .10,
+        borderOpacity: .14,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Typ-Badge (für alle drei Arten)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 8),
+                decoration: BoxDecoration(
+                  color: zs.ZenColors.mist.withValues(alpha: .80),
+                  borderRadius: const BorderRadius.all(zs.ZenRadii.s),
+                  border: Border.all(
+                    color: zs.ZenColors.jadeMid.withValues(alpha: .18),
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(typeIcon, color: zs.ZenColors.jadeMid, size: 18),
+                    const SizedBox(width: 6),
+                    Text(
+                      typeLabel,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14.5,
+                        color: zs.ZenColors.jade,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            // Inhalt
+            if (kind == EntryKind.journal)
+              _journalBlock(context)
+            else if (kind == EntryKind.reflection)
+              _reflectionBlock(context)
+            else
+              _storyBlock(context),
+
+            const SizedBox(height: 12),
+            _metaRow(context),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Journal: Erste nicht-leere Zeile als grüne Überschrift, Rest als ruhiger Fließtext.
+  Widget _journalBlock(BuildContext context) {
+    final raw = (journalText ?? '').trim();
+    if (raw.isEmpty) {
+      return const SelectableText('—', semanticsLabel: 'Leer');
+    }
+
+    final lines = raw.split(RegExp(r'\r?\n')).map((s) => s.trim()).toList();
+    final nonEmpty = lines.where((s) => s.isNotEmpty).toList();
+
+    final title = nonEmpty.isNotEmpty ? nonEmpty.first : '';
+    final bodyLines = nonEmpty.length > 1 ? nonEmpty.sublist(1) : const <String>[];
+    // sanfte Normalisierung: 3+ Leerzeilen → 2
+    final body = bodyLines.join('\n').trim().replaceAll(RegExp(r'\n{3,}'), '\n\n');
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (title.isNotEmpty) ...[
+          Text(title, style: _titleStyle(context)),
+          if (body.isNotEmpty) const SizedBox(height: 10),
+        ],
+        if (body.isNotEmpty)
+          SelectableText(body, style: _bodyInkStyle(context)),
+      ],
+    );
+  }
+
+  // Reflexion: RUHIG wie Story — Gedanke als Überschrift, Frage kursiv, Antwort Fließtext.
+  Widget _reflectionBlock(BuildContext context) {
+    final thought = (userThought ?? '').trim();
+    final question = (aiQuestion ?? '').trim();
+    final answer = (userAnswer ?? '').trim();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (thought.isNotEmpty) ...[
+          Text(thought, style: _titleStyle(context)),
+          const SizedBox(height: 10),
+        ],
+        if (question.isNotEmpty) ...[
+          SelectableText(question, style: _questionStyle(context)),
+          const SizedBox(height: 10),
+        ],
+        if (answer.isNotEmpty)
+          SelectableText(answer, style: _bodyInkStyle(context))
+        else
+          const SelectableText('—', semanticsLabel: 'Leer'),
+      ],
+    );
+  }
+
+  // Story: Volltext (oder Teaser) ruhig gesetzt.
+  Widget _storyBlock(BuildContext context) {
+    final title = (storyTitle ?? '').trim();
+    final body = (storyBody ?? '').trim();
+    final teaser = (storyTeaser ?? '').trim();
+    final text = (body.isNotEmpty ? body : teaser);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (title.isNotEmpty) ...[
+          Text(title, style: _titleStyle(context)),
+          const SizedBox(height: 10),
+        ],
+        SelectableText(
+          text.isEmpty ? '—' : text,
+          style: _bodyInkStyle(context),
+          textAlign: TextAlign.start,
+          maxLines: null, // kompletter Story-Text
+          semanticsLabel: text.isEmpty ? 'Leer' : null,
+        ),
+      ],
+    );
+  }
+
+  // ───────────────────────────── Meta ───────────────────────────
+
+  Widget _metaRow(BuildContext context) {
+    final ts = _formatDate(createdAt);
+    final mood = (moodLabel ?? '').trim();
+
+    return Row(
+      children: [
+        Text(ts, style: _captionStyle(context)),
+        if (mood.isNotEmpty) ...[
+          const SizedBox(width: 8),
+          PandaMoodChip(mood: mood, small: true),
+        ],
+        const Spacer(),
+      ],
+    );
+  }
+
+  // ─────────────────────────────── Utils ─────────────────────────────────
+
+  String _formatDate(DateTime dt) {
+    final l = dt.toLocal();
+    final now = DateTime.now();
+
+    bool sameDay(DateTime a, DateTime b) =>
+        a.year == b.year && a.month == b.month && a.day == b.day;
+
+    String two(int n) => n.toString().padLeft(2, '0');
+    final hh = two(l.hour);
+    final mm = two(l.minute);
+
+    if (sameDay(l, now)) return 'Heute, $hh:$mm';
+    if (sameDay(l, now.subtract(const Duration(days: 1)))) return 'Gestern, $hh:$mm';
+
+    final dd = two(l.day);
+    final mo = two(l.month);
+    return '$dd.$mo.${l.year}, $hh:$mm';
+  }
+}

@@ -916,7 +916,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                   height: 4,
                   margin: const EdgeInsets.only(bottom: 12),
                   decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(.12),
+                    color: Colors.black.withValues(alpha: .12),
                     borderRadius: BorderRadius.circular(99),
                   ),
                 ),
@@ -1221,7 +1221,7 @@ class _ReflectionHeader extends StatelessWidget {
             shadows: [
               Shadow(
                 blurRadius: 8,
-                color: Colors.black.withOpacity(.08),
+                color: Colors.black.withValues(alpha: .08),
                 offset: const Offset(0, 2),
               ),
             ],
@@ -1241,7 +1241,7 @@ class _ReflectionHeader extends StatelessWidget {
           textAlign: TextAlign.center,
           style: tt.labelLarge?.copyWith(
             fontStyle: FontStyle.italic,
-            color: ZenColors.deepSage.withOpacity(.9),
+            color: ZenColors.deepSage.withValues(alpha: .9),
           ),
         ),
       ],
@@ -1335,12 +1335,12 @@ class _RoundThread extends StatelessWidget {
   Widget build(BuildContext context) {
     final tt = Theme.of(context).textTheme;
     final base = tt.bodyMedium!;
-    final timeStyle = base.copyWith(color: Colors.black.withOpacity(.45), fontSize: 12);
+    final timeStyle = base.copyWith(color: Colors.black.withValues(alpha: .45), fontSize: 12);
 
     final labelStyle = base.copyWith(
       fontSize: 12,
       fontWeight: FontWeight.w400,
-      color: Colors.white.withOpacity(.9),
+      color: Colors.white.withValues(alpha: .9),
       letterSpacing: .3,
     );
 
@@ -1350,7 +1350,7 @@ class _RoundThread extends StatelessWidget {
       fontWeight: FontWeight.w600,
       height: 1.35,
     );
-    final Color userBg = ZenColors.jade.withOpacity(.92);
+    final Color userBg = ZenColors.jade.withValues(alpha: .92);
 
     // Panda-Bubble
     final pandaMirror = base.copyWith(color: ZenColors.ink, height: 1.32);
@@ -1676,8 +1676,8 @@ class _ChipPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final pillColor = Colors.white.withOpacity(.96);
-    final border = ZenColors.jade.withOpacity(.55);
+    final pillColor = Colors.white.withValues(alpha: .96);
+    final border = ZenColors.jade.withValues(alpha: .55);
 
     return Material(
       color: Colors.transparent,
@@ -1739,12 +1739,12 @@ class _InputBar extends StatelessWidget {
   Widget build(BuildContext context) {
     const jade = ZenColors.jade;
     final baseText = Theme.of(context).textTheme.bodyMedium!;
-    final hintStyle = baseText.copyWith(color: jade.withOpacity(0.55));
+    final hintStyle = baseText.copyWith(color: jade.withValues(alpha: 0.55));
 
     final List<BoxShadow> pulse = isRecording
         ? [
-            BoxShadow(color: Colors.black.withOpacity(0.10), blurRadius: 14, offset: const Offset(0, 4)),
-            BoxShadow(color: jade.withOpacity(0.30), blurRadius: 22, spreadRadius: 1.2),
+            BoxShadow(color: Colors.black.withValues(alpha: 0.10), blurRadius: 14, offset: const Offset(0, 4)),
+            BoxShadow(color: jade.withValues(alpha: 0.30), blurRadius: 22, spreadRadius: 1.2),
           ]
         : [
             const BoxShadow(color: Color(0x14000000), blurRadius: 18, offset: Offset(0, 6)),
@@ -1754,7 +1754,7 @@ class _InputBar extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: const BorderRadius.all(Radius.circular(18)),
-        border: Border.all(color: jade.withOpacity(0.75), width: 2),
+        border: Border.all(color: jade.withValues(alpha: 0.75), width: 2),
         boxShadow: pulse,
       ),
       padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
@@ -1793,7 +1793,7 @@ class _InputBar extends StatelessWidget {
                     onPressed: (hasText && canSend && onSend != null) ? onSend : null,
                     icon: Icon(
                       Icons.send_rounded,
-                      color: (hasText && canSend && onSend != null) ? jade : jade.withOpacity(0.45),
+                      color: (hasText && canSend && onSend != null) ? jade : jade.withValues(alpha: 0.45),
                     ),
                   ),
                 ],

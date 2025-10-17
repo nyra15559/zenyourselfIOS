@@ -1,16 +1,17 @@
 // lib/features/reflection/reflection_widgets.dart
 // Part: UI-Widgets (library: reflection_screen)
 // -----------------------------------------------------------------------------
-// Oxford–Zen v6.7 — Reflection UI (closure-gated, calm type, 2025-appear)
+// Oxford–Zen v6.9 — Reflection UI (closure-gated, calm type, 2025-appear)
 // - Completion/Mood nur wenn round.allowClosure == true && !round.hasPendingQuestion
 // - Letzte Leitfrage wird unterdrückt, sobald Abschluss aktiv (Mood-Phase)
 // - Optional: mood_intro-Blase vor Abschluss-Karte, falls vorhanden
+// - NEU: HelperSuggestion (sanfter 0–1-Satz aus dem Worker) unter der Frage
 // - Verbesserungen:
 //   • Beruhigte Typografie (keine Kursiv-Frage), konsistente Weights/Sizes
 //   • RepaintBoundary an zentralen Cards (ohne const-Fehler)
 //   • Tooltips + Kopieren via Long-Press/Right-Click, barrierearme Semantics
-//   • Stabilere Text-Layouts (maxWidth, TextScale-Clamp bei Chips)
-//   • NEU (2025): _ZenAppear (Fade+Slide+Scale) für sanftes Einblenden
+//   • Stabilere Text-Layouts (maxWidth, dezente Schatten, Timestamp rechts)
+//   • _ZenAppear (Fade+Slide+Scale) für sanftes Einblenden
 // -----------------------------------------------------------------------------
 // ignore_for_file: unused_element_parameter
 
@@ -156,8 +157,8 @@ class _IntroBubble extends StatelessWidget {
             borderOpacity: _kGlassBorder,
             borderRadius: _kRadius16,
             child: SelectableText(
-              'Hi, ich bin dein Zen Panda. Erzähl mir in 1–2 Sätzen, was dich gerade beschäftigt. '
-              'Deine Reflexion findest du später im Gedankenbuch — gespeichert wird nur, wenn du es willst.',
+              'Was bewegt dich gerade? Schreib’s in 1–2 Sätzen. '
+              'Du entscheidest, ob es gespeichert wird – dann steht es im Gedankenbuch.',
               textAlign: TextAlign.center,
               style: TextStyle(
                 height: 1.42,
@@ -301,6 +302,10 @@ class _RoundThread extends StatelessWidget {
     }
     if (!suppressQuestion && s.question.trim().isNotEmpty) {
       buffer.writeln(s.question.trim());
+    }
+    if (!suppressQuestion &&
+        (s.helperSuggestion ?? '').trim().isNotEmpty) {
+      buffer.writeln((s.helperSuggestion ?? '').trim());
     }
     final copyAll = buffer.toString();
 
@@ -970,6 +975,33 @@ class _PandaCardInner extends StatelessWidget {
       );
     }
 
+    // HelperSuggestion: nur zeigen, wenn Frage sichtbar (gleiche Achse, sanfter Satz)
+    if (!suppressQuestion &&
+        (s.helperSuggestion ?? '').trim().isNotEmpty) {
+      children.add(const SizedBox(height: 8));
+      children.add(
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const ExcludeSemantics(
+              child: Icon(Icons.tips_and_updates_rounded, size: 18, color: _kInk),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: SelectableText(
+                (s.helperSuggestion ?? '').trim(),
+                style: tt.bodySmall?.copyWith(
+                  color: _kInk.withValues(alpha: .87),
+                  height: 1.30,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     // Timestamp bottom-right
     children.add(const SizedBox(height: 6));
     children.add(
@@ -1114,7 +1146,7 @@ class _MoodIntroScope extends InheritedWidget {
   });
 
   static _MoodIntroScope? maybeOf(BuildContext context) =>
-      context.dependOnInheritedWidgetOfExactType<_MoodIntroScope>();
+    context.dependOnInheritedWidgetOfExactType<_MoodIntroScope>();
 
   @override
   bool updateShouldNotify(_MoodIntroScope oldWidget) => oldWidget.text != text;
@@ -1128,7 +1160,7 @@ class _SafetyScope extends InheritedWidget {
   });
 
   static _SafetyScope? maybeOf(BuildContext context) =>
-      context.dependOnInheritedWidgetOfExactType<_SafetyScope>();
+    context.dependOnInheritedWidgetOfExactType<_SafetyScope>();
 
   @override
   bool updateShouldNotify(_SafetyScope oldWidget) => oldWidget.text != text;

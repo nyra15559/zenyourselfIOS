@@ -2,15 +2,15 @@
 //
 // ZenYourself • Accessibility Utils (safe-by-default)
 // ---------------------------------------------------
-// • Keine Namenskollision mit Color-Blind-Palette (eigener Klassenname)
-// • Kontrast-Helpers (WCAG), dynamische On-Color, Reduced-Motion-Hinweis
+// • Eigene Palette/Provider (keine Kollision mit Color-Blind-Palette)
+// • WCAG-Kontrast-Helpers, dynamische On-Color, Reduced-Motion-Hinweis
 // • Semantik-Werkzeuge (Announce), fokusfreundliche Text-Komponente
-// • Defensive Defaults für sensible Zielgruppen
+// • Auf Flutter ≥3.12+ aktualisiert (TextScaler, Color.r/g/b, withValues)
 
-import 'package:flutter/material.dart';
-// <- nötig für SemanticsService.announce
-import 'package:flutter/semantics.dart'; // <-- für SemanticsService.announce
 import 'dart:math' as math;
+import 'package:flutter/material.dart';
+// Für optionales Live-Announcement (sparsam verwenden!)
+import 'package:flutter/semantics.dart';
 
 /// ===================
 /// ZEN ACCESSIBILITY THEME
@@ -33,15 +33,17 @@ class ZenA11yPalette {
   });
 
   // Zen Brand (konservativ, beruhigende Töne)
-  static const _zenJade      = Color(0xFF0B3D2E);
+  static const _zenJade = Color(0xFF0B3D2E);
   static const _zenJadeLight = Color(0xFF386F5B);
-  static const _zenWhite     = Color(0xFFFDFCF6);
-  static const _zenGold      = Color(0xFFFFD48A);
+  static const _zenWhite = Color(0xFFFDFCF6);
+  static const _zenGold = Color(0xFFFFD48A);
 
   Color get primary =>
-      isDark ? _zenWhite
-      : isColorBlind ? const Color(0xFF1B263B)
-      : _zenJade;
+      isDark
+          ? _zenWhite
+          : isColorBlind
+              ? const Color(0xFF1B263B)
+              : _zenJade;
 
   Color get accent => isColorBlind ? _zenGold : _zenJadeLight;
 
@@ -51,10 +53,12 @@ class ZenA11yPalette {
 
   Color get error => const Color(0xFFD7263D);
 
-  Color get border => isHighContrast ? Colors.black : _zenJadeLight.withValues(alpha: 0.14);
+  Color get border =>
+      isHighContrast ? Colors.black : _zenJadeLight.withValues(alpha: 0.14);
 
   /// Kontrastfreundliche Textfarbe zu einem Hintergrund bestimmen.
-  static Color onColor(Color bg) => _relativeLuminance(bg) > 0.58 ? Colors.black : Colors.white;
+  static Color onColor(Color bg) =>
+      _relativeLuminance(bg) > 0.58 ? Colors.black : Colors.white;
 
   /// WCAG-Kontrast-Ratio (>= 4.5 empfohlen für normale Schrift)
   static double contrastRatio(Color a, Color b) {
@@ -66,13 +70,15 @@ class ZenA11yPalette {
   static bool isContrastGood(Color fg, Color bg, {double min = 4.5}) =>
       contrastRatio(fg, bg) >= min;
 
+  /// Relative Luminanz nach WCAG – aktualisiert auf neues Color-API.
+  /// Achtung: `Color.r/g/b` sind **0..1**-Floats (nicht 0..255).
   static double _relativeLuminance(Color c) {
-    double ch(int v) {
-      final s = v / 255.0;
-      return s <= 0.03928 ? s / 12.92 : math.pow((s + 0.055) / 1.055, 2.4).toDouble();
-    }
+    double gamma(double s) =>
+        s <= 0.03928 ? s / 12.92 : math.pow((s + 0.055) / 1.055, 2.4).toDouble();
 
-    final r = ch(c.red), g = ch(c.green), b = ch(c.blue);
+    final r = gamma(c.r);
+    final g = gamma(c.g);
+    final b = gamma(c.b);
     return 0.2126 * r + 0.7152 * g + 0.0722 * b;
   }
 
@@ -100,11 +106,13 @@ class ZenA11yPalette {
           reduceMotion == other.reduceMotion;
 
   @override
-  int get hashCode => Object.hash(isColorBlind, isDark, isHighContrast, reduceMotion);
+  int get hashCode =>
+      Object.hash(isColorBlind, isDark, isHighContrast, reduceMotion);
 
   /// Aus dem BuildContext holen
   static ZenA11yPalette of(BuildContext context) {
-    final inherited = context.dependOnInheritedWidgetOfExactType<_ZenA11yPaletteProvider>();
+    final inherited =
+        context.dependOnInheritedWidgetOfExactType<_ZenA11yPaletteProvider>();
     return inherited?.palette ?? const ZenA11yPalette();
   }
 }
@@ -155,7 +163,7 @@ class _ZenA11yPaletteProvider extends InheritedWidget {
 /// ===================
 /// A11yText – fokus- & kontrastfreundlicher Text
 /// ===================
-/// - Achtet den systemweiten TextScaleFactor
+/// - Achtet den systemweiten TextScaler (nonlinear scaling ready)
 /// - Optionaler Fokusrahmen (High-Contrast & Tastaturnavigation)
 /// - Minimiert visuelle Belastung (schwache Schatten nur bei animatedFocus)
 class A11yText extends StatelessWidget {
@@ -188,17 +196,29 @@ class A11yText extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scale = MediaQuery.textScaleFactorOf(context).clamp(1.0, 2.2);
+    // Neu: TextScaler statt textScaleFactorOf (deprecatet).
+    // Wir kappen sanft auf 1.0–2.2, um extreme Skalen zu entschärfen.
+    final scaler = MediaQuery.textScalerOf(context);
+    final base = fontSize ?? 17.0;
+    final scaled = scaler.scale(base);
+    final clamped = scaled.clamp(base * 1.0, base * 2.2).toDouble();
+
     final palette = ZenA11yPalette.of(context);
 
     final baseStyle = TextStyle(
       fontFamily: "SFProText",
-      fontSize: (fontSize ?? 17) * scale,
+      fontSize: clamped, // bereits skaliert & gekappt
       color: color ?? palette.primary,
       fontWeight: fontWeight ?? (bold ? FontWeight.w600 : FontWeight.normal),
       height: 1.22,
       shadows: animatedFocus
-          ? [Shadow(blurRadius: 10, color: palette.accent.withValues(alpha: 0.12), offset: const Offset(0, 2))]
+          ? [
+              Shadow(
+                blurRadius: 10,
+                color: palette.accent.withValues(alpha: 0.12),
+                offset: const Offset(0, 2),
+              )
+            ]
           : const [],
     );
 
@@ -255,7 +275,7 @@ class A11yAnnounce extends StatelessWidget {
 /// A11yLiveAnnouncer – optionales Live-Announcement
 /// ===================
 /// Ruft nach dem Frame SemanticsService.announce() auf.
-/// Nutze sparsam (kann sonst aufdringlich sein).
+/// **Wichtig:** sehr sparsam einsetzen (kann sonst aufdringlich sein).
 class A11yLiveAnnouncer extends StatefulWidget {
   final String message;
   final TextDirection textDirection;
@@ -282,6 +302,8 @@ class _A11yLiveAnnouncerState extends State<A11yLiveAnnouncer> {
     super.didChangeDependencies();
     if (!_announced || !widget.announceOnce) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
+        // Hinweis: Einige Lints markieren announce() als "deprecated_member_use".
+        // In Flutter ist announce weiterhin de facto-API. Bei Änderung: zentral hier anpassen.
         // ignore: deprecated_member_use_from_same_package
         SemanticsService.announce(widget.message, widget.textDirection);
       });
@@ -296,7 +318,8 @@ class _A11yLiveAnnouncerState extends State<A11yLiveAnnouncer> {
 /// ===================
 /// Kontrast-Helpers (öffentlich)
 /// ===================
-bool isContrastGood(Color fg, Color bg) => ZenA11yPalette.isContrastGood(fg, bg);
+bool isContrastGood(Color fg, Color bg) =>
+    ZenA11yPalette.isContrastGood(fg, bg);
 double contrastRatio(Color a, Color b) => ZenA11yPalette.contrastRatio(a, b);
 
 /// ===========================

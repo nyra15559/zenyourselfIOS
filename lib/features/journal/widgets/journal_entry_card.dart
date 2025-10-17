@@ -1,14 +1,29 @@
 // lib/features/journal/widgets/journal_entry_card.dart
 //
-// JournalEntryCard — Oxford-Zen Glass v10.8 (ruhig & konsistent)
+// JournalEntryCard — Oxford-Zen Glass v10.9 (ruhig, konsistent, a11y-freundlich)
 // -----------------------------------------------------------------------------
-// • Glasige Karte (ZenGlassCard) nach zen_style.dart.
-// • Header: Titel (DeepSage) + optional trailing + Menü (…).
+// • Glasige Karte (ZenGlassCard) lt. zen_style.dart / zen_widgets.dart.
+// • Header: Titel (DeepSage) + optional trailing + „…“-Menü (Popup).
 // • Meta: „Do., 07.09., 19:05 — <Typ>“ (ohne Model-Helper).
-// • Preview: Reflexion (Frage kursiv, Antwort DeepSage) | sonst Plaintext.
-// • **Keine** Inline-CTA — Aktionen nur im …-Menü.
-// • KEINE Abhängigkeiten von Model-Hilfsmethoden (withAutoTitle, badge, ...)
-// • Color.withOpacity(...) statt withValues(...).
+// • Preview: max. 3 Zeilen (Reflection: Frage kursiv, Antwort DeepSage).
+// • **Keine** Inline-CTA — Aktionen ausschließlich im …-Menü.
+// • **Keine** Abhängigkeiten von Model-Hilfsmethoden (withAutoTitle, badge etc.).
+// • Nur Color.withValues(alpha: …), keine withOpacity(..).
+//
+// Öffentliche API (non-breaking):
+//   JournalEntryCard({
+//     required JournalEntry entry,
+//     VoidCallback? onTap,
+//     VoidCallback? onContinue, // im Menü für Reflexion
+//     VoidCallback? onEdit,
+//     VoidCallback? onHide,
+//     VoidCallback? onDelete,
+//     Widget? trailing,
+//   });
+//
+// Hinweise:
+// • Karte navigiert nicht selbst; Steuerung via onTap/onMore-Callbacks.
+// • Tags werden dezent, max. 3, ohne technische/debug Tags dargestellt.
 
 import 'package:flutter/material.dart';
 import '../../../models/journal_entry.dart';
@@ -19,7 +34,7 @@ import '../../../utils/formatting.dart' show formatDateTimeShort;
 class JournalEntryCard extends StatefulWidget {
   final JournalEntry entry;
   final VoidCallback? onTap;
-  final VoidCallback? onContinue; // nur Reflexion (im Menü)
+  final VoidCallback? onContinue; // nur Reflexion
   final VoidCallback? onEdit;
   final VoidCallback? onHide;
   final VoidCallback? onDelete;
@@ -48,9 +63,9 @@ class _JournalEntryCardState extends State<JournalEntryCard> {
   @override
   Widget build(BuildContext context) {
     final e = widget.entry;
-    final badge = _badgeFor(e.kind);           // {label, icon}
-    final title = _computedTitle(e);           // sicherer Titel (lokal)
-    final meta = '${formatDateTimeShort(e.createdAt)} — ${badge.label}';
+    final badge = _badgeFor(e.kind);                         // {label, icon}
+    final title = _computedTitle(e);                         // robuster, lokaler Titel
+    final meta  = '${formatDateTimeShort(e.createdAt)} — ${badge.label}';
 
     return Semantics(
       container: true,
@@ -101,11 +116,11 @@ class _JournalEntryCardState extends State<JournalEntryCard> {
 
                       const SizedBox(height: 6),
 
-                      // Meta
+                      // Meta-Zeile
                       Text(
                         meta,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: zs.ZenColors.inkSubtle.withOpacity(.90),
+                              color: zs.ZenColors.inkSubtle.withValues(alpha: .90),
                             ),
                       ),
 
@@ -114,7 +129,7 @@ class _JournalEntryCardState extends State<JournalEntryCard> {
 
                       const SizedBox(height: 8),
 
-                      // Preview (expandable)
+                      // Preview (3 Zeilen clamp; „Mehr/Weniger“ per AnimatedSwitcher)
                       _ExpandablePreview(
                         isReflection: _isReflection,
                         question: e.aiQuestion ?? '',
@@ -183,6 +198,7 @@ class _JournalEntryCardState extends State<JournalEntryCard> {
     return base.copyWith(
       color: zs.ZenColors.deepSage,
       fontWeight: FontWeight.w700,
+      letterSpacing: .10,
     );
   }
 
@@ -190,26 +206,10 @@ class _JournalEntryCardState extends State<JournalEntryCard> {
   List<Widget> _tagChips(List<String> tags) {
     if (tags.isEmpty) return const [];
     const bannedKeys = <String>{
-      'mood',
-      'moodscore',
-      'emotion',
-      'input',
-      'answer',
-      'user',
-      'ai',
-      'ai_question',
-      'question',
-      'type',
-      'kind',
-      'source',
-      'sourceref',
+      'mood', 'moodscore', 'emotion', 'input', 'answer', 'user', 'ai',
+      'ai_question', 'question', 'type', 'kind', 'source', 'sourceref',
     };
-    const bannedFlat = <String>{
-      'reflection',
-      'reflexion',
-      'journal',
-      'story',
-    };
+    const bannedFlat = <String>{ 'reflection', 'reflexion', 'journal', 'story' };
 
     final filtered = tags.where((t) {
       final s = t.trim();
@@ -258,9 +258,9 @@ class _TypeIcon extends StatelessWidget {
       height: 36,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(10),
-        color: c.withOpacity(0.07),
+        color: c.withValues(alpha: 0.07),
       ),
-      child: Icon(icon, size: 20, color: c.withOpacity(0.90)),
+      child: Icon(icon, size: 20, color: c.withValues(alpha: 0.90)),
     );
   }
 }
@@ -284,52 +284,61 @@ class _ExpandablePreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final base =
-        Theme.of(context).textTheme.bodyMedium ?? const TextStyle(fontSize: 14.5);
-    final green = zs.ZenColors.deepSage.withOpacity(.95);
+    final body = _buildSpan(context);
+    // Zwei Varianten (collapsed / expanded) via AnimatedSwitcher
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 220),
+      switchInCurve: Curves.easeInOut,
+      switchOutCurve: Curves.easeInOut,
+      child: _ExpandableRichText(
+        key: ValueKey<bool>(expanded),
+        span: body,
+        expanded: expanded,
+        onToggle: onToggle,
+        collapsedMaxLines: 3,
+      ),
+    );
+  }
+
+  InlineSpan _buildSpan(BuildContext context) {
+    final base = Theme.of(context).textTheme.bodyMedium ??
+        const TextStyle(fontSize: 14.5);
+    final green = zs.ZenColors.deepSage.withValues(alpha: .95);
     final textColor =
         Theme.of(context).textTheme.bodyMedium?.color ?? zs.ZenColors.ink;
 
-    InlineSpan span;
-
-    if (isReflection) {
-      final q = question.trim();
-      final a = answer.trim();
-      if (q.isEmpty && a.isEmpty) {
-        span = TextSpan(
-          text: 'Reflexion',
-          style: base.copyWith(color: zs.ZenColors.inkSubtle),
-        );
-      } else {
-        span = TextSpan(children: [
-          if (q.isNotEmpty)
-            TextSpan(
-              text: '„$q“ ',
-              style: base.copyWith(
-                fontStyle: FontStyle.italic,
-                color: textColor.withOpacity(0.75),
-              ),
-            ),
-          if (a.isNotEmpty)
-            TextSpan(
-              text: a,
-              style: base.copyWith(
-                fontWeight: FontWeight.w600,
-                color: green,
-              ),
-            ),
-        ]);
-      }
-    } else {
-      span = TextSpan(text: plainText, style: base.copyWith(color: textColor));
+    if (!isReflection) {
+      return TextSpan(text: plainText, style: base.copyWith(color: textColor));
     }
 
-    return _ExpandableRichText(
-      span: span,
-      expanded: expanded,
-      onToggle: onToggle,
-      collapsedMaxLines: 3,
-    );
+    final q = question.trim();
+    final a = answer.trim();
+
+    if (q.isEmpty && a.isEmpty) {
+      return TextSpan(
+        text: 'Reflexion',
+        style: base.copyWith(color: zs.ZenColors.inkSubtle),
+      );
+    }
+
+    return TextSpan(children: [
+      if (q.isNotEmpty)
+        TextSpan(
+          text: '„$q“ ',
+          style: base.copyWith(
+            fontStyle: FontStyle.italic,
+            color: textColor.withValues(alpha: 0.75),
+          ),
+        ),
+      if (a.isNotEmpty)
+        TextSpan(
+          text: a,
+          style: base.copyWith(
+            fontWeight: FontWeight.w600,
+            color: green,
+          ),
+        ),
+    ]);
   }
 }
 
@@ -340,18 +349,17 @@ class _ExpandableRichText extends StatelessWidget {
   final int collapsedMaxLines;
 
   const _ExpandableRichText({
+    super.key,
     required this.span,
     required this.expanded,
     required this.onToggle,
     this.collapsedMaxLines = 3,
   });
 
-  static const _animDur = Duration(milliseconds: 220);
-  static const _animCurve = Curves.easeInOut;
-
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(builder: (context, constraints) {
+      // Overflow-Check für „Mehr anzeigen“
       final tp = TextPainter(
         text: span,
         textAlign: TextAlign.left,
@@ -362,37 +370,33 @@ class _ExpandableRichText extends StatelessWidget {
 
       final overflow = tp.didExceedMaxLines;
 
-      return AnimatedSize(
-        duration: _animDur,
-        curve: _animCurve,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text.rich(
-              span,
-              maxLines: expanded ? null : collapsedMaxLines,
-              overflow: expanded ? TextOverflow.visible : TextOverflow.ellipsis,
-            ),
-            if (overflow)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: GestureDetector(
-                  onTap: onToggle,
-                  behavior: HitTestBehavior.opaque,
-                  child: Align(
-                    alignment: Alignment.centerRight,
-                    child: Text(
-                      expanded ? 'Weniger' : 'Mehr anzeigen',
-                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                            color: zs.ZenColors.jade,
-                            fontWeight: FontWeight.w600,
-                          ),
-                    ),
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text.rich(
+            span,
+            maxLines: expanded ? null : collapsedMaxLines,
+            overflow: expanded ? TextOverflow.visible : TextOverflow.ellipsis,
+          ),
+          if (overflow)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: GestureDetector(
+                onTap: onToggle,
+                behavior: HitTestBehavior.opaque,
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    expanded ? 'Weniger' : 'Mehr anzeigen',
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                          color: zs.ZenColors.jade,
+                          fontWeight: FontWeight.w600,
+                        ),
                   ),
                 ),
               ),
-          ],
-        ),
+            ),
+        ],
       );
     });
   }
@@ -404,13 +408,13 @@ class _TagChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bg = Colors.black.withOpacity(.04);
+    final bg = Colors.black.withValues(alpha: .04);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: bg,
         borderRadius: const BorderRadius.all(zs.ZenRadii.s),
-        border: Border.all(color: Colors.black.withOpacity(.08), width: 1),
+        border: Border.all(color: Colors.black.withValues(alpha: .08), width: 1),
       ),
       child: Text(
         text,
@@ -497,7 +501,7 @@ class _MenuButton extends StatelessWidget {
         child: Icon(
           Icons.more_horiz,
           size: 22,
-          color: Theme.of(context).iconTheme.color?.withOpacity(.80),
+          color: Theme.of(context).iconTheme.color?.withValues(alpha: .80),
         ),
       ),
     );

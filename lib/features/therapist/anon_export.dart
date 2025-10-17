@@ -156,7 +156,7 @@ class _AnonExportWidgetState extends State<AnonExportWidget> {
                     _exportMsg!,
                     style: ZenTextStyles.body.copyWith(
                       color: _exportMsg!.startsWith('Fehler')
-                          ? Colors.red[800]
+                          ? Colors.red.shade800
                           : ZenColors.inkStrong,
                     ),
                   ),
@@ -240,17 +240,21 @@ class _AnonExportWidgetState extends State<AnonExportWidget> {
         file = await _saveFile(jsonStr, _timestamped('zenyourself_export', 'json'));
       }
 
-      if (!mounted) return;
-      setState(() {
-        _exportMsg = 'Export erfolgreich.';
-        _lastPath = file.path;
-      });
+      if (mounted) {
+        setState(() {
+          _exportMsg = 'Export erfolgreich.';
+          _lastPath = file.path;
+        });
+      }
     } catch (e) {
-      if (!mounted) return;
-      setState(() => _exportMsg = 'Fehler beim Export: $e');
+      if (mounted) {
+        setState(() => _exportMsg = 'Fehler beim Export: $e');
+      }
     } finally {
-      if (!mounted) return;
-      setState(() => _exporting = false);
+      // ⚠️ Wichtig: Kein `return` im finally-Block → Analyzer-Warnung vermeiden
+      if (mounted) {
+        setState(() => _exporting = false);
+      }
     }
   }
 
@@ -373,7 +377,7 @@ class _ExportSelector extends StatelessWidget {
         backgroundColor: WidgetStateProperty.resolveWith(
           (states) => ZenColors.surface, // kein surfaceAlt → build-safe
         ),
-        foregroundColor: WidgetStateProperty.all(ZenColors.inkStrong),
+        foregroundColor: const WidgetStatePropertyAll(ZenColors.inkStrong),
       ),
     );
   }

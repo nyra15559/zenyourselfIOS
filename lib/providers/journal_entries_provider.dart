@@ -69,7 +69,7 @@ class JournalEntriesProvider with ChangeNotifier {
       _entries.where((e) => e.kind == EntryKind.journal).toList(growable: false);
 
   List<JournalEntry> get reflections =>
-      _entries.where((e) => e.kind == EntryKind.reflection).toList(growable: false);
+    _entries.where((e) => e.kind == EntryKind.reflection).toList(growable: false);
 
   List<JournalEntry> get stories =>
       _entries.where((e) => e.kind == EntryKind.story).toList(growable: false);
@@ -621,6 +621,7 @@ class JournalEntriesProvider with ChangeNotifier {
     return groups;
   }
 
+  /// Öffentliche Helper: alle Einträge für einen lokalen Tag (für Day-Screen)
   List<JournalEntry> entriesForLocalDay(DateTime dayLocal) {
     final key = _dayKeyLocal(dayLocal);
     return _entries
@@ -973,6 +974,7 @@ class JournalEntriesProvider with ChangeNotifier {
     return null;
   }
 
+  /// Interner Helper: Fragen normalisieren (Duplikate raus, stabile Liste)
   String _normalizeQuestions(List<String> qs) {
     if (qs.isEmpty) return '';
     final seen = <String>{};

@@ -1,36 +1,32 @@
 // lib/features/journey/journey_map.dart
 //
-// JourneyMapScreen — v7.3 Oxford (Therapeuten-Tile, Privacy-Footer, Safe-Nav)
-// Anpassungsdatum: 2025-09-13
-// Hinweise:
-// • Gemäß Projektstil: keine übermäßige Verwendung von `const` bei Widgets.
-// • Safe-Nav-Lock verhindert doppelte Navigations-Pushes.
-// • Story-Gate via Provider: Freischaltung nach ≥ StoryScreen.neededReflections.
+// JourneyMapScreen — v8.1.1 Oxford (responsive grid, overflow-safe)
+// -----------------------------------------------------------------------------
+// • Volle Responsivität (xs/sm: 1 Spalte; md+: 2 Spalten)
+// • Grid via Slivers; Footer als eigener Sliver (kein Overlay)
+// • SliverFadeTransition statt FadeTransition (Sliver ↔︎ Sliver!)
+// • mainAxisExtent statt AspectRatio → Kacheln passen sich Höhe je Breakpoint an
+// • TextScaler lokal geklemmt
+// • FIX: Back-Button wird als LETZTES Stack-Kind gerendert → ist immer klickbar
+// -----------------------------------------------------------------------------
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
-// Tokens (ohne Widget-Backdrop, um Namenskollision zu vermeiden)
 import '../../shared/zen_style.dart' as zs hide ZenBackdrop, ZenGlassCard;
-// UI-Widgets (mit Widget-Backdrop)
 import '../../shared/ui/zen_widgets.dart' show ZenBackdrop, ZenGlassCard;
 
-// Datenmodelle (Legacy – bleibt für Konstruktor-Signatur als Fallback)
 import '../../data/mood_entry.dart';
 import '../../data/reflection_entry.dart';
-
-// Kanonische Quelle für Reflexionen
 import '../../providers/journal_entries_provider.dart';
 
-// Screens
 import '../journal/journal_screen.dart';
 import '../reflection/reflection_screen.dart';
 import '../impulse/impulse_screen.dart';
 import '../pro/pro_screen.dart';
 import '../story/story_screen.dart';
 
-const double _tabletMaxWidth = 720;
 const int _kStoryUnlock = StoryScreen.neededReflections;
 
 class JourneyMapScreen extends StatefulWidget {
@@ -51,7 +47,6 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
     with TickerProviderStateMixin {
   late final AnimationController _introCtrl;
   late final AnimationController _tilesCtrl;
-
   bool _navLocked = false;
 
   @override
@@ -107,12 +102,25 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
-    final isCompact = size.width < 520;
-    final maxGridWidth = size.width < _tabletMaxWidth ? 480.0 : 720.0;
-    final tt = Theme.of(context).textTheme;
+    final media = MediaQuery.of(context);
+    final size = media.size;
+    final width = size.width;
 
-    // Reflexions-Zähler aus dem JournalEntriesProvider (Fallback: Legacy-Param).
+    // Responsiv
+    final bool isXsSm = width < 480;         // 1 Spalte
+    final bool isMd = width >= 480 && width < 760;
+    final bool isLg = width >= 760;
+
+    final int columns = isXsSm ? 1 : 2;
+    final double maxGridWidth = isLg ? 760 : (isMd ? 640 : 520);
+
+    // Kachelhöhen je Breakpoint
+    final double tileExtent = isXsSm ? 76 : (isMd ? 86 : 96);
+
+    // TextScaler zähmen
+    final textScaler = media.textScaler.clamp(maxScaleFactor: 1.15, minScaleFactor: 0.90);
+
+    // Reflexions-Zähler (Provider/Fallback)
     final prov = context.watch<JournalEntriesProvider?>();
     final reflectionsCount = prov?.reflections.length ?? widget.reflections.length;
     final storyUnlocked = reflectionsCount >= _kStoryUnlock;
@@ -122,157 +130,200 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
         ? SystemUiOverlayStyle.light
         : SystemUiOverlayStyle.dark;
 
+    final tt = Theme.of(context).textTheme;
+
+    // Tiles
+    final items = <_OptionData>[
+      _OptionData(
+        icon: Icons.menu_book_rounded,
+        label: 'Gedankenbuch',
+        subtitleXs: 'Gedanken loslassen',
+        subtitleMd: 'Lass deine Gedanken los',
+        onTap: () => _pushLocked(MaterialPageRoute(builder: (_) => const JournalScreen())),
+      ),
+      _OptionData(
+        icon: Icons.psychology_alt_rounded,
+        label: 'Selbstreflexion',
+        subtitleXs: 'Ordne Gedanken',
+        subtitleMd: 'Ordne deine Gedanken',
+        onTap: _openReflection,
+      ),
+      _OptionData(
+        icon: Icons.auto_stories_rounded,
+        label: 'Kurzgeschichte',
+        subtitleXs: storyUnlocked ? 'Story lesen' : 'Noch $remaining bis frei',
+        subtitleMd: storyUnlocked ? 'Therapeutische Kurzgeschichte lesen' : 'Noch $remaining bis freigeschaltet',
+        locked: !storyUnlocked,
+        lockHint: 'Noch $remaining vollständige Runde${remaining == 1 ? '' : 'n'} bis zur Story',
+        onTap: () {
+          if (!storyUnlocked) {
+            HapticFeedback.selectionClick();
+            _showLockedSnack(remaining);
+            return;
+          }
+          _pushLocked(MaterialPageRoute(builder: (_) => const StoryScreen()));
+        },
+      ),
+      _OptionData(
+        icon: Icons.bubble_chart_rounded,
+        label: 'Impuls',
+        subtitleXs: 'Atem & Reset',
+        subtitleMd: 'Atem & Mini-Reset',
+        onTap: () => _pushLocked(MaterialPageRoute(builder: (_) => const ImpulseScreen())),
+      ),
+      _OptionData(
+        icon: Icons.insights_rounded,
+        label: 'Dich erkennen',
+        subtitleXs: 'Dein Weg in Bildern',
+        subtitleMd: 'Dein Weg in Bildern',
+        onTap: () => _pushLocked(
+          MaterialPageRoute(
+            builder: (_) => ProScreen(
+              moodEntries: widget.moodEntries,
+              reflectionEntries: widget.reflections,
+            ),
+          ),
+        ),
+      ),
+      _OptionData(
+        icon: Icons.verified_user_rounded,
+        label: 'Therapeuten-Modus',
+        subtitleXs: 'Code eingeben & teilen',
+        subtitleMd: 'Code eingeben & teilen',
+        onTap: () => _pushLocked(
+          MaterialPageRoute(
+            builder: (_) => ProScreen(
+              moodEntries: widget.moodEntries,
+              reflectionEntries: widget.reflections,
+            ),
+          ),
+        ),
+      ),
+    ];
+
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: overlay,
-      child: Scaffold(
-        extendBodyBehindAppBar: true,
-        backgroundColor: Colors.transparent,
-        body: Stack(
-          children: [
-            const PositionedFillBackdrop(),
+      child: MediaQuery(
+        data: media.copyWith(textScaler: textScaler),
+        child: Scaffold(
+          extendBodyBehindAppBar: true,
+          backgroundColor: Colors.transparent,
+          body: Stack(
+            children: [
+              const PositionedFillBackdrop(),
 
-            // Back-Button
-            const SafeArea(
-              child: Padding(
-                padding: EdgeInsets.only(top: zs.ZenSpacing.l, left: zs.ZenSpacing.l),
-                child: _BackButton(),
-              ),
-            ),
-
-            // Content
-            SafeArea(
-              child: Center(
-                child: SingleChildScrollView(
-                  padding: EdgeInsets.fromLTRB(
-                    zs.ZenSpacing.m,
-                    size.height < 700 ? zs.ZenSpacing.m : zs.ZenSpacing.xl,
-                    zs.ZenSpacing.m,
-                    zs.ZenSpacing.xl,
-                  ),
+              // Content als Sliver-Scroll (inkl. Footer)
+              SafeArea(
+                child: Center(
                   child: ConstrainedBox(
-                    constraints: BoxConstraints(maxWidth: maxGridWidth),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
+                    constraints: BoxConstraints(minWidth: 320, maxWidth: maxGridWidth),
+                    child: CustomScrollView(
+                      slivers: [
                         // Headline
-                        ScaleTransition(
-                          scale: CurvedAnimation(parent: _introCtrl, curve: Curves.elasticOut),
-                          child: Padding(
-                            padding: const EdgeInsets.only(bottom: zs.ZenSpacing.m),
-                            child: Text(
-                              'Was brauchst du?',
-                              textAlign: TextAlign.center,
-                              style: tt.headlineMedium!.copyWith(
-                                fontSize: 24,
-                                color: zs.ZenColors.deepSage,
-                                fontWeight: FontWeight.w900,
-                                letterSpacing: .2,
-                                shadows: [
-                                  Shadow(
-                                    blurRadius: 8,
-                                    color: Colors.black.withValues(alpha: .08),
-                                    offset: const Offset(0, 2),
-                                  ),
-                                ],
+                        SliverToBoxAdapter(
+                          child: ScaleTransition(
+                            scale: CurvedAnimation(parent: _introCtrl, curve: Curves.elasticOut),
+                            child: Padding(
+                              padding: EdgeInsets.fromLTRB(
+                                zs.ZenSpacing.m,
+                                size.height < 700 ? zs.ZenSpacing.m : zs.ZenSpacing.xl,
+                                zs.ZenSpacing.m,
+                                zs.ZenSpacing.m,
+                              ),
+                              child: Text(
+                                'Was brauchst du?',
+                                textAlign: TextAlign.center,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: tt.headlineMedium!.copyWith(
+                                  fontSize: isXsSm ? 22 : (isMd ? 24 : 26),
+                                  color: zs.ZenColors.deepSage,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: .2,
+                                  shadows: [
+                                    Shadow(
+                                      blurRadius: 8,
+                                      color: Colors.black.withValues(alpha: .08),
+                                      offset: const Offset(0, 2),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                           ),
                         ),
 
-                        // Grid
-                        FadeTransition(
-                          opacity: CurvedAnimation(parent: _tilesCtrl, curve: Curves.easeOutCubic),
-                          child: LayoutBuilder(
-                            builder: (context, _) {
-                              return GridView(
-                                shrinkWrap: true,
-                                physics: const NeverScrollableScrollPhysics(),
-                                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                                  crossAxisCount: isCompact ? 1 : 2,
-                                  mainAxisSpacing: zs.ZenSpacing.m,
-                                  crossAxisSpacing: zs.ZenSpacing.m,
-                                  childAspectRatio: isCompact ? 16 / 5 : 16 / 4.6,
+                        // Grid der Optionen (mit SliverFadeTransition!)
+                        SliverPadding(
+                          padding: EdgeInsets.symmetric(horizontal: zs.ZenSpacing.m),
+                          sliver: SliverFadeTransition(
+                            opacity: CurvedAnimation(parent: _tilesCtrl, curve: Curves.easeOutCubic),
+                            sliver: SliverGrid(
+                              delegate: SliverChildBuilderDelegate(
+                                (context, index) {
+                                  final d = items[index];
+                                  return _OptionTile(
+                                    icon: d.icon,
+                                    label: d.label,
+                                    subtitle: isXsSm ? d.subtitleXs : d.subtitleMd,
+                                    locked: d.locked,
+                                    lockHint: d.lockHint,
+                                    onTap: d.onTap,
+                                  );
+                                },
+                                childCount: items.length,
+                              ),
+                              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: columns,
+                                mainAxisSpacing: zs.ZenSpacing.m,
+                                crossAxisSpacing: zs.ZenSpacing.m,
+                                mainAxisExtent: tileExtent,
+                              ),
+                            ),
+                          ),
+                        ),
+
+                        // Abstand vor Footer
+                        const SliverToBoxAdapter(child: SizedBox(height: zs.ZenSpacing.l)),
+
+                        // Footer (Zitat + Privacy)
+                        SliverToBoxAdapter(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: zs.ZenSpacing.m),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                AnimatedSwitcher(
+                                  duration: zs.animShort,
+                                  child: Text(
+                                    _randomQuote(reflectionsCount),
+                                    key: ValueKey(reflectionsCount % 7),
+                                    textAlign: TextAlign.center,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: tt.titleMedium!.copyWith(
+                                      color: zs.ZenColors.deepSage,
+                                      fontStyle: FontStyle.italic,
+                                      fontSize: isXsSm ? 14.5 : 16.0,
+                                      shadows: const [
+                                        Shadow(blurRadius: 6, color: Colors.black26, offset: Offset(0, 2)),
+                                      ],
+                                    ),
+                                  ),
                                 ),
-                                children: [
-                                  _OptionTile(
-                                    icon: Icons.menu_book_rounded,
-                                    label: 'Gedankenbuch',
-                                    subtitle: 'Lass deine Gedanken los',
-                                    onTap: () {
-                                      HapticFeedback.selectionClick();
-                                      _pushLocked(MaterialPageRoute(builder: (_) => const JournalScreen()));
-                                    },
+                                const SizedBox(height: 6),
+                                Text(
+                                  'Privacy first · Lokaler Modus: Deine Daten bleiben auf deinem Gerät.',
+                                  textAlign: TextAlign.center,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: tt.bodySmall?.copyWith(
+                                    color: zs.ZenColors.deepSage.withValues(alpha: .82),
                                   ),
-                                  _OptionTile(
-                                    icon: Icons.psychology_alt_rounded,
-                                    label: 'Selbstreflexion',
-                                    subtitle: 'Ordne deine Gedanken',
-                                    onTap: _openReflection,
-                                  ),
-                                  _OptionTile(
-                                    icon: Icons.auto_stories_rounded,
-                                    label: 'Kurzgeschichte',
-                                    subtitle: storyUnlocked
-                                        ? 'Therapeutische Kurzgeschichte lesen'
-                                        : 'Noch $remaining bis freigeschaltet',
-                                    locked: !storyUnlocked,
-                                    lockHint:
-                                        'Noch $remaining vollständige Runde${remaining == 1 ? '' : 'n'} bis zur Story',
-                                    onTap: () {
-                                      if (!storyUnlocked) {
-                                        HapticFeedback.selectionClick();
-                                        _showLockedSnack(remaining);
-                                        return;
-                                      }
-                                      HapticFeedback.selectionClick();
-                                      _pushLocked(MaterialPageRoute(builder: (_) => const StoryScreen()));
-                                    },
-                                  ),
-                                  _OptionTile(
-                                    icon: Icons.bubble_chart_rounded,
-                                    label: 'Impuls',
-                                    subtitle: 'Atem & Mini-Reset',
-                                    onTap: () {
-                                      HapticFeedback.selectionClick();
-                                      _pushLocked(MaterialPageRoute(builder: (_) => const ImpulseScreen()));
-                                    },
-                                  ),
-                                  _OptionTile(
-                                    icon: Icons.insights_rounded,
-                                    label: 'Dich erkennen',
-                                    subtitle: 'Dein Weg in Bildern',
-                                    onTap: () {
-                                      HapticFeedback.selectionClick();
-                                      _pushLocked(
-                                        MaterialPageRoute(
-                                          builder: (_) => ProScreen(
-                                            moodEntries: widget.moodEntries,
-                                            reflectionEntries: widget.reflections,
-                                          ),
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                  // Therapeuten-Modus als eigener Tile
-                                  _OptionTile(
-                                    icon: Icons.verified_user_rounded,
-                                    label: 'Therapeuten-Modus',
-                                    subtitle: 'Code eingeben & teilen',
-                                    onTap: () {
-                                      HapticFeedback.selectionClick();
-                                      _pushLocked(
-                                        MaterialPageRoute(
-                                          builder: (_) => ProScreen(
-                                            moodEntries: widget.moodEntries,
-                                            reflectionEntries: widget.reflections,
-                                          ),
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                ],
-                              );
-                            },
+                                ),
+                                const SizedBox(height: zs.ZenSpacing.l),
+                              ],
+                            ),
                           ),
                         ),
                       ],
@@ -280,53 +331,16 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
                   ),
                 ),
               ),
-            ),
 
-            // Footer: Zitat + Privacy-Hinweis (dezent)
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: zs.ZenSpacing.l,
-              child: SafeArea(
-                top: false,
-                child: Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      AnimatedSwitcher(
-                        duration: zs.animShort,
-                        child: Text(
-                          _randomQuote(reflectionsCount),
-                          key: ValueKey(reflectionsCount % 7),
-                          textAlign: TextAlign.center,
-                          style: tt.titleMedium!.copyWith(
-                            color: zs.ZenColors.deepSage,
-                            fontStyle: FontStyle.italic,
-                            fontSize: 16.0,
-                            shadows: [
-                              const Shadow(
-                                blurRadius: 6,
-                                color: Colors.black26,
-                                offset: Offset(0, 2),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        'Privacy first · Lokaler Modus: Deine Daten bleiben auf deinem Gerät.',
-                        textAlign: TextAlign.center,
-                        style: tt.bodySmall?.copyWith(
-                          color: zs.ZenColors.deepSage.withValues(alpha: .82),
-                        ),
-                      ),
-                    ],
-                  ),
+              // Back-Button (SafeArea) — WICHTIG: als LETZTES Kind → liegt oben & ist klickbar
+              const SafeArea(
+                child: Padding(
+                  padding: EdgeInsets.only(top: zs.ZenSpacing.l, left: zs.ZenSpacing.l),
+                  child: _BackButton(),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -344,6 +358,26 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
     ];
     return quotes[idx % quotes.length];
   }
+}
+
+class _OptionData {
+  final IconData icon;
+  final String label;
+  final String subtitleXs;
+  final String subtitleMd;
+  final VoidCallback onTap;
+  final bool locked;
+  final String? lockHint;
+
+  _OptionData({
+    required this.icon,
+    required this.label,
+    required this.subtitleXs,
+    required this.subtitleMd,
+    required this.onTap,
+    this.locked = false,
+    this.lockHint,
+  });
 }
 
 class PositionedFillBackdrop extends StatelessWidget {
@@ -420,6 +454,8 @@ class _OptionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final width = MediaQuery.of(context).size.width;
+    final bool isXsSm = width < 480;
     final tt = Theme.of(context).textTheme;
 
     final tile = Opacity(
@@ -435,8 +471,8 @@ class _OptionTile extends StatelessWidget {
         child: Row(
           children: [
             Container(
-              width: 42,
-              height: 42,
+              width: isXsSm ? 38 : 42,
+              height: isXsSm ? 38 : 42,
               decoration: BoxDecoration(
                 color: zs.ZenColors.cta.withValues(alpha: .12),
                 shape: BoxShape.circle,
@@ -444,7 +480,7 @@ class _OptionTile extends StatelessWidget {
                   color: zs.ZenColors.cta.withValues(alpha: .35),
                 ),
               ),
-              child: Icon(icon, color: zs.ZenColors.cta, size: 22),
+              child: Icon(icon, color: zs.ZenColors.cta, size: isXsSm ? 20 : 22),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -459,19 +495,19 @@ class _OptionTile extends StatelessWidget {
                     style: tt.labelLarge!.copyWith(
                       color: zs.ZenColors.cta,
                       fontWeight: FontWeight.w700,
-                      fontSize: 17.2,
+                      fontSize: isXsSm ? 16.5 : 17.2,
                       letterSpacing: .1,
                     ),
                   ),
                   const SizedBox(height: 2),
                   Text(
                     subtitle,
-                    maxLines: 2,
+                    maxLines: isXsSm ? 1 : 2,
                     overflow: TextOverflow.ellipsis,
                     style: tt.bodyMedium!.copyWith(
                       color: zs.ZenColors.cta.withValues(alpha: .82),
                       fontStyle: FontStyle.italic,
-                      fontSize: 13,
+                      fontSize: isXsSm ? 12.5 : 13,
                       height: 1.15,
                     ),
                   ),
@@ -481,6 +517,7 @@ class _OptionTile extends StatelessWidget {
             const SizedBox(width: 8),
             Icon(
               locked ? Icons.lock_rounded : Icons.chevron_right_rounded,
+              size: isXsSm ? 20 : 24,
               color: zs.ZenColors.cta,
             ),
           ],

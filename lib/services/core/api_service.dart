@@ -421,6 +421,7 @@ class ApiService {
         mirror: null,
         context: const [],
         followups: const [],
+        answerHelpers: const [], // <- wichtig: UI/Guidance kann darauf hören
         flow: const ReflectionFlow(
           recommendEnd: false,
           suggestBreak: false,
@@ -460,6 +461,7 @@ class ApiService {
         mirror: null,
         context: const [],
         followups: const [],
+        answerHelpers: const [],
         flow: const ReflectionFlow(
           recommendEnd: false,
           suggestBreak: false,
@@ -480,6 +482,7 @@ class ApiService {
         mirror: null,
         context: const [],
         followups: const [],
+        answerHelpers: const [],
         flow: const ReflectionFlow(recommendEnd: false, suggestBreak: false),
         session: session,
         tags: const [],
@@ -573,12 +576,17 @@ class ApiService {
       );
     }
 
-    final userText = messages
-            .lastWhereOrNull((m) => (m['role'] ?? '') == 'user')?['content'] ??
-        (messages.isNotEmpty ? (messages.last['content'] ?? '') : '');
+    // Robust extrahieren: letzte User-Nachricht oder sonst letzte Nachricht
+    String userText = '';
+    final lastUser = messages.lastWhereOrNull((m) => (m['role'] ?? '') == 'user');
+    if (lastUser != null && (lastUser['content'] ?? '').trim().isNotEmpty) {
+      userText = lastUser['content']!.trim();
+    } else if (messages.isNotEmpty && (messages.last['content'] ?? '').trim().isNotEmpty) {
+      userText = messages.last['content']!.trim();
+    }
 
     final turn = await _reflectStep(
-      text: (userText ?? '').trim(),
+      text: userText,
       session: ReflectionSession(threadId: _uuid.v4(), turnIndex: 0, maxTurns: 3),
       locale: 'de',
       tz: 'Europe/Zurich',
@@ -693,8 +701,14 @@ class ApiService {
         final insightsDyn = (json['insights'] as List?) ?? const [];
         final question = (json['question'] ?? '').toString();
 
-        final insights = insightsDyn.map((e) => e.toString()).where((e) => e.trim().isNotEmpty).take(6).toList(growable: false);
-        if (insights.isEmpty && question.isEmpty) throw Exception('Leeres Journey-Result');
+        final insights = insightsDyn
+            .map((e) => e.toString())
+            .where((e) => e.trim().isNotEmpty)
+            .take(6)
+            .toList(growable: false);
+        if (insights.isEmpty && question.isEmpty) {
+          throw Exception('Leeres Journey-Result');
+        }
 
         return JourneyInsights(
           insights: insights.isEmpty ? <String>[question] : insights,
@@ -939,7 +953,11 @@ class ApiService {
   List<String> _bulletsFromText(String text, {int maxItems = 6}) {
     if (text.isEmpty) return const <String>[];
     final raw = text.replaceAll('\r', ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
-    final parts = raw.split(RegExp(r'[\.!\?\n;:]+')).map((s) => s.trim()).where((s) => s.length >= 3).toList();
+    final parts = raw
+        .split(RegExp(r'[\.!\?\n;:]+'))
+        .map((s) => s.trim())
+        .where((s) => s.length >= 3)
+        .toList();
     final seen = <String>{};
     final out = <String>[];
     for (final p in parts) {
@@ -1006,6 +1024,7 @@ class ApiService {
         mirror: null,
         context: const [],
         followups: const [],
+        answerHelpers: const [],
         flow: const ReflectionFlow(recommendEnd: false, suggestBreak: false),
         session: session,
         tags: const [],
@@ -1045,11 +1064,18 @@ class ApiService {
         (json['contexts'] as List?) ??
         (json['hints'] as List?) ??
         const [];
-    final ctx = ctxDyn.map((e) => e.toString()).where((e) => e.trim().isNotEmpty).take(4).toList(growable: false);
+    final ctx = ctxDyn
+        .map((e) => e.toString())
+        .where((e) => e.trim().isNotEmpty)
+        .take(4)
+        .toList(growable: false);
 
-    // ---- ANSWER HELPERS (exklusiv in followups) --------------------------------
+    // ---- ANSWER HELPERS (aus Worker-Varianten einsammeln) --------------------
     final helpers = _readAnswerHelpers(json);
-    final followups = helpers; // Nur die Worker-Answer-Helper, keine Follow-up-Fragen
+
+    // Followups hier bewusst NICHT mit Fragen befüllen; falls Worker nur Chips liefert,
+    // spiegeln wir diese als followups (harmlose Duplizierung, UI zeigt primär answer_helpers).
+    final followups = helpers;
 
     final talkDyn = (json['talk'] as List?) ?? const [];
     final talk = talkDyn.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList(growable: true);
@@ -1102,6 +1128,7 @@ class ApiService {
       mirror: mirror,
       context: ctx,
       followups: followups,
+      answerHelpers: helpers, // <- WICHTIG: echte Worker-Chips nach außen geben
       flow: flow,
       session: s,
       tags: tags,
@@ -1191,12 +1218,21 @@ class ApiService {
   static List<String> _parseStringList(dynamic v) {
     if (v == null) return const <String>[];
     if (v is List) {
-      return v.map((e) => e?.toString() ?? '').map((s) => s.trim()).where((s) => s.isNotEmpty).toList(growable: false);
+      // Nulls explizit filtern → kein dead_null_aware_expression
+      final nonNull = v.where((e) => e != null).map((e) => e.toString());
+      return nonNull
+          .map((s) => s.trim())
+          .where((s) => s.isNotEmpty)
+          .toList(growable: false);
     }
     if (v is String) {
       final s = v.trim();
       if (s.isEmpty) return const <String>[];
-      final parts = s.split(RegExp(r'\n+|[•\-–—]\s+|;\s+')).map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+      final parts = s
+          .split(RegExp(r'\n+|[•\-–—]\s+|;\s+'))
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toList();
       return parts.isEmpty ? <String>[s] : parts;
     }
     return const <String>[];

@@ -46,24 +46,24 @@ class AccessibilityPalette {
 
   /// Ermittelt die aktive Palette aus dem Context (Provider)
   static AccessibilityPalette of(BuildContext context) {
-    final enabled = context.select<ColorBlindModeProvider, bool>((p) => p.enabled);
+    final enabled =
+        context.select<ColorBlindModeProvider, bool>((p) => p.enabled);
     return enabled ? AccessibilityPalette.colorBlind : AccessibilityPalette.normal;
   }
 
   /// Lesefarbe (schwarz/weiß) mit solidem Kontrast
-  static Color onColor(Color bg) => _relativeLuminance(bg) > 0.58 ? Colors.black : Colors.white;
+  static Color onColor(Color bg) => _relativeLuminance(bg) > 0.58
+      ? Colors.black
+      : Colors.white;
 
-  /// Grobe Relative-Luminanz (für onColor-Entscheidung) – sRGB → linear
+  /// Relative Luminanz (WCAG) – aktualisiert auf neues Color-API:
+  /// Achtung: `Color.r/g/b` liefern 0..1 Floats (nicht 0..255).
   static double _relativeLuminance(Color c) {
-    double ch(int v) {
-      final s = v / 255.0;
-      if (s <= 0.03928) return s / 12.92;
-      final base = (s + 0.055) / 1.055;
-      // korrektes Gamma 2.4
-      return MathPow.pow24(base);
-    }
-
-    final r = ch(c.red), g = ch(c.green), b = ch(c.blue);
+    double gamma(double s) =>
+        s <= 0.03928 ? s / 12.92 : math.pow((s + 0.055) / 1.055, 2.4).toDouble();
+    final r = gamma(c.r);
+    final g = gamma(c.g);
+    final b = gamma(c.b);
     return 0.2126 * r + 0.7152 * g + 0.0722 * b;
   }
 }
@@ -113,6 +113,10 @@ class ColorBlindModeSwitcher extends StatelessWidget {
     final provider = context.watch<ColorBlindModeProvider>();
     final palette = AccessibilityPalette.of(context);
 
+    // Material 3: activeColor ist deprecated → Thumb/Track separat setzen.
+    final activeThumb = palette.accent;
+    final activeTrack = palette.accent.withValues(alpha: 0.45);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -129,10 +133,13 @@ class ColorBlindModeSwitcher extends StatelessWidget {
           children: [
             Semantics(
               toggled: provider.enabled,
-              label: "Farbenblinden-Modus ${provider.enabled ? 'aktiv' : 'inaktiv'}",
+              label:
+                  "Farbenblinden-Modus ${provider.enabled ? 'aktiv' : 'inaktiv'}",
               child: Switch.adaptive(
                 value: provider.enabled,
-                activeColor: palette.accent,
+                // ersetzt deprecated activeColor:
+                activeThumbColor: activeThumb,
+                activeTrackColor: activeTrack,
                 onChanged: (v) {
                   HapticFeedback.selectionClick();
                   provider.enabled = v;
@@ -186,7 +193,7 @@ class _SignalChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = AccessibilityPalette.of(context);
 
-    // kompatibel ohne Switch-Expression
+    // komplette, aber erreichbare Fallunterscheidung (kein unreachable default)
     Color bg;
     switch (kind) {
       case _SignalKind.good:
@@ -196,7 +203,6 @@ class _SignalChip extends StatelessWidget {
         bg = p.warning;
         break;
       case _SignalKind.bad:
-      default:
         bg = p.bad;
         break;
     }

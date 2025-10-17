@@ -1,36 +1,59 @@
 // lib/features/reflection/reflection_models.dart
 // Part: Modelle/Typen/Utils (library: reflection_screen)
 // -----------------------------------------------------------------------------
-// v3.13 — Worker v12.2 Alignment
+// v3.21 — Worker v15.3 Alignment (Oxford style)
 // - Frage optional (0–1): liest 'question' ODER 'output_text'.
 // - Answer-Chips: liest 'answer_helpers' (Fallback: 'followups').
+// - helperSuggestion: neues optionales Feld; liest 'helper_suggestion'.
 // - risk: mappt 'risk_level' (!= "none") → true; Fallback: 'risk' bool.
-// - toMap: schreibt zusätzlich 'answer_helpers' für Kompatibilität.
-// - Sanitizer/Heuristik/Closure-Gate unverändert.
+// - toMap: schreibt zusätzlich 'answer_helpers' + 'helper_suggestion'.
+// - normalizeForCompare: whitespace-normalisiert (Deckungsgleich mit Screen).
 // -----------------------------------------------------------------------------
+//
+// Lints / Analyzer:
+// Private Typen in öffentlicher API sind hier bewusst gewollt.
+// Unterdrücken wir zentral für diese Datei:
+//
+// ignore_for_file: library_private_types_in_public_api
 
-part of reflection_screen;
-
-/// Konfigurierbare Heuristik für den Fallback (wenn der Worker keinen Abschluss
-/// signalisiert, aber der Nutzer "wirklich reflektiert" hat).
-const int kMinAnswersForMoodFallback = 2; // frühester Mood-Zeitpunkt
-const int kMaxAnswersForMoodFallback = 3; // spätestens nach so vielen Antworten
+part of 'reflection_screen.dart';
 
 typedef JsonMap = Map<String, dynamic>;
 
+/// Konfigurierbare Heuristik für den Fallback (wenn der Worker keinen Abschluss
+/// signalisiert, aber der Nutzer „wirklich reflektiert“ hat).
+const int kMinAnswersForMoodFallback = 2; // frühester Mood-Zeitpunkt
+const int kMaxAnswersForMoodFallback = 3; // spätestens nach so vielen Antworten
+
 // =============================================================================
-// Panda Step
+// Panda Step (privat, da andere Parts diesen Typ direkt verwenden)
 // =============================================================================
 
+/// Ein semantischer „Schritt“ des Panda-Coaches:
+/// - [mirror]: kurze, beruhigende Spiegelung
+/// - [question]: optionale Leitfrage (0–1)
+/// - [followups]: Antwort-Chips als Satzstarter (keine Fragen, max. 3)
+/// - [talkLines]: optionale Zusatzzeilen (max. 2)
+/// - [risk]: Risiko-Hinweis (true = Safety-Hinweis/CH-Card anzeigen)
+/// - [helperSuggestion]: sanfter 0–1-Satz vom Worker (optional)
+/// - [answer]: Nutzerantwort auf die aktuelle Frage (optional)
 class _PandaStep {
   final String mirror;
   final String question;
 
   /// Answer-Chips (Satzstarter; keine Fragen)
   final List<String> followups;
+
+  /// Zusatzzeilen (ruhige Hinweise, max. 2)
   final List<String> talkLines;
+
+  /// Risiko-Flag (aus risk_level != 'none' oder bool 'risk')
   final bool risk;
 
+  /// Optionaler sanfter Satz aus dem Worker (key: 'helper_suggestion')
+  final String? helperSuggestion;
+
+  /// Frei eingegebene Nutzerantwort (wird getrimmt gespeichert)
   String? answer;
 
   _PandaStep({
@@ -39,16 +62,20 @@ class _PandaStep {
     List<String> followups = const [],
     List<String> talkLines = const [],
     this.risk = false,
+    String? helperSuggestion,
     String? answer,
   })  : followups = _sanitizeFollowups(followups),
         talkLines = _sanitizeTalk(talkLines),
+        helperSuggestion = _trimOrNull(helperSuggestion),
         answer = _trimOrNull(answer);
 
   /// Talk-only Schritt (keine Frage/Antwort erwartet).
+  // ignore: unused_element
   factory _PandaStep.talkOnly({
     required String mirror,
     List<String> talkLines = const [],
     bool risk = false,
+    String? helperSuggestion,
   }) =>
       _PandaStep(
         mirror: mirror,
@@ -56,9 +83,13 @@ class _PandaStep {
         talkLines: talkLines,
         followups: const [],
         risk: risk,
+        helperSuggestion: helperSuggestion,
       );
 
+  /// true, wenn der Nutzer bereits eine Antwort hinterlegt hat.
   bool get hasAnswer => (answer ?? '').trim().isNotEmpty;
+
+  /// true, wenn eine Frage gestellt ist und somit eine Antwort erwartet wäre.
   bool get expectsAnswer => question.trim().isNotEmpty;
 
   _PandaStep deepClone() => _PandaStep(
@@ -67,6 +98,7 @@ class _PandaStep {
         followups: List<String>.from(followups),
         talkLines: List<String>.from(talkLines),
         risk: risk,
+        helperSuggestion: helperSuggestion,
         answer: answer,
       );
 
@@ -76,6 +108,7 @@ class _PandaStep {
     List<String>? followups,
     List<String>? talkLines,
     bool? risk,
+    String? helperSuggestion,
     String? answer,
   }) {
     final step = _PandaStep(
@@ -84,29 +117,33 @@ class _PandaStep {
       followups: followups ?? List<String>.from(this.followups),
       talkLines: talkLines ?? List<String>.from(this.talkLines),
       risk: risk ?? this.risk,
+      helperSuggestion: helperSuggestion ?? this.helperSuggestion,
       answer: this.answer,
     );
     if (answer != null) step.answer = _trimOrNull(answer);
     return step;
   }
 
+  /// Serialisierung (schreibt zusätzlich 'answer_helpers' & 'helper_suggestion').
   JsonMap toMap() => <String, dynamic>{
         'mirror': mirror,
         'question': question,
-        // Bewusst beide Keys für Abwärts-/Aufwärtskompatibilität:
+        // Beide Keys für Abwärts-/Aufwärtskompatibilität:
         'followups': List<String>.from(followups),
         'answer_helpers': List<String>.from(followups),
         'talk': List<String>.from(talkLines),
         'risk': risk,
+        'helper_suggestion': helperSuggestion,
         'answer': hasAnswer ? answer!.trim() : null,
       };
 
+  /// Deserialisierung aus Worker/Store-Map.
   static _PandaStep fromMap(JsonMap m) {
     final talk = (m['talk'] is List)
         ? (m['talk'] as List).map((e) => e.toString()).toList()
         : const <String>[];
 
-    // Worker v12.2 liefert answer_helpers; ältere Pfade evtl. followups.
+    // Worker liefert answer_helpers; ältere Pfade evtl. followups.
     final fuSrc = (m['answer_helpers'] is List)
         ? (m['answer_helpers'] as List)
         : (m['followups'] is List ? (m['followups'] as List) : const <dynamic>[]);
@@ -120,12 +157,18 @@ class _PandaStep {
     final rl = _asString(m['risk_level']).toLowerCase();
     final risk = (m['risk'] == true) || (rl.isNotEmpty && rl != 'none');
 
+    // Helper-Satz: 'helper_suggestion' (oder tolerant 'helperSuggestion')
+    final hs = _asNullableTrimmedString(
+      m.containsKey('helper_suggestion') ? m['helper_suggestion'] : m['helperSuggestion'],
+    );
+
     return _PandaStep(
       mirror: _asString(m['mirror']),
       question: q,
       followups: fu,
       talkLines: talk,
       risk: risk,
+      helperSuggestion: hs,
       answer: _asNullableTrimmedString(m['answer']),
     );
   }
@@ -136,7 +179,8 @@ class _PandaStep {
     return '_PandaStep(mirror:${mirror.length}c, '
         'question:"${_ellipsis(question, 40)}", '
         'followups:${followups.length}, talk:${talkLines.length}, '
-        'risk:$risk, hasAnswer:$a)';
+        'risk:$risk, helperSuggestion:${(helperSuggestion ?? '').isNotEmpty}, '
+        'hasAnswer:$a)';
   }
 
   @override
@@ -144,6 +188,7 @@ class _PandaStep {
         mirror,
         question,
         risk,
+        helperSuggestion ?? '',
         Object.hashAll(talkLines),
         Object.hashAll(followups),
         (answer ?? ''),
@@ -156,6 +201,7 @@ class _PandaStep {
     return mirror == other.mirror &&
         question == other.question &&
         risk == other.risk &&
+        (helperSuggestion ?? '') == (other.helperSuggestion ?? '') &&
         _listEquals(talkLines, other.talkLines) &&
         _listEquals(followups, other.followups) &&
         (answer ?? '') == (other.answer ?? '');
@@ -211,18 +257,27 @@ class _PandaStep {
 // Round Model
 // =============================================================================
 
+/// Eine benutzerzentrierte Reflexionsrunde.
+/// Enthält den initialen Nutzertext, die Panda-Schritte und den
+/// Abschlussstatus (Mood etc.). Persistenz erfolgt über JournalEntries.
 class ReflectionRound {
   final String id;
   final DateTime ts;
-  final String mode;
+  final String mode; // 'text' | 'voice'
   String userInput;
   final List<_PandaStep> steps;
 
+  /// Journal-Persistenz
   String? entryId;
+
+  /// Stimmung (0..4), Label (z.B. „Gelassen“)
   int? moodScore;
   String? moodLabel;
-  String? moodIntro; // optionaler Worker-Text für Mood-Phase
 
+  /// Optionaler Worker-Text als Einleitung zur Mood-Phase
+  String? moodIntro;
+
+  /// Gate: Abschluss/Mood-Phase erlaubt?
   bool allowClosure;
 
   ReflectionRound({
@@ -241,19 +296,30 @@ class ReflectionRound {
         steps = steps ?? <_PandaStep>[];
 
   // ---- Fortschritt / Status --------------------------------------------------
+
+  /// true, wenn die letzte Leitfrage noch nicht beantwortet ist.
   bool get hasPendingQuestion {
     if (steps.isEmpty) return false;
     final last = steps.last;
     return last.expectsAnswer && !last.hasAnswer;
   }
 
+  /// true, sobald mind. eine Nutzerantwort existiert.
   bool get answered => steps.any((s) => s.hasAnswer);
+
+  /// true, wenn die Stimmung gesetzt ist.
   bool get hasMood => moodScore != null;
+
+  /// true, wenn Antwort + Stimmung vorhanden sind.
   bool get isComplete => answered && hasMood;
+
+  /// Anzahl Antworten / Fragen / Reflektions-Tiefe
   int get answersCount => steps.where((s) => s.hasAnswer).length;
-  int get questionsCount => steps.where((s) => s.question.trim().isNotEmpty).length;
+  int get questionsCount =>
+      steps.where((s) => s.question.trim().isNotEmpty).length;
   int get reflectionDepth => answersCount;
 
+  /// Fallback-Heuristik für die Mood-Phase, falls der Worker kein Closure setzt.
   bool get readyForMood {
     if (!answered) return false;
     if (allowClosure) return !hasPendingQuestion;
@@ -271,12 +337,14 @@ class ReflectionRound {
     return false;
   }
 
+  /// Der Panda darf noch eine nächste Leitfrage stellen?
   bool get wantsFollowup {
     if (readyForMood) return false;
     if (hasPendingQuestion) return false;
     return answered && answersCount < kMaxAnswersForMoodFallback;
   }
 
+  /// Normalisierte Menge aller gestellten Fragen (für Duplikat-Schutz).
   Set<String> get normalizedQuestions {
     final out = <String>{};
     for (final s in steps) {
@@ -286,12 +354,14 @@ class ReflectionRound {
     return out;
   }
 
+  /// Duplikat-Schutz: füge Step nur an, wenn es keine inhaltlich gleiche Frage ist.
   bool shouldAppendStep(_PandaStep step) {
     final normQ = normalizeForCompare(step.question.trim());
     if (normQ.isEmpty) return true;
     return !normalizedQuestions.contains(normQ);
   }
 
+  /// Neueste Nutzerantwort (oder null).
   String? get latestAnswer {
     for (int i = steps.length - 1; i >= 0; i--) {
       final a = (steps[i].answer ?? '').trim();
@@ -300,11 +370,14 @@ class ReflectionRound {
     return null;
   }
 
+  /// Erste gestellte Frage (oder leer).
   String get firstQuestion => steps.isEmpty ? '' : steps.first.question.trim();
 
+  /// Fügt einen Step unverändert hinzu.
   void addStep(_PandaStep step) => steps.add(step);
 
   // ---- (De-)Serialisierung ---------------------------------------------------
+
   JsonMap toMap() => <String, dynamic>{
         'id': id,
         'ts': ts.toIso8601String(),
@@ -425,10 +498,10 @@ class ReflectionRound {
 // Shared Normalizer & Utils
 // =============================================================================
 
-String normalizeForCompare(String s) {
-  final lower = s.toLowerCase();
-  return lower.replaceAll(RegExp(r'[^a-z0-9\u00C0-\u017F]+'), '');
-}
+/// Vergleicht Fragen „weich“: nur Leerzeichen werden zusammengezogen, Kleinbuchstaben.
+/// (Deckungsgleich mit der Screen-Logik, um Duplikate stabil zu erkennen.)
+String normalizeForCompare(String s) =>
+    s.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim();
 
 bool _listEquals<T>(List<T> a, List<T> b) {
   if (identical(a, b)) return true;
@@ -460,5 +533,6 @@ String? _asNullableTrimmedString(dynamic v) {
 String _ellipsis(String s, int max) {
   final t = s.trim();
   if (t.length <= max) return t;
+  if (max <= 1) return '…';
   return '${t.substring(0, max - 1)}…';
 }

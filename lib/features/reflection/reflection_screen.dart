@@ -1,17 +1,24 @@
 // lib/features/reflection/reflection_screen.dart
 //
-// ReflectionScreen — Panda v3.19.1 (Profilevel, no auto-nav on mood/save)
+// ReflectionScreen — Panda v3.21.0 (Oxford level; CH risk actions; no auto-nav)
 // -----------------------------------------------------------------------------
-// Garantien / Änderungen:
+// Änderungen in diesem Build:
+// • helperSuggestion: Worker-Feld 'helper_suggestion' wird gelesen und an _PandaStep übergeben.
+// • closureFull: mood_intro-Text wird in round.moodIntro gespeichert (Bubble in Widgets),
+//   kein zusätzlicher Panda-Step für den Intro-Text.
+// • Sonstiges: kleine Robustheits-/Style-Anpassungen, keine Verhaltensänderung im Kern.
+// -----------------------------------------------------------------------------
+// Garantien / Änderungen (unverändert):
 // • KEIN automatisches Zurück ins Hauptmenü beim Mood-Wählen ODER Speichern.
 // • Save-Flow deterministisch: Button → (falls Mood fehlt) Picker → Persist → Calm Confirm → Panda-Danke.
-// • Closure-Respect: flow.mood_prompt / recommend_end → Frage unterdrücken, Mood-Phase.
-// • Worker-Chips: nutzt answer_helpers (sanitisiert, max 3). Fallback aus Leitfrage (≈2.4 s).
-// • Error-Path robust: keine Frage/Chips bei Worker/Netz-Fehler; fester kurzer Mirror.
+// • Closure-Respect: flow.mood_prompt / recommend_end → Leitfrage unterdrückt, Mood-Phase.
+// • Worker-Chips ONLY: nutzt answer_helpers (sanitisiert, max 3). KEINE abgeleiteten Heuristik-Chips.
+// • Error-Path ruhig: BottomSheet mit „Nochmal senden“; kein generisches Debug-Toast.
 // • talk[] optional, Safety bei risk_level mild/high.
-// • Keine Snackbars/Undo; Haptik + milchige Bestätigungsleiste.
 // • Footer-Disclaimer bleibt sichtbar.
 // • [GUARD] Mood-Guard: Picker max. 1× pro Runde, keine Doppel-Öffnungen.
+// • NEU (CH): Bei Risiko werden Schweizer Hilfenummern angezeigt (143/147/144/112/117) –
+//   als milder Safety-Text + eigene Card mit Call-Buttons (SwissHotlineCard).
 //
 // -----------------------------------------------------------------------------
 library reflection_screen;
@@ -21,7 +28,7 @@ import 'dart:math';
 
 import '../../services/guidance/dtos.dart';
 
-import 'package:flutter/services.dart'; // KeyEvent
+import 'package:flutter/services.dart'; // KeyEvent, Haptik
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -55,6 +62,10 @@ import '../../services/guidance_service.dart';
 import '../../services/speech_service.dart';
 import '../../services/core/api_service.dart'; // Mood speichern
 
+// CH Hotlines (Call-Buttons) + Launcher-Utilities
+import '../../widgets/hotline_widget.dart'; // SwissHotlineCard / Section
+import '../../shared/launching.dart'; // (nicht direkt hier genutzt; in Card verwendet)
+
 // Parts
 part 'reflection_models.dart';
 part 'reflection_widgets.dart';
@@ -73,9 +84,6 @@ const int kInputHardLimit = 800;
 const Duration _animShort = Duration(milliseconds: 240);
 const Duration _netTimeout = Duration(seconds: 18);
 const double _inputReserve = 104;
-
-// Abgeleitete Chips: sanft nach kurzer Pause
-const Duration _chipsDelay = Duration(milliseconds: 2400);
 
 // ---------------- Optionaler Hook + Navigation --------------------------------
 typedef AddToGedankenbuch = void Function(
@@ -139,11 +147,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
   _ChipMode _chipMode = _ChipMode.starter;
   bool _textWasEmpty = true;
 
-  // Derived Chips
-  Timer? _chipsTimer;
-  List<String> _questionDerivedHelpers = const <String>[];
-  String _lastQuestionNorm = '';
-
   // ---------------- NEW: Save→Mood Flow State --------------------------------
   bool _showConfirmBanner = false;
   String _confirmText =
@@ -151,7 +154,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
 
   // ---------------- [GUARD] Mood Prompt Guards -------------------------------
   bool _didPromptMood = false; // wurde für diese Runde schon aktiv gefragt?
-  bool _isMoodOpen = false;    // ist der Picker aktuell offen?
+  bool _isMoodOpen = false; // ist der Picker aktuell offen?
 
   @override
   void initState() {
@@ -208,7 +211,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     _pageFocus.dispose();
     _listCtrl.dispose();
     _fadeSlideCtrl.dispose(); // sicher, da in initState erzeugt
-    _cancelChipsTimer();
     super.dispose();
   }
 
@@ -288,7 +290,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
         _current!.steps.last.answer = text;
         _controller.clear();
         _chipMode = _ChipMode.none;
-        _clearDerivedChips();
       });
       _scrollToBottom();
       _focusInput();
@@ -361,7 +362,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     setState(() {
       loading = true;
       _chipMode = _ChipMode.none;
-      _clearDerivedChips();
       // [GUARD] neue Runde → Guards zurücksetzen
       _didPromptMood = false;
       _isMoodOpen = false;
@@ -398,10 +398,18 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       } on TimeoutException {
         if (!mounted) return;
         _handleTurnError(round);
+        _showRetryError(_errorHint, () {
+          if (!mounted) return;
+          unawaited(_startNewReflection(userText: userText, mode: mode));
+        });
         return;
       } catch (_) {
         if (!mounted) return;
         _handleTurnError(round);
+        _showRetryError(_errorHint, () {
+          if (!mounted) return;
+          unawaited(_startNewReflection(userText: userText, mode: mode));
+        });
         return;
       }
 
@@ -424,8 +432,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
             (step.expectsAnswer || hasHelpers) ? _ChipMode.answer : _ChipMode.none;
       });
 
-      _scheduleDerivedChipsIfNeeded(round.steps.last,
-          closureActive: round.allowClosure);
       _fadeSlideCtrl.forward(from: 0);
       _scrollToBottom();
       _focusInput();
@@ -501,12 +507,20 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     } on TimeoutException {
       if (!mounted) return;
       setState(() => loading = false);
-      _toast(_errorHint);
+      _showRetryError(_errorHint, () {
+        if (!mounted) return;
+        unawaited(_continueReflectionFromWorker(
+            round: round, userAnswer: userAnswer));
+      });
       return;
     } catch (_) {
       if (!mounted) return;
       setState(() => loading = false);
-      _toast(_errorHint);
+      _showRetryError(_errorHint, () {
+        if (!mounted) return;
+        unawaited(_continueReflectionFromWorker(
+            round: round, userAnswer: userAnswer));
+      });
       return;
     }
 
@@ -531,9 +545,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
           (step.expectsAnswer || hasHelpers) ? _ChipMode.answer : _ChipMode.none;
     });
 
-    _scheduleDerivedChipsIfNeeded(step,
-        closureActive: _current?.allowClosure ?? false);
-
     _fadeSlideCtrl.forward(from: 0);
     _scrollToBottom();
     _focusInput();
@@ -555,7 +566,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
   }
 
   void _handleTurnError(ReflectionRound round) {
-    _toast(_errorHint);
+    // Ruhig bleiben, Mini-Mirror ohne Frage, keine Chips
     const fallbackMirror = 'Ich höre dich. Ich bleibe bei dir.';
     final step = _PandaStep(
       mirror: _capChars(fallbackMirror, kMirrorMaxChars),
@@ -568,7 +579,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       round.steps.add(step);
       round.allowClosure = false;
       _chipMode = _ChipMode.none;
-      _clearDerivedChips();
     });
     _fadeSlideCtrl.forward(from: 0);
     _scrollToBottom();
@@ -583,6 +593,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
 
     final mirrorRaw = _coerceMirror(t).trim();
     final questionRaw = _coerceQuestion(t);
+    final helperSuggestion = _coerceHelperSuggestion(t);
 
     final level = _safeString(t, ['risk_level']).toLowerCase();
     final risk = _safeBool(t, ['risk']) || level == 'high' || level == 'mild';
@@ -605,6 +616,8 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       talkLines: talk,
       risk: risk,
       followups: helpers,
+      helperSuggestion:
+          helperSuggestion.isNotEmpty ? helperSuggestion : null,
     );
   }
 
@@ -624,15 +637,15 @@ class _ReflectionScreenState extends State<ReflectionScreen>
 
     // Mood fehlt → Picker öffnen (einmalig, mit Guard)
     if (!r.hasMood) {
-      if (_isMoodOpen) return;        // [GUARD]
-      _isMoodOpen = true;             // [GUARD]
+      if (_isMoodOpen) return; // [GUARD]
+      _isMoodOpen = true; // [GUARD]
       final chosen = await showPandaMoodPicker(
         context,
         title: 'Wie fühlst du dich gerade?',
       );
-      _isMoodOpen = false;            // [GUARD]
-      if (chosen == null) return;     // User abgebrochen
-      _didPromptMood = true;          // [GUARD] – Mood wurde entschieden
+      _isMoodOpen = false; // [GUARD]
+      if (chosen == null) return; // User abgebrochen
+      _didPromptMood = true; // [GUARD] – Mood wurde entschieden
 
       final score = _scoreForMoodLocal(chosen);
       final label = chosen.labelDe;
@@ -727,7 +740,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     // Falls nun keine Runden mehr → zurück zu Starterchips
     setState(() {
       _chipMode = _rounds.isEmpty ? _ChipMode.starter : _ChipMode.none;
-      _clearDerivedChips();
     });
     _toast('Gelöscht.');
   }
@@ -771,8 +783,11 @@ class _ReflectionScreenState extends State<ReflectionScreen>
 
     setState(() => loading = false);
 
+    // Wenn kein Text vom Worker: direkt in die Mood-Phase wechseln
     if (closure.isEmpty) {
-      round.allowClosure = true;
+      setState(() {
+        round.allowClosure = true;
+      });
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         _maybeAskMood(context,
@@ -781,17 +796,18 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       return;
     }
 
-    final _PandaStep closureStep = _PandaStep(
-      mirror: _capChars(closure, kMirrorMaxChars),
-      question: '',
-      talkLines: const <String>[],
-      risk: risk || (round.steps.isNotEmpty ? round.steps.last.risk : false),
-    );
-
+    // → Intro-Bubble befüllen, keine zusätzliche Panda-Karte
     setState(() {
-      round.steps.add(closureStep);
+      round.moodIntro = _capChars(closure, kMirrorMaxChars);
       round.allowClosure = true;
-      _clearDerivedChips();
+      // Safety-Flag: falls Worker hier Risiko meldet, in letzter Step-Card mitschwingen lassen
+      if (round.steps.isNotEmpty) {
+        final last = round.steps.last;
+        if (risk && !last.risk) {
+          round.steps[round.steps.length - 1] =
+              last.copyWith(risk: true);
+        }
+      }
     });
     _fadeSlideCtrl.forward(from: 0);
     _scrollToBottom();
@@ -881,6 +897,33 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     return '';
   }
 
+  String _coerceHelperSuggestion(dynamic t) {
+    // tolerant: top-level und innerhalb von primary/flow prüfen
+    String pick(dynamic obj) {
+      final s1 = _safeString(obj, ['helper_suggestion']).trim();
+      if (s1.isNotEmpty) return s1;
+      final s2 = _safeString(obj, ['helperSuggestion']).trim();
+      return s2;
+    }
+
+    final top = pick(t);
+    if (top.isNotEmpty) return top;
+
+    final primary = _extract(t, 'primary');
+    if (primary != null) {
+      final p = pick(primary);
+      if (p.isNotEmpty) return p;
+    }
+
+    final flow = _extract(t, 'flow');
+    if (flow != null) {
+      final f = pick(flow);
+      if (f.isNotEmpty) return f;
+    }
+
+    return '';
+  }
+
   // Answer-Helpers (keine Fragen!)
   List<String> _coerceAnswerHelpers(dynamic t) {
     List<String> acc = [];
@@ -921,120 +964,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     if (s.length > 72) s = '${s.substring(0, 72).trimRight()}…';
     s = s.replaceAll(RegExp(r'[.。]+$'), '').trim();
     return s;
-  }
-
-  // ---------------- Derived Chips from Question ------------------------------
-  void _scheduleDerivedChipsIfNeeded(_PandaStep lastStep,
-      {required bool closureActive}) {
-    final q = lastStep.question.trim();
-    final hasWorkerHelpers = lastStep.followups.isNotEmpty;
-    final expects = lastStep.expectsAnswer;
-
-    if (closureActive || !expects || q.isEmpty || hasWorkerHelpers) {
-      _clearDerivedChips();
-      return;
-    }
-
-    final norm = normalizeForCompare(q);
-    if (norm == _lastQuestionNorm && _questionDerivedHelpers.isNotEmpty) {
-      return;
-    }
-
-    _cancelChipsTimer();
-    _lastQuestionNorm = norm;
-    _chipsTimer = Timer(_chipsDelay, () {
-      if (!mounted) return;
-      final r = _current;
-      if (r == null || r.steps.isEmpty) return;
-      final currentLast = r.steps.last;
-      final stillSameQ =
-          normalizeForCompare(currentLast.question.trim()) == _lastQuestionNorm;
-      final stillNoWorkerHelpers = currentLast.followups.isEmpty;
-      final stillExpects = currentLast.expectsAnswer;
-      final stillNotClosure = !r.allowClosure;
-
-      if (stillSameQ &&
-          stillNoWorkerHelpers &&
-          stillExpects &&
-          stillNotClosure) {
-        setState(() {
-          _questionDerivedHelpers = _chipsFromQuestion(currentLast.question);
-          _chipMode = _ChipMode.answer;
-        });
-      }
-    });
-  }
-
-  void _clearDerivedChips() {
-    _questionDerivedHelpers = const <String>[];
-    _lastQuestionNorm = '';
-    _cancelChipsTimer();
-  }
-
-  void _cancelChipsTimer() {
-    _chipsTimer?.cancel();
-    _chipsTimer = null;
-  }
-
-  List<String> _chipsFromQuestion(String qRaw) {
-    final q = qRaw.toLowerCase();
-
-    String e(String s) {
-      var x = s.trim();
-      if (!x.endsWith('…')) x = '$x …';
-      if (!x.endsWith('… ')) x = '$x ';
-      return x;
-    }
-
-    if (q.contains('welcher aspekt')) {
-      return [
-        e('Besonders herausfordernd war'),
-        e('Der Aspekt, der herausstach, war'),
-        e('Am meisten gewogen hat')
-      ];
-    }
-    if (q.startsWith('was ist dir') || q.contains('was ist dir')) {
-      return [
-        e('Wichtig ist mir'),
-        e('Im Kern geht es mir um'),
-        e('Gerade zählt für mich')
-      ];
-    }
-    if (q.contains('druck rausnehmen') || q.contains('druck raus nehmen')) {
-      return [
-        e('Druck rausnehmen kann ich bei'),
-        e('Ich lasse heute weg'),
-        e('Gut täte mir')
-      ];
-    }
-    if (q.contains('woran würdest du merken')) {
-      return [
-        e('Ich würde merken, dass es leichter ist, wenn'),
-        e('Ein kleines Zeichen wäre'),
-        e('Im Alltag würde ich sehen')
-      ];
-    }
-    if (q.contains('kleiner nächster schritt') ||
-        q.contains('kleinen nächsten schritt')) {
-      return [
-        e('Ein kleiner nächster Schritt wäre'),
-        e('Machbar wäre'),
-        e('Ich fange an mit')
-      ];
-    }
-    if (q.contains('worum geht es dir im kern') || q.contains('im kern')) {
-      return [
-        e('Im Kern geht es um'),
-        e('Mir wäre wichtig, dass'),
-        e('Ein ruhiger erster Schritt wäre')
-      ];
-    }
-
-    return [
-      e('Mir ist wichtig'),
-      e('Im Kern geht es um'),
-      e('Ein kleiner nächster Schritt wäre')
-    ];
   }
 
   // ---------------- Utils -----------------------------------------------------
@@ -1109,7 +1038,56 @@ class _ReflectionScreenState extends State<ReflectionScreen>
 
   void _focusInput() => FocusScope.of(context).requestFocus(_inputFocus);
 
-  // Silent "Toast" – keine Snackbars mehr
+  // Ruhiger „Retry“-BottomSheet
+  void _showRetryError(String msg, VoidCallback onRetry) {
+    if (!mounted) return;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (_) => SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 18),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.cloud_off_rounded,
+                  color: Colors.black.withOpacity(.65)),
+              const SizedBox(height: 10),
+              Text(
+                (msg.isNotEmpty ? msg : 'Verbindung gerade schwierig.'),
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  ZenOutlineButton(
+                    label: 'Später',
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                  const SizedBox(width: 8),
+                  ZenPrimaryButton(
+                    label: 'Nochmal senden',
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                      onRetry();
+                    },
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Silent "Toast" – dezentes Haptic + Log
   void _toast(String msg) {
     debugPrint('[Reflection] $msg');
     HapticFeedback.selectionClick();
@@ -1148,7 +1126,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                   height: 4,
                   margin: const EdgeInsets.only(bottom: 12),
                   decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: .12),
+                    color: Colors.black.withOpacity(.12),
                     borderRadius: BorderRadius.circular(99),
                   ),
                 ),
@@ -1218,21 +1196,21 @@ class _ReflectionScreenState extends State<ReflectionScreen>
 
     final bool showStarter = _rounds.isEmpty && _chipMode == _ChipMode.starter;
 
+    // Nur Worker-Chips (keine Client-Heuristiken)
     final bool showAnswerChips = !closureActive &&
-        (r != null &&
-            r.steps.isNotEmpty &&
-            (r.steps.last.followups.isNotEmpty ||
-                _questionDerivedHelpers.isNotEmpty)) &&
+        (r != null && r.steps.isNotEmpty && r.steps.last.followups.isNotEmpty) &&
         _chipMode == _ChipMode.answer;
 
-    final List<String> answerTemplates = showAnswerChips
-        ? (r!.steps.last.followups.isNotEmpty
-            ? r.steps.last.followups
-            : _questionDerivedHelpers)
-        : ((!closureActive && (r?.hasPendingQuestion ?? false)) &&
-                _chipMode == _ChipMode.answer)
-            ? _fallbackAnswerHelpers()
-            : (showStarter ? _starterChips() : const <String>[]);
+    // --- Chip-Quellen
+    final List<String> _rawTemplates = showAnswerChips
+        ? r!.steps.last.followups
+        : (showStarter ? _starterChips() : const <String>[]);
+
+    // Sanfter, modell-freundlicher Filter (kein Erfinden)
+    final lastQ = r?.steps.isNotEmpty == true ? r!.steps.last.question : '';
+    final lastA = r?.steps.isNotEmpty == true ? (r!.steps.last.answer ?? '') : '';
+    final List<String> answerTemplates =
+        _refineChips(_rawTemplates, question: lastQ, lastAnswer: lastA);
 
     final bool canPermanentSave =
         r != null && r.answered && (r.entryId == null);
@@ -1309,7 +1287,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                                   ),
                                 ),
 
-                              // Verlauf
+                              // Verlauf (mit CH-Risk-Actions unter der Runde)
                               for (int index = 0;
                                   index < _rounds.length;
                                   index++)
@@ -1317,12 +1295,18 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                                   key: ValueKey(_rounds[index].id),
                                   child: Builder(
                                     builder: (_) {
-                                      final child = _RoundThread(
+                                      final isLast = index == _rounds.length - 1;
+                                      final isTyping = isLast && lastIsTyping;
+                                      final hasRisk = _rounds[index]
+                                              .steps
+                                              .isNotEmpty &&
+                                          _rounds[index].steps.last.risk;
+
+                                      final thread = _RoundThread(
                                         maxWidth: cardMaxW,
                                         round: _rounds[index],
-                                        isLast: index == _rounds.length - 1,
-                                        isTyping: index == _rounds.length - 1 &&
-                                            lastIsTyping,
+                                        isLast: isLast,
+                                        isTyping: isTyping,
                                         // Rundeninterner Save (weiterhin erlaubt)
                                         onSave: _rounds[index].answered
                                             ? () => _onPressSaveRound(
@@ -1341,21 +1325,35 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                                           });
                                           await _saveRoundCore(_rounds[index]);
                                         },
-                                        safetyText: _rounds[index]
-                                                    .steps
-                                                    .isNotEmpty &&
-                                                _rounds[index]
-                                                    .steps
-                                                    .last
-                                                    .risk
+                                        safetyText: hasRisk
                                             ? _emergencyHint(context)
                                             : null,
                                       );
 
-                                      if (index != _rounds.length - 1) {
-                                        return child;
+                                      // Darunter (falls Risiko) CH-Call-Card einblenden
+                                      final threadWithRisk = Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.stretch,
+                                        children: [
+                                          thread,
+                                          if (hasRisk) ...[
+                                            const SizedBox(height: 6),
+                                            Center(
+                                              child: ConstrainedBox(
+                                                constraints: BoxConstraints(
+                                                    maxWidth: cardMaxW),
+                                                child: const SwissHotlineCard(),
+                                              ),
+                                            ),
+                                          ],
+                                        ],
+                                      );
+
+                                      if (!isLast) {
+                                        return threadWithRisk;
                                       }
 
+                                      // Sanftes Appear nur für letzte Runde
                                       return FadeTransition(
                                         opacity: _fadeSlideCtrl
                                             .drive(Tween(begin: 0.0, end: 1.0)),
@@ -1366,7 +1364,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                                               end: Offset.zero,
                                             ),
                                           ),
-                                          child: child,
+                                          child: threadWithRisk,
                                         ),
                                       );
                                     },
@@ -1462,7 +1460,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                                             ?.copyWith(
                                               height: 1.25,
                                               color: Colors.black
-                                                  .withValues(alpha: 0.72),
+                                                  .withOpacity(0.72),
                                             ),
                                       ),
                                     ),
@@ -1560,11 +1558,60 @@ class _ReflectionScreenState extends State<ReflectionScreen>
         'Etwas beschäftigt mich seit Tagen … ',
       ];
 
-  List<String> _fallbackAnswerHelpers() => const [
-        'Ich merke gerade, dass … ',
-        'Der schwierigste Moment war … ',
-        'Ein kleiner nächster Schritt wäre … ',
-      ];
+  // --- Chip Refinement (sanft, modell-freundlich; keine Erfindungen) ---------
+  final _kBannedStarters = <RegExp>[
+    RegExp(r'^\s*mir ist wichtig\b', caseSensitive: false),
+    RegExp(r'^\s*im kern geht es\b', caseSensitive: false),
+    RegExp(r'^\s*ein(?:er)?\s+kleiner\s+nächster\s+schritt\b', caseSensitive: false),
+    RegExp(r'^\s*es fühlt sich an wie\b', caseSensitive: false),
+  ];
+
+  String _ensureEllipsisSuffix(String s) {
+    var t = s
+        .trim()
+        .replaceAll(RegExp(r'[?。？？]+$'), '')
+        .replaceAll(RegExp(r'\.\s*$'), '');
+    if (t.endsWith('… ')) return t;
+    if (t.endsWith('…')) return '$t ';
+    return '$t … ';
+  }
+
+  List<String> _refineChips(
+    List<String> chips, {
+    required String question,
+    String lastAnswer = '',
+  }) {
+    final qTokens =
+        question.toLowerCase().split(RegExp(r'[^a-zäöüß0-9]+')).where((w) => w.length >= 3).toSet();
+    final aTokens =
+        lastAnswer.toLowerCase().split(RegExp(r'[^a-zäöüß0-9]+')).where((w) => w.length >= 3).toSet();
+    final anchors = {...qTokens, ...aTokens};
+
+    bool looksInAxis(String t) {
+      if (anchors.isEmpty) return true;
+      final toks =
+          t.toLowerCase().split(RegExp(r'[^a-zäöüß0-9]+')).where((w) => w.length >= 3);
+      return toks.any(anchors.contains);
+    }
+
+    final seen = <String>{};
+    final kept = <String>[];
+
+    for (var raw in chips) {
+      var s = raw.trim();
+      if (s.isEmpty) continue;
+      if (_kBannedStarters.any((re) => re.hasMatch(s))) continue;
+      if (!looksInAxis(s)) continue;
+      final key = s.toLowerCase();
+      if (!seen.add(key)) continue;
+      kept.add(_ensureEllipsisSuffix(s));
+      if (kept.length >= 3) break;
+    }
+
+    return kept.isNotEmpty
+        ? kept
+        : chips.map(_ensureEllipsisSuffix).take(3).toList();
+  }
 
   void _onTapChip(String text, {required bool isAnswerTemplate}) {
     final original = text;
@@ -1595,9 +1642,8 @@ class _ReflectionScreenState extends State<ReflectionScreen>
   }
 
   String _emergencyHint(BuildContext context) {
-    return 'Wenn es sich akut belastend anfühlt: Sprich mit jemandem, '
-        'dem du vertraust. In Notfällen wende dich sofort an lokale '
-        'Hilfsangebote oder den Notruf.';
+    // Straff: nur 144 & 112 im Text (Details in SwissHotlineCard darunter).
+    return 'Wenn es sich akut belastend anfühlt: In Notfällen rufe sofort 144 (Rettungsdienst) oder 112.';
   }
 
   // ---------------- JSON-safe helpers ----------------------------------------
@@ -1671,10 +1717,10 @@ class _ReflectionScreenState extends State<ReflectionScreen>
   }) async {
     if (!moodPrompt) return;
     if (!mounted) return;
-    if (round.hasMood) return;     // Mood schon gesetzt → nichts tun
+    if (round.hasMood) return; // Mood schon gesetzt → nichts tun
     if (_didPromptMood || _isMoodOpen) return; // [GUARD]
 
-    _isMoodOpen = true;            // [GUARD]
+    _isMoodOpen = true; // [GUARD]
     final title =
         afterClosure ? 'Wie fühlst du dich jetzt?' : 'Wie fühlst du dich gerade?';
 
@@ -1682,7 +1728,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       context,
       title: title,
     );
-    _isMoodOpen = false;           // [GUARD]
+    _isMoodOpen = false; // [GUARD]
     if (chosen == null) return;
 
     final score = _scoreForMoodLocal(chosen);
@@ -1692,7 +1738,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     setState(() {
       round.moodScore = score;
       round.moodLabel = label;
-      _didPromptMood = true;       // [GUARD]
+      _didPromptMood = true; // [GUARD]
     });
 
     // Best-effort Speichern (kein Snackbar, keine Navigation)
@@ -1745,14 +1791,14 @@ class _CalmGlassBanner extends StatelessWidget {
       margin: const EdgeInsets.symmetric(horizontal: 16),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: .20),
+        color: Colors.white.withOpacity(.20),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withValues(alpha: .22)),
+        border: Border.all(color: Colors.white.withOpacity(.22)),
         boxShadow: [
           BoxShadow(
             blurRadius: 20,
             offset: const Offset(0, 8),
-            color: Colors.black.withValues(alpha: .10),
+            color: Colors.black.withOpacity(.10),
           ),
         ],
       ),

@@ -574,6 +574,24 @@ extension JournalEntryUiCompatX on JournalEntry {
   /// Framework-freier Badge: Label + Icon-Key (UI mappt Key → IconData).
   ({String label, String iconKey}) get badge =>
       (label: kind.labelDe, iconKey: kind.iconKey);
+
+  /// Menschenlesbares Mood-Label, falls in den Tags vorhanden (z. B. "mood:glücklich").
+  /// Gibt `''` zurück, wenn nichts gesetzt ist.
+  String get moodLabel {
+    for (final raw in tags) {
+      final s = raw.trim();
+      if (s.isEmpty) continue;
+      final lower = s.toLowerCase();
+      if (lower.startsWith('mood:')) {
+        final idx = s.indexOf(':');
+        if (idx >= 0 && idx + 1 < s.length) {
+          final v = s.substring(idx + 1).trim();
+          if (v.isNotEmpty) return v;
+        }
+      }
+    }
+    return '';
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

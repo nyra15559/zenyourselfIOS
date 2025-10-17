@@ -3,6 +3,7 @@ description: ZenYourself App mit Sprach-Input und GPT-Antwort
 publish_to: "none"
 version: 1.0.0+1
 
+# Dart/Flutter Basis – passt zu Flutter ≥3.19 (Dart 3.3)
 environment:
   sdk: ">=3.3.0 <4.0.0"
 
@@ -37,10 +38,11 @@ dependencies:
 
   # ---- Device / Permissions / Notifications --------------------------
   permission_handler: ^11.3.0
-  flutter_local_notifications: ^19.0.0
+  flutter_local_notifications: ^19.0.0    # Falls dein Flutter älter ist, ggf. auf ^17.x pinnen (siehe Kommentar unten)
 
   # ---- Utilities ------------------------------------------------------
-  share_plus: ^11.0.0
+  url_launcher: ^6.3.0                   # <— für tel: und https:, nötig für CH-Hotlines
+  share_plus: ^11.0.0                    # Bei sehr alter Flutter-SDK ggf. ^10.0.2 verwenden
   speech_to_text: ^7.2.0
   flutter_dotenv: ^5.0.2
   screenshot: ^3.0.0
@@ -58,7 +60,13 @@ dev_dependencies:
   # ---- App-Icon Generator --------------------------------------------
   flutter_launcher_icons: ^0.13.1
 
-# App-Icons (Profi: adaptive + monochrome + iOS Alpha-Removal)
+# OPTIONAL: Falls der Pub-Solver wegen älterer Flutter-Channel-Versionen streikt,
+# kannst du temporär pins setzen (eine von beiden Zeilen auskommentieren/aktivieren):
+# dependency_overrides:
+#   share_plus: ^10.0.2
+#   flutter_local_notifications: ^17.2.0
+
+# App-Icons (Pro: adaptive + monochrome + iOS Alpha-Removal)
 flutter_launcher_icons:
   android: true
   ios: true
@@ -112,7 +120,7 @@ flutter:
     - assets/teich.png
     - assets/tempel.png
     - assets/welcomescreen.png
-    - assets/woleknhimmel.png  # Schreibweise prüfen, sonst anpassen
+    - assets/woleknhimmel.png   # Schreibweise prüfen – falls Datei 'wolkenhimmel.png' heißt, hier anpassen
     - assets/wolken.png
     - assets/zweiwege.png
     - assets/panda-header.png
@@ -123,7 +131,7 @@ flutter:
     - assets/bg/bg_reflection.png
     - assets/star_pa.png
 
-    # Ordner komplett einbinden:
+    # Ordner komplett:
     - assets/audio/
     - assets/panda_moods/
 
@@ -133,8 +141,8 @@ flutter:
         - asset: assets/fonts/NotoSans-Regular.ttf
 
     # ZenKalligrafie vorläufig auf NotoSans aliasiert, damit der Build nie
-    # an einer fehlenden Datei scheitert. Wenn vorhanden, diese Zeile durch
-    # assets/fonts/ZenKalligrafie-Regular.ttf ersetzen.
+    # an einer fehlenden Datei scheitert. Wenn vorhanden, ersetze den Pfad
+    # durch assets/fonts/ZenKalligrafie-Regular.ttf
     - family: ZenKalligrafie
       fonts:
         - asset: assets/fonts/NotoSans-Regular.ttf

@@ -1,31 +1,23 @@
 // lib/features/journal/journal_screen.dart
 //
-// JournalScreen — Oxford-Zen Timeline (Phase 2.8 • Parität + sanftes Pull-to-refresh)
-// -----------------------------------------------------------------------------------
-// • Nutzt JournalEntriesProvider (Filter + Soft-Hide) und JournalEntry.
-// • Tages-Gruppierung (lokale Zeit) + ruhige Timeline mit Panda-Header.
-// • Zentrierte Filter-Pille: Alle / Tagebuch / Reflexion / Kurzgeschichte (Counts).
-// • Card: features/journal/widgets/journal_entry_card.dart
-// • Aktionen: Öffnen, Erneut reflektieren (nur Reflexion), Ausblenden, Löschen.
-// • Crash-Fix: KEIN IntrinsicHeight mehr (Timeline-Reihe via Stack/Align).
-// • FAB („+“) kontextsensitiv, optisch beruhigt (Deep Sage).
-// • Pull-to-refresh → provider.restore() (falls Persistence-Hooks gesetzt).
+// JournalScreen — Oxford-Zen Timeline (Filterchips + Counts, Tages-Gruppierung)
+// -----------------------------------------------------------------------------
+// • Filter-Pille oben: Alle / Tagebuch / Reflexion / Kurzgeschichte (mit Counts)
+// • Tages-Gruppierung (lokale Zeit) — „Heute“, „Gestern“, sonst TT.MM.JJJJ
+// • Ruhige Abstände, konstante Max-Width, viele consts/Keys für Leistung
+// • Aktionen ausschließlich im „…“-Menü der Card (keine Inline-CTAs)
+// • Nur Color.withValues(alpha: …); keine withOpacity(..)
+// • Keine Breaking Changes (Provider-/Model-APIs unverändert)
 //
-// In diesem Patch (Parität zum Viewer):
-// • _openViewer: Story wird korrekt als Story angezeigt (Header, Badge, Volltext).
-// • Übergabe der Story-Felder (title/teaser/body) an JournalEntryView.
-// • Kommentare/Benennung aufgeräumt; keine Verhaltensänderung außerhalb des Fixes.
-//
-// Technische Notizen:
-// • Bei ZenAppBar/Backdrop KEINE const verwenden (intern dynamisch).
-// • Color.withOpacity(...) statt withValues(...).
+// Hinweise:
+// • Kein IntrinsicHeight in der Timeline-Reihe (stabil, performant)
+// • Pull-to-refresh -> provider.restore() (no-op, wenn nicht implementiert)
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
-import '../../shared/zen_style.dart' as zs
-    hide ZenBackdrop, ZenGlassCard, ZenAppBar;
+import '../../shared/zen_style.dart' as zs hide ZenBackdrop, ZenGlassCard, ZenAppBar;
 import '../../shared/ui/zen_widgets.dart' as zw
     show ZenBackdrop, ZenGlassCard, ZenAppBar, PandaHeader, ZenToast;
 
@@ -36,10 +28,28 @@ import 'widgets/journal_entry_card.dart';
 import 'journal_entry_view.dart' as jv;
 import '../reflection/reflection_screen.dart';
 
-class JournalScreen extends StatelessWidget {
+class JournalScreen extends StatefulWidget {
   const JournalScreen({super.key});
 
   static const double _maxContentWidth = 820;
+
+  @override
+  State<JournalScreen> createState() => _JournalScreenState();
+}
+
+class _JournalScreenState extends State<JournalScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // Beim Öffnen Filter sicher auf „Alle“ zurücksetzen
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final p = context.read<jp.JournalEntriesProvider?>();
+      if (p == null) return;
+      try {
+        p.setFilter(jp.JournalFilterKind.all);
+      } catch (_) {}
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -104,7 +114,7 @@ class JournalScreen extends StatelessWidget {
             child: Padding(
               padding: EdgeInsets.only(top: isMobile ? 20 : 36, bottom: 12),
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: _maxContentWidth),
+                constraints: const BoxConstraints(maxWidth: JournalScreen._maxContentWidth),
                 child: isEmpty
                     ? _wrapRefresh(
                         context: context,
@@ -201,7 +211,11 @@ class JournalScreen extends StatelessWidget {
               OutlinedButton.icon(
                 icon: const Icon(Icons.add_rounded),
                 label: Text(_ctaLabelFor(activeFilter)),
-                onPressed: () => _startNewEntry(context, provider),
+                onPressed: () {
+                  // Falls Empty-State im falschen Filter, neutralisieren
+                  try { provider.setFilter(jp.JournalFilterKind.all); } catch (_) {}
+                  _startNewEntry(context, provider);
+                },
               ),
             ],
           ),
@@ -284,6 +298,7 @@ class JournalScreen extends StatelessWidget {
 
         final group = groups[i - 3];
         return Column(
+          key: ValueKey('group-${group.dateOnly.millisecondsSinceEpoch}'),
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Padding(
@@ -299,6 +314,7 @@ class JournalScreen extends StatelessWidget {
                 showAbove: showAbove,
                 showBelow: showBelow,
                 child: JournalEntryCard(
+                  key: ValueKey('card-${e.id}'),
                   entry: e,
                   onTap: () => _openViewer(context, e),
                   onContinue: e.kind == jm.EntryKind.reflection
@@ -331,7 +347,7 @@ class JournalScreen extends StatelessWidget {
     final viewKind = switch (e.kind) {
       jm.EntryKind.journal    => jv.EntryKind.journal,
       jm.EntryKind.reflection => jv.EntryKind.reflection,
-      jm.EntryKind.story      => jv.EntryKind.story, // ← wichtig: Story bleibt Story
+      jm.EntryKind.story      => jv.EntryKind.story, // Story bleibt Story
     };
 
     await Navigator.of(context).push(
@@ -361,7 +377,6 @@ class JournalScreen extends StatelessWidget {
     );
   }
 
-  // Falls Story keinen expliziten Titel hat, fällt sauber auf e.title zurück.
   String? _storyTitleFor(jm.JournalEntry e) {
     final t = (e.storyTitle ?? '').trim();
     if (t.isNotEmpty) return t;
@@ -401,7 +416,9 @@ class JournalScreen extends StatelessWidget {
         );
         return;
       case jp.JournalFilterKind.story:
-        _showStoryStartSheet(context);
+        // Vor Story-Start Filter neutralisieren und Provider mitgeben
+        try { provider.setFilter(jp.JournalFilterKind.all); } catch (_) {}
+        _showStoryStartSheet(context, provider);
         return;
       case jp.JournalFilterKind.all:
         _showNewEntryChooser(context, provider);
@@ -521,7 +538,9 @@ class JournalScreen extends StatelessWidget {
               subtitle: const Text('Aus deinen Reflexionen generieren'),
               onTap: () {
                 Navigator.pop(ctx);
-                _showStoryStartSheet(context);
+                // Vor Story-Sheet Filter neutralisieren + Provider mitgeben
+                try { provider.setFilter(jp.JournalFilterKind.all); } catch (_) {}
+                _showStoryStartSheet(context, provider);
               },
             ),
           ],
@@ -530,7 +549,7 @@ class JournalScreen extends StatelessWidget {
     );
   }
 
-  void _showStoryStartSheet(BuildContext context) {
+  void _showStoryStartSheet(BuildContext context, jp.JournalEntriesProvider provider) {
     showModalBottomSheet(
       context: context,
       showDragHandle: true,
@@ -561,6 +580,8 @@ class JournalScreen extends StatelessWidget {
                   label: const Text('Reflexion starten'),
                   onPressed: () {
                     Navigator.pop(ctx);
+                    // Filter sicher auf „Alle“
+                    try { provider.setFilter(jp.JournalFilterKind.all); } catch (_) {}
                     Navigator.of(context).push(
                       MaterialPageRoute(builder: (_) => const ReflectionScreen()),
                     );
@@ -606,7 +627,7 @@ class JournalScreen extends StatelessWidget {
     return out;
   }
 
-  // ——— Local fallbacks for fehlende Model-Getter ———
+  // Fallbacks für fehlende Model-Getter — ohne Breaking Changes.
 
   String? _moodLabelOf(jm.JournalEntry e) {
     for (final t in e.tags) {
@@ -614,7 +635,6 @@ class JournalScreen extends StatelessWidget {
       if (s.toLowerCase().startsWith('mood:')) {
         final raw = s.substring(5).trim();
         if (raw.isEmpty) return null;
-        // Erster Buchstabe groß
         return raw[0].toUpperCase() + raw.substring(1);
       }
     }
@@ -690,8 +710,8 @@ class _FilterPill extends StatelessWidget {
               Text('$label ($count)'),
             ],
           ),
-          selectedColor: zs.ZenColors.sage.withOpacity(.22),
-          backgroundColor: zs.ZenColors.white.withOpacity(.18),
+          selectedColor: zs.ZenColors.sage.withValues(alpha: .22),
+          backgroundColor: zs.ZenColors.white.withValues(alpha: .18),
           showCheckmark: false,
           labelStyle: Theme.of(context).textTheme.labelMedium?.copyWith(
                 color: selected ? zs.ZenColors.deepSage : zs.ZenColors.jadeMid,
@@ -700,7 +720,7 @@ class _FilterPill extends StatelessWidget {
           side: BorderSide(
             color: selected
                 ? zs.ZenColors.deepSage
-                : zs.ZenColors.jadeMid.withOpacity(.22),
+                : zs.ZenColors.jadeMid.withValues(alpha: .22),
           ),
           shape: const StadiumBorder(),
         ),
@@ -725,7 +745,8 @@ class _DayHeader extends StatelessWidget {
 
   String _label(DateTime d) {
     final local = d.toLocal();
-    final today = DateTime.now();
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
     final yesterday = today.subtract(const Duration(days: 1));
     bool same(DateTime a, DateTime b) =>
         a.year == b.year && a.month == b.month && a.day == b.day;
@@ -746,10 +767,10 @@ class _DayHeader extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 10),
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(.66),
+            color: Colors.white.withValues(alpha: .66),
             borderRadius: const BorderRadius.all(zs.ZenRadii.m),
             border: Border.all(
-              color: zs.ZenColors.jadeMid.withOpacity(0.14),
+              color: zs.ZenColors.jadeMid.withValues(alpha: 0.14),
               width: 1,
             ),
             boxShadow: const [BoxShadow(color: Color(0x14000000), blurRadius: 8)],
@@ -843,7 +864,7 @@ class _RailPainter extends CustomPainter {
     }
 
     final dotPaint = Paint()
-      ..color = const Color(0xFF2F5F49).withOpacity(.28)
+      ..color = const Color(0xFF2F5F49).withValues(alpha: .28)
       ..style = PaintingStyle.fill
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 1.2);
     canvas.drawCircle(Offset(centerX, dotY), 4.8, dotPaint);

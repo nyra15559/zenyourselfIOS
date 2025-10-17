@@ -1,4 +1,4 @@
-package com.example.zenyourself_complete_ui_final
+package ch.zenyourself.app
 
 import io.flutter.embedding.android.FlutterActivity
 
