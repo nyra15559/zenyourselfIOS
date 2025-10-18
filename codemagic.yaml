@@ -47,20 +47,23 @@ workflows:
           : "${APP_STORE_CONNECT_ISSUER_ID:?Missing APP_STORE_CONNECT_ISSUER_ID}"
           : "${APP_STORE_CONNECT_KEY_IDENTIFIER:?Missing APP_STORE_CONNECT_KEY_IDENTIFIER}"
           : "${APP_STORE_CONNECT_PRIVATE_KEY:?Missing APP_STORE_CONNECT_PRIVATE_KEY}"
-      - name: Automatic code signing (fetch & apply)
-        script: |
-          keychain initialize
-          app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE \
-            --issuer-id "$APP_STORE_CONNECT_ISSUER_ID" \
-            --key-id "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
-            --private-key "$APP_STORE_CONNECT_PRIVATE_KEY" \
-            --create
-          keychain add-certificates
-          if [ -d ios/Runner.xcworkspace ]; then
-            xcode-project use-profiles --workspace ios/Runner.xcworkspace --scheme Runner
-          else
-            xcode-project use-profiles --project ios/Runner.xcodeproj --scheme Runner
-          fi
+- name: Automatic code signing (fetch & apply)
+  script: |
+    set -e
+    keychain initialize
+    app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE \
+      --issuer-id "$APP_STORE_CONNECT_ISSUER_ID" \
+      --key-id "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
+      --private-key "$APP_STORE_CONNECT_PRIVATE_KEY" \
+      --create
+    # .p12-Import nur, wenn vorhanden (bei Automatic Signing oft NICHT nötig)
+    if ls /Users/builder/Library/MobileDevice/Certificates/*.p12 1>/dev/null 2>&1; then
+      keychain add-certificates
+    else
+      echo "No .p12 found (OK for ASC auto-signing), skipping import"
+    fi
+    # Provisioning-Profile auf das Xcode-Projekt anwenden
+    xcode-project use-profiles --project ios/Runner.xcodeproj
       - name: Build signed IPA (release)
         script: |
           flutter build ipa --release --no-tree-shake-icons \
