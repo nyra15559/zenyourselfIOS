@@ -29,12 +29,7 @@ workflows:
       xcode: latest
       cocoapods: default
       groups:
-        # Codemagic env group with (secure+masked):
-        # APP_STORE_CONNECT_ISSUER_ID
-        # APP_STORE_CONNECT_KEY_IDENTIFIER
-        # APP_STORE_CONNECT_PRIVATE_KEY  (p8 content incl. BEGIN/END)
-        # CERTIFICATE_PRIVATE_KEY        (RSA PEM)
-        - appstore_connect
+        - appstore_connect   # has: APP_STORE_CONNECT_ISSUER_ID, APP_STORE_CONNECT_KEY_IDENTIFIER, APP_STORE_CONNECT_PRIVATE_KEY, CERTIFICATE_PRIVATE_KEY
       vars:
         BUNDLE_ID: ch.zenyourself.app
 
@@ -58,7 +53,7 @@ workflows:
         script: |
           set -e
           keychain initialize
-          # Bundle-ID ist *positionales* Argument, --key-id (nicht --key-identifier)
+          # Bundle-ID ist *positionales* Argument; --key-id (nicht --key-identifier)
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --type IOS_APP_STORE \
             --issuer-id "$APP_STORE_CONNECT_ISSUER_ID" \
@@ -83,8 +78,8 @@ workflows:
             --build-name=${CM_BUILD_NUMBER:-1.0.0} \
             --build-number=${CM_BUILD_NUMBER:-1}
 
-      # Fallback: Falls Flutter keine .ipa exportiert, exportieren wir aus dem .xcarchive
-      - name: Fallback export .xcarchive → .ipa (if missing)
+      # === Fallback: wenn Flutter keine .ipa erzeugt, exportiere aus dem .xcarchive ===
+      - name: Export from archive (fallback)
         script: |
           set -e
           if ! find build -type f -name "*.ipa" | grep -q .; then
