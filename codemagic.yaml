@@ -8,12 +8,12 @@ workflows:
       xcode: latest
       cocoapods: default
       groups:
-        # In Codemagic als Gruppe anlegen (z.B. "appstore_connect") und setzen:
+        # In Codemagic als Gruppe anlegen (z. B. "appstore_connect") und Variablen setzen:
         # APP_STORE_CONNECT_ISSUER_ID
         # APP_STORE_CONNECT_KEY_IDENTIFIER
-        # APP_STORE_CONNECT_PRIVATE_KEY   (kompletter .p8-Inhalt)
+        # APP_STORE_CONNECT_PRIVATE_KEY     (kompletter .p8-Inhalt)
         # EINES von beidem für Zertifikate:
-        #   CERTIFICATE_PRIVATE_KEY       (RSA PEM)  ODER
+        #   CERTIFICATE_PRIVATE_KEY         (RSA PEM)  ODER
         #   IOS_P12_BASE64 + IOS_P12_PASSWORD
         - appstore_connect
       vars:
@@ -30,9 +30,9 @@ workflows:
           : "${APP_STORE_CONNECT_KEY_IDENTIFIER:?Missing APP_STORE_CONNECT_KEY_IDENTIFIER}"
           : "${APP_STORE_CONNECT_PRIVATE_KEY:?Missing APP_STORE_CONNECT_PRIVATE_KEY}"
           if [ -n "${CERTIFICATE_PRIVATE_KEY:-}" ]; then
-            echo "🔐 Using CERTIFICATE_PRIVATE_KEY (RSA)"
+            echo "🔐 Using CERTIFICATE_PRIVATE_KEY (RSA PEM)"
           elif [ -n "${IOS_P12_BASE64:-}" ] && [ -n "${IOS_P12_PASSWORD:-}" ]; then
-            echo "🔐 Using IOS_P12_BASE64/IOS_P12_PASSWORD"
+            echo "🔐 Using IOS_P12_* (P12)"
           else
             echo "❌ Missing certs (RSA or P12)"; exit 2
           fi
@@ -41,6 +41,7 @@ workflows:
         script: |
           set -e
           keychain initialize
+
           if [ -n "${CERTIFICATE_PRIVATE_KEY:-}" ]; then
             app-store-connect fetch-signing-files "$BUNDLE_ID" \
               --type IOS_APP_STORE \
@@ -60,6 +61,7 @@ workflows:
               --private-key "$APP_STORE_CONNECT_PRIVATE_KEY" \
               --create --verbose
           fi
+
           keychain add-certificates
           xcode-project use-profiles --project ios/Runner.xcodeproj
 
@@ -94,6 +96,7 @@ workflows:
       - name: Build signed IPA (release)
         script: |
           set -e
+          # Eindeutige Buildnummer
           BN="${CM_BUILD_NUMBER:-${BUILD_NUMBER:-$(date +%Y%m%d%H%M)}}"
           flutter build ipa \
             --release \
@@ -146,8 +149,8 @@ workflows:
           set -e
           IPA_PATH="$(find build -type f -name '*.ipa' | head -n1)"
           [ -n "$IPA_PATH" ] || { echo "❌ No IPA found under build/"; find build -maxdepth 4 -type f -print; exit 1; }
+
           echo "🚀 Uploading (primary: Codemagic CLI)…"
-          UPLOAD_OK=0
           if app-store-connect publish \
               --issuer-id "$APP_STORE_CONNECT_ISSUER_ID" \
               --key-id "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
@@ -155,28 +158,28 @@ workflows:
               --path "$IPA_PATH" \
               --verbose; then
             echo "✅ Primary upload OK"
-            UPLOAD_OK=1
           else
             echo "⚠️  Primary upload failed — trying Fastlane fallback…"
-            cat >/tmp/asc_api_key.json <<JSON
-{
-  "key_id": "$APP_STORE_CONNECT_KEY_IDENTIFIER",
-  "issuer_id": "$APP_STORE_CONNECT_ISSUER_ID",
-  "key": "$APP_STORE_CONNECT_PRIVATE_KEY",
-  "in_house": false
-}
-JSON
+            # JSON per printf schreiben (kein Heredoc → YAML-sicher)
+            {
+              printf '{\n'
+              printf '  "key_id": "%s",\n'   "$APP_STORE_CONNECT_KEY_IDENTIFIER"
+              printf '  "issuer_id": "%s",\n' "$APP_STORE_CONNECT_ISSUER_ID"
+              # Multiline p8 sicher in JSON: Zeilenumbrüche werden von Fastlane akzeptiert
+              printf '  "key": "%s",\n'   "$(printf %s "$APP_STORE_CONNECT_PRIVATE_KEY" | sed ':a;N;$!ba;s/\n/\\n/g')"
+              printf '  "in_house": false\n'
+              printf '}\n'
+            } > /tmp/asc_api_key.json
+
             if fastlane run upload_to_testflight \
                 ipa:"$IPA_PATH" \
                 api_key_path:/tmp/asc_api_key.json \
                 skip_waiting_for_build_processing:true \
                 reject_build_waiting_for_review:true; then
               echo "✅ Fastlane upload OK"
-              UPLOAD_OK=1
+            else
+              echo "❌ Upload failed via both methods"; exit 1
             fi
-          fi
-          if [ "$UPLOAD_OK" -ne 1 ]; then
-            echo "❌ Upload failed via both methods"; exit 1
           fi
 
     artifacts:
