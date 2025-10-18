@@ -29,83 +29,132 @@ workflows:
       xcode: latest
       cocoapods: default
       groups:
-        # Secure+masked in Codemagic Gruppe "appstore_connect":
+        # In Codemagic als Gruppe (z.B. "appstore_connect") anlegen:
         # APP_STORE_CONNECT_ISSUER_ID
         # APP_STORE_CONNECT_KEY_IDENTIFIER
-        # APP_STORE_CONNECT_PRIVATE_KEY   (p8-Inhalt inkl. BEGIN/END)
-        # CERTIFICATE_PRIVATE_KEY         (RSA PEM)
+        # APP_STORE_CONNECT_PRIVATE_KEY     (kompletter .p8-Inhalt)
+        # EINES von beidem für Zertifikate:
+        #   CERTIFICATE_PRIVATE_KEY         (RSA PEM)  ODER
+        #   IOS_P12_BASE64 + IOS_P12_PASSWORD
         - appstore_connect
       vars:
+        # <<<<<<<< Stelle sicher, dass das zu deiner App passt
         BUNDLE_ID: ch.zenyourself.app
-
     scripts:
       - name: Flutter pub get
         script: flutter pub get
 
-      - name: Sanity verify ASC secrets
+      - name: Sanity verify ASC + cert secrets
         script: |
           set -e
           : "${APP_STORE_CONNECT_ISSUER_ID:?Missing APP_STORE_CONNECT_ISSUER_ID}"
           : "${APP_STORE_CONNECT_KEY_IDENTIFIER:?Missing APP_STORE_CONNECT_KEY_IDENTIFIER}"
           : "${APP_STORE_CONNECT_PRIVATE_KEY:?Missing APP_STORE_CONNECT_PRIVATE_KEY}"
-          : "${CERTIFICATE_PRIVATE_KEY:?Missing CERTIFICATE_PRIVATE_KEY}"
-          echo "p8 chars:  $(echo -n "$APP_STORE_CONNECT_PRIVATE_KEY" | wc -c)"
-          echo "rsa chars: $(echo -n "$CERTIFICATE_PRIVATE_KEY" | wc -c)"
-          echo "$APP_STORE_CONNECT_PRIVATE_KEY" | head -n1 | grep -q "BEGIN PRIVATE KEY"
-          echo "$CERTIFICATE_PRIVATE_KEY"       | head -n1 | grep -q "BEGIN RSA PRIVATE KEY"
+          echo "✅ ASC Keys vorhanden."
+          if [ -n "${CERTIFICATE_PRIVATE_KEY:-}" ]; then
+            echo "🗝️  CERTIFICATE_PRIVATE_KEY (RSA) gefunden."
+          elif [ -n "${IOS_P12_BASE64:-}" ] && [ -n "${IOS_P12_PASSWORD:-}" ]; then
+            echo "🗝️  IOS_P12_BASE64/IOS_P12_PASSWORD gefunden."
+          else
+            echo "❌ Weder CERTIFICATE_PRIVATE_KEY noch IOS_P12_* gesetzt."; exit 2
+          fi
 
       - name: Automatic code signing (fetch & apply)
         script: |
           set -e
           keychain initialize
-          # Bundle-ID ist positional; --key-id (nicht --key-identifier)
-          app-store-connect fetch-signing-files "$BUNDLE_ID" \
-            --type IOS_APP_STORE \
-            --issuer-id "$APP_STORE_CONNECT_ISSUER_ID" \
-            --key-id "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
-            --private-key "$APP_STORE_CONNECT_PRIVATE_KEY" \
-            --certificate-key "$CERTIFICATE_PRIVATE_KEY" \
-            --create \
-            --verbose
+
+          # Zertifikate einspielen (zwei Wege)
+          if [ -n "${CERTIFICATE_PRIVATE_KEY:-}" ]; then
+            echo "🔐 Verwende CERTIFICATE_PRIVATE_KEY (RSA PEM)."
+            app-store-connect fetch-signing-files "$BUNDLE_ID" \
+              --type IOS_APP_STORE \
+              --issuer-id "$APP_STORE_CONNECT_ISSUER_ID" \
+              --key-id "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
+              --private-key "$APP_STORE_CONNECT_PRIVATE_KEY" \
+              --certificate-key "$CERTIFICATE_PRIVATE_KEY" \
+              --create \
+              --verbose
+          else
+            echo "🔐 Importiere P12 & lade nur Provisioning Profiles."
+            echo "$IOS_P12_BASE64" | base64 --decode > /tmp/dist.p12
+            # In CM-Keychain importieren
+            KEYCHAIN_PATH="$(security default-keychain -d user | tr -d '"')"
+            security import /tmp/dist.p12 -P "$IOS_P12_PASSWORD" -A -k "$KEYCHAIN_PATH"
+            app-store-connect fetch-signing-files "$BUNDLE_ID" \
+              --type IOS_APP_STORE \
+              --issuer-id "$APP_STORE_CONNECT_ISSUER_ID" \
+              --key-id "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
+              --private-key "$APP_STORE_CONNECT_PRIVATE_KEY" \
+              --create \
+              --verbose
+          fi
+
           keychain add-certificates
           xcode-project use-profiles --project ios/Runner.xcodeproj
 
-      - name: Echo bundle id
-        script: echo "BUNDLE_ID=$BUNDLE_ID"
+      - name: Debug signing state
+        script: |
+          set -e
+          echo "🔎 Code signing identities:"; security find-identity -p codesigning -v || true
+          echo "🔎 Provisioning profiles:"; ls -l ~/Library/MobileDevice/Provisioning\ Profiles || true
+
+      - name: Create ExportOptions.plist (app-store-connect, automatic)
+        script: |
+          set -e
+          TEAM_ID="${APPLE_TEAM_ID:-${CM_APPLE_TEAM_ID:-${APP_STORE_CONNECT_TEAM_ID:-}}}"
+          cat >/tmp/ExportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>destination</key><string>export</string>
+            <key>compileBitcode</key><false/>
+            <key>stripSwiftSymbols</key><true/>
+            <!-- teamID optional; Xcode findet i.d.R. das Team trotzdem -->
+            $( [ -n "$TEAM_ID" ] && echo "<key>teamID</key><string>$TEAM_ID</string>" )
+          </dict>
+          </plist>
+          EOF
 
       - name: Build signed IPA (release)
         script: |
           set -e
           flutter build ipa \
             --release \
-            --export-method app-store \
+            --export-options-plist=/tmp/ExportOptions.plist \
             --no-tree-shake-icons \
             --build-name=${CM_BUILD_NUMBER:-1.0.0} \
             --build-number=${CM_BUILD_NUMBER:-1}
 
-      # Fallback: falls Flutter keine .ipa erzeugt, exportiere aus dem .xcarchive
       - name: Export from archive (fallback)
         script: |
           set -e
+          # Läuft auf macOS Runner; auf Linux wäre das ein No-Op.
           if ! find build -type f -name "*.ipa" | grep -q .; then
-            echo "No IPA found after flutter build – exporting from .xcarchive …"
+            echo "📦 No IPA from flutter build. Exporting from .xcarchive …"
             ARCHIVE="build/ios/archive/Runner.xcarchive"
-            if [ ! -d "$ARCHIVE" ]; then
-              echo "Archive not found: $ARCHIVE"
-              find build -maxdepth 4 -type f -print || true
-              exit 1
-            fi
-            printf '%s\n' \
-              '<?xml version="1.0" encoding="UTF-8"?>' \
-              '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
-              '<plist version="1.0">' \
-              '<dict>' \
-              '  <key>method</key><string>app-store</string>' \
-              '  <key>compileBitcode</key><false/>' \
-              '  <key>stripSwiftSymbols</key><true/>' \
-              '  <key>destination</key><string>export</string>' \
-              '</dict>' \
-              '</plist>' > /tmp/ExportOptions.plist
+            [ -d "$ARCHIVE" ] || { echo "❌ Archive not found: $ARCHIVE"; find build -maxdepth 4 -type f -print || true; exit 1; }
+
+            TEAM_ID="${APPLE_TEAM_ID:-${CM_APPLE_TEAM_ID:-${APP_STORE_CONNECT_TEAM_ID:-}}}"
+            cat >/tmp/ExportOptions.plist <<EOF
+            <?xml version="1.0" encoding="UTF-8"?>
+            <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+            <plist version="1.0">
+            <dict>
+              <key>method</key><string>app-store-connect</string>
+              <key>signingStyle</key><string>automatic</string>
+              <key>destination</key><string>export</string>
+              <key>compileBitcode</key><false/>
+              <key>stripSwiftSymbols</key><true/>
+              $( [ -n "$TEAM_ID" ] && echo "<key>teamID</key><string>$TEAM_ID</string>" )
+            </dict>
+            </plist>
+            EOF
+
+            mkdir -p build/ios/ipa
             /usr/bin/xcodebuild -exportArchive \
               -archivePath "$ARCHIVE" \
               -exportOptionsPlist /tmp/ExportOptions.plist \
@@ -115,7 +164,7 @@ workflows:
       - name: Verify IPA artifact
         script: |
           set -e
-          echo "Searching for IPAs in build/…"
+          echo "🔎 Searching for IPAs…"
           find build -type f -name "*.ipa" -print
 
       - name: Upload to TestFlight (manual)
@@ -123,9 +172,9 @@ workflows:
           set -e
           IPA_PATH="$(find build -type f -name '*.ipa' | head -n1)"
           if [ -z "$IPA_PATH" ]; then
-            echo "No IPA found under build/"; find build -maxdepth 4 -type f -print; exit 1
+            echo "❌ No IPA found under build/"; find build -maxdepth 4 -type f -print; exit 1
           fi
-          echo "Uploading $IPA_PATH"
+          echo "🚀 Uploading $IPA_PATH"
           app-store-connect publish \
             --issuer-id "$APP_STORE_CONNECT_ISSUER_ID" \
             --key-id "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
