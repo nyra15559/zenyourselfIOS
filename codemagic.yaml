@@ -29,9 +29,14 @@ workflows:
       xcode: latest
       cocoapods: default
       groups:
-        - appstore_connect          # <— Gruppe mit den 3 ASC-Variablen
+        # In Codemagic (secure+masked) vorhanden:
+        # APP_STORE_CONNECT_ISSUER_ID
+        # APP_STORE_CONNECT_KEY_IDENTIFIER
+        # APP_STORE_CONNECT_PRIVATE_KEY
+        # CERTIFICATE_PRIVATE_KEY
+        - appstore_connect
       vars:
-        BUNDLE_ID: zenyourself-zenyourself
+        BUNDLE_ID: ch.zenyourself.app
     scripts:
       - name: Flutter pub get
         script: flutter pub get
@@ -47,6 +52,7 @@ workflows:
           : "${APP_STORE_CONNECT_ISSUER_ID:?Missing APP_STORE_CONNECT_ISSUER_ID}"
           : "${APP_STORE_CONNECT_KEY_IDENTIFIER:?Missing APP_STORE_CONNECT_KEY_IDENTIFIER}"
           : "${APP_STORE_CONNECT_PRIVATE_KEY:?Missing APP_STORE_CONNECT_PRIVATE_KEY}"
+          : "${CERTIFICATE_PRIVATE_KEY:?Missing CERTIFICATE_PRIVATE_KEY}"
       - name: Automatic code signing (fetch & apply)
         script: |
           set -e
@@ -56,20 +62,19 @@ workflows:
             --key-id "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
             --private-key "$APP_STORE_CONNECT_PRIVATE_KEY" \
             --create
-          # .p12 nur importieren, wenn vorhanden (bei ASC-Auto-Signing oft NICHT nötig)
-          if ls /Users/builder/Library/MobileDevice/Certificates/*.p12 1>/dev/null 2>&1; then
-            keychain add-certificates
-          else
-            echo "No .p12 found (OK for ASC auto-signing), skipping import"
-          fi
-          # Profile ins Xcode-Projekt schreiben
+          keychain add-certificates
           xcode-project use-profiles --project ios/Runner.xcodeproj
       - name: Build signed IPA (release)
         script: |
-          flutter build ipa --release --no-tree-shake-icons \
-            --build-name=$CM_BUILD_NUMBER --build-number=$CM_BUILD_NUMBER
+          flutter build ipa \
+            --release \
+            --export-method app-store \
+            --no-tree-shake-icons \
+            --build-name=${CM_BUILD_NUMBER:-1.0.0} \
+            --build-number=${CM_BUILD_NUMBER:-1}
     artifacts:
       - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
     cache:
       cache_paths:
         - $FLUTTER_ROOT/.pub-cache
