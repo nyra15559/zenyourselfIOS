@@ -32,3 +32,6 @@ flutter/
 .flutter-plugins
 .flutter-plugins-dependencies
 android/key.properties
+
+# ignore Flutter SDK
+flutter/
