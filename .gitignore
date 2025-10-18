@@ -41,3 +41,6 @@ flutter/
 
 # ignore Flutter SDK
 flutter/
+
+ios_distribution_private_key
+ios_distribution_private_key.pub
