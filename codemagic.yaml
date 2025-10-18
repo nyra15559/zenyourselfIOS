@@ -29,11 +29,11 @@ workflows:
       xcode: latest
       cocoapods: default
       groups:
-        # In Codemagic (secure+masked) müssen liegen:
+        # Codemagic env group with (secure+masked):
         # APP_STORE_CONNECT_ISSUER_ID
         # APP_STORE_CONNECT_KEY_IDENTIFIER
-        # APP_STORE_CONNECT_PRIVATE_KEY   (Inhalt der .p8 inkl. BEGIN/END)
-        # CERTIFICATE_PRIVATE_KEY         (RSA-Schlüssel im PEM-Format)
+        # APP_STORE_CONNECT_PRIVATE_KEY  (p8 content incl. BEGIN/END)
+        # CERTIFICATE_PRIVATE_KEY        (RSA PEM)
         - appstore_connect
       vars:
         BUNDLE_ID: ch.zenyourself.app
@@ -58,8 +58,7 @@ workflows:
         script: |
           set -e
           keychain initialize
-          # Bundle-ID ist *positionales* Argument, --key-id (nicht --key-identifier),
-          # RSA-Key via --certificate-key.
+          # Bundle-ID ist *positionales* Argument, --key-id (nicht --key-identifier)
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --type IOS_APP_STORE \
             --issuer-id "$APP_STORE_CONNECT_ISSUER_ID" \
@@ -76,12 +75,43 @@ workflows:
 
       - name: Build signed IPA (release)
         script: |
+          set -e
           flutter build ipa \
             --release \
             --export-method app-store \
             --no-tree-shake-icons \
             --build-name=${CM_BUILD_NUMBER:-1.0.0} \
             --build-number=${CM_BUILD_NUMBER:-1}
+
+      # Fallback: Falls Flutter keine .ipa exportiert, exportieren wir aus dem .xcarchive
+      - name: Fallback export .xcarchive → .ipa (if missing)
+        script: |
+          set -e
+          if ! find build -type f -name "*.ipa" | grep -q .; then
+            echo "No IPA found after flutter build – exporting from .xcarchive …"
+            ARCHIVE="build/ios/archive/Runner.xcarchive"
+            if [ ! -d "$ARCHIVE" ]; then
+              echo "Archive not found: $ARCHIVE"
+              find build -maxdepth 4 -type f -print || true
+              exit 1
+            fi
+            cat > /tmp/ExportOptions.plist <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>method</key><string>app-store</string>
+  <key>compileBitcode</key><false/>
+  <key>stripSwiftSymbols</key><true/>
+  <key>destination</key><string>export</string>
+</dict>
+</plist>
+PLIST
+            /usr/bin/xcodebuild -exportArchive \
+              -archivePath "$ARCHIVE" \
+              -exportOptionsPlist /tmp/ExportOptions.plist \
+              -exportPath build/ios/ipa
+          fi
 
       - name: Verify IPA artifact
         script: |
