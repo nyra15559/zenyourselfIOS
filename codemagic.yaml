@@ -58,8 +58,8 @@ workflows:
         script: |
           set -e
           keychain initialize
-          # Achtung: Bundle-ID ist *positionales* Argument, --key-id (nicht --key-identifier),
-          # und der RSA-Key wird via --certificate-key übergeben.
+          # Bundle-ID ist *positionales* Argument, --key-id (nicht --key-identifier),
+          # RSA-Key via --certificate-key.
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --type IOS_APP_STORE \
             --issuer-id "$APP_STORE_CONNECT_ISSUER_ID" \
