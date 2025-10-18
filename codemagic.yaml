@@ -115,6 +115,7 @@ workflows:
           set -e
           BN="${CM_BUILD_NUMBER:-${BUILD_NUMBER:-$(date +%Y%m%d%H%M)}}"
           flutter build ipa \
+            --no-enable-impeller \
             --release \
             --export-options-plist=/tmp/ExportOptions.plist \
             --no-tree-shake-icons \
@@ -250,6 +251,7 @@ workflows:
           set -e
           BN="${CM_BUILD_NUMBER:-${BUILD_NUMBER:-$(date +%Y%m%d%H%M)}}"
           flutter build ipa \
+            --no-enable-impeller \
             -t lib/diag_entry.dart \
             --release \
             --export-options-plist=/tmp/ExportOptions.plist \
