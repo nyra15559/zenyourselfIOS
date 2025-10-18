@@ -1,4 +1,4 @@
-workflows:
+xworkflows:
   ios_smoke:
     name: iOS Smoke (no signing)
     instance_type: mac_mini_m2
