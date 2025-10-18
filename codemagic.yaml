@@ -29,7 +29,12 @@ workflows:
       xcode: latest
       cocoapods: default
       groups:
-        - appstore_connect   # APP_STORE_CONNECT_ISSUER_ID / _KEY_IDENTIFIER / _PRIVATE_KEY / CERTIFICATE_PRIVATE_KEY
+        # Secure+masked in Codemagic Gruppe "appstore_connect":
+        # APP_STORE_CONNECT_ISSUER_ID
+        # APP_STORE_CONNECT_KEY_IDENTIFIER
+        # APP_STORE_CONNECT_PRIVATE_KEY   (p8-Inhalt inkl. BEGIN/END)
+        # CERTIFICATE_PRIVATE_KEY         (RSA PEM)
+        - appstore_connect
       vars:
         BUNDLE_ID: ch.zenyourself.app
 
@@ -78,7 +83,7 @@ workflows:
             --build-name=${CM_BUILD_NUMBER:-1.0.0} \
             --build-number=${CM_BUILD_NUMBER:-1}
 
-      # Fallback: exportiere .ipa aus dem .xcarchive, falls Flutter keine .ipa erzeugt
+      # Fallback: falls Flutter keine .ipa erzeugt, exportiere aus dem .xcarchive
       - name: Export from archive (fallback)
         script: |
           set -e
@@ -91,16 +96,16 @@ workflows:
               exit 1
             fi
             printf '%s\n' \
-'<?xml version="1.0" encoding="UTF-8"?>' \
-'<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
-'<plist version="1.0">' \
-'<dict>' \
-'  <key>method</key><string>app-store</string>' \
-'  <key>compileBitcode</key><false/>' \
-'  <key>stripSwiftSymbols</key><true/>' \
-'  <key>destination</key><string>export</string>' \
-'</dict>' \
-'</plist>' > /tmp/ExportOptions.plist
+              '<?xml version="1.0" encoding="UTF-8"?>' \
+              '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+              '<plist version="1.0">' \
+              '<dict>' \
+              '  <key>method</key><string>app-store</string>' \
+              '  <key>compileBitcode</key><false/>' \
+              '  <key>stripSwiftSymbols</key><true/>' \
+              '  <key>destination</key><string>export</string>' \
+              '</dict>' \
+              '</plist>' > /tmp/ExportOptions.plist
             /usr/bin/xcodebuild -exportArchive \
               -archivePath "$ARCHIVE" \
               -exportOptionsPlist /tmp/ExportOptions.plist \
