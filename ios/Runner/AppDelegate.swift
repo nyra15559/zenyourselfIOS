@@ -1,10 +1,10 @@
 import UIKit
 import Flutter
 
-@UIApplicationMain
-@objc class AppDelegate: FlutterAppDelegate {
+@main
+class AppDelegate: FlutterAppDelegate {
 
-  var window: UIWindow?
+  // Keine eigene 'var window' deklarieren – FlutterAppDelegate hat sie bereits.
   lazy var flutterEngine = FlutterEngine(name: "zen_engine")
 
   override func application(
@@ -16,13 +16,13 @@ import Flutter
     flutterEngine.run()
     GeneratedPluginRegistrant.register(with: flutterEngine)
 
-    // Flutter ViewController programmatic als Root setzen
+    // Programmatic UIWindow + FlutterViewController
+    let win = UIWindow(frame: UIScreen.main.bounds)
     let flutterVC = FlutterViewController(engine: flutterEngine, nibName: nil, bundle: nil)
-    self.window = UIWindow(frame: UIScreen.main.bounds)
-    self.window?.rootViewController = flutterVC
-    self.window?.makeKeyAndVisible()
+    win.rootViewController = flutterVC
+    win.makeKeyAndVisible()
+    self.window = win   // vorhandene Property der Superklasse verwenden
 
-    // Wichtig: Super aufrufen für Plugin-Callbacks (Push, etc.)
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 }
