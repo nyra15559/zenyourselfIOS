@@ -28,6 +28,8 @@ workflows:
       flutter: stable
       xcode: latest
       cocoapods: default
+      groups:
+        - appstore_connect            # <— HIER: Gruppe importieren
       vars:
         BUNDLE_ID: zenyourself-zenyourself
     scripts:
@@ -35,6 +37,11 @@ workflows:
         script: flutter pub get
       - name: Update CocoaPods
         script: pod repo update
+      - name: Debug ASC env (masked)
+        script: |
+          for v in APP_STORE_CONNECT_PRIVATE_KEY APP_STORE_CONNECT_KEY_IDENTIFIER APP_STORE_CONNECT_ISSUER_ID; do
+            if [ -n "${!v:-}" ]; then echo "$v=SET ($(echo -n "${!v}" | wc -c) chars)"; else echo "$v=EMPTY"; fi
+          done
       - name: Assert ASC env vars
         script: |
           : "${APP_STORE_CONNECT_ISSUER_ID:?Missing APP_STORE_CONNECT_ISSUER_ID}"
@@ -71,5 +78,3 @@ workflows:
         key_id: $APP_STORE_CONNECT_KEY_IDENTIFIER
         issuer_id: $APP_STORE_CONNECT_ISSUER_ID
         submit_to_testflight: true
-        # beta_groups:
-        #   - Internal Testers
