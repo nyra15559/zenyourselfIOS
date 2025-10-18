@@ -8,13 +8,12 @@ workflows:
       xcode: latest
       cocoapods: default
       groups:
-        # In Codemagic als Gruppe anlegen (z. B. "appstore_connect") und Variablen setzen:
+        # In Codemagic als Gruppe (z. B. "appstore_connect") anlegen:
         # APP_STORE_CONNECT_ISSUER_ID
         # APP_STORE_CONNECT_KEY_IDENTIFIER
-        # APP_STORE_CONNECT_PRIVATE_KEY     (kompletter .p8-Inhalt)
-        # EINES von beidem für Zertifikate:
-        #   CERTIFICATE_PRIVATE_KEY         (RSA PEM)  ODER
-        #   IOS_P12_BASE64 + IOS_P12_PASSWORD
+        # APP_STORE_CONNECT_PRIVATE_KEY  (kompletter .p8-Inhalt)
+        # und EINES von beidem:
+        #   CERTIFICATE_PRIVATE_KEY (RSA PEM)  ODER  IOS_P12_BASE64 + IOS_P12_PASSWORD
         - appstore_connect
       vars:
         BUNDLE_ID: ch.zenyourself.app
@@ -32,7 +31,7 @@ workflows:
           if [ -n "${CERTIFICATE_PRIVATE_KEY:-}" ]; then
             echo "🔐 Using CERTIFICATE_PRIVATE_KEY (RSA PEM)"
           elif [ -n "${IOS_P12_BASE64:-}" ] && [ -n "${IOS_P12_PASSWORD:-}" ]; then
-            echo "🔐 Using IOS_P12_* (P12)"
+            echo "🔐 Using IOS_P12_BASE64/IOS_P12_PASSWORD"
           else
             echo "❌ Missing certs (RSA or P12)"; exit 2
           fi
@@ -41,7 +40,6 @@ workflows:
         script: |
           set -e
           keychain initialize
-
           if [ -n "${CERTIFICATE_PRIVATE_KEY:-}" ]; then
             app-store-connect fetch-signing-files "$BUNDLE_ID" \
               --type IOS_APP_STORE \
@@ -61,7 +59,6 @@ workflows:
               --private-key "$APP_STORE_CONNECT_PRIVATE_KEY" \
               --create --verbose
           fi
-
           keychain add-certificates
           xcode-project use-profiles --project ios/Runner.xcodeproj
 
@@ -71,9 +68,37 @@ workflows:
           echo "🔎 Code signing identities:"; security find-identity -p codesigning -v || true
           echo "🔎 Provisioning profiles:"; ls -l ~/Library/MobileDevice/Provisioning\ Profiles || true
 
-      - name: Create ExportOptions.plist (app-store-connect, automatic)
+      - name: Resolve App Store profile for $BUNDLE_ID
         script: |
           set -e
+          OUT=/tmp/profile_env
+          : > "$OUT"
+          FOUND=0
+          for f in ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision; do
+            [ -e "$f" ] || continue
+            TMP=$(mktemp)
+            security cms -D -i "$f" > "$TMP" 2>/dev/null || { rm -f "$TMP"; continue; }
+            APPID=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$TMP" 2>/dev/null || echo "")
+            BID_SUFFIX="${APPID#*.}"
+            HAS_DEV=1; /usr/libexec/PlistBuddy -c 'Print :ProvisionedDevices' "$TMP" >/dev/null 2>&1 || HAS_DEV=0
+            GTA=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:get-task-allow' "$TMP" 2>/dev/null || echo "true")
+            NAME=$(/usr/libexec/PlistBuddy -c 'Print :Name' "$TMP" 2>/dev/null || echo "")
+            UUID=$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$TMP" 2>/dev/null || echo "")
+            if [ "$BID_SUFFIX" = "$BUNDLE_ID" ] && [ "$HAS_DEV" -eq 0 ] && [ "$GTA" = "false" ]; then
+              echo "PROFILE_NAME=\"$NAME\"" >> "$OUT"
+              echo "PROFILE_UUID=\"$UUID\"" >> "$OUT"
+              echo "✅ Using profile: ${NAME:-$UUID}"
+              FOUND=1
+              rm -f "$TMP"; break
+            fi
+            rm -f "$TMP"
+          done
+          [ "$FOUND" -eq 1 ] || { echo "❌ No App Store profile found for $BUNDLE_ID"; exit 70; }
+
+      - name: Create ExportOptions.plist (MANUAL mapping)
+        script: |
+          set -e
+          . /tmp/profile_env
           TEAM_ID="${APPLE_TEAM_ID:-${CM_APPLE_TEAM_ID:-${APP_STORE_CONNECT_TEAM_ID:-}}}"
           {
             printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>'
@@ -81,22 +106,26 @@ workflows:
             printf '%s\n' '<plist version="1.0">'
             printf '%s\n' '<dict>'
             printf '%s\n' '  <key>method</key><string>app-store-connect</string>'
-            printf '%s\n' '  <key>signingStyle</key><string>automatic</string>'
-            printf '%s\n' '  <key>destination</key><string>export</string>'
-            printf '%s\n' '  <key>compileBitcode</key><false/>'
-            printf '%s\n' '  <key>stripSwiftSymbols</key><true/>'
+            printf '%s\n' '  <key>signingStyle</key><string>manual</string>'
+            printf '%s\n' '  <key>signingCertificate</key><string>Apple Distribution</string>'
             if [ -n "$TEAM_ID" ]; then
               printf '  <key>teamID</key><string>%s</string>\n' "$TEAM_ID"
             fi
+            printf '%s\n' '  <key>provisioningProfiles</key>'
+            printf '%s\n' '  <dict>'
+            printf '    <key>%s</key><string>%s</string>\n' "$BUNDLE_ID" "${PROFILE_NAME:-$PROFILE_UUID}"
+            printf '%s\n' '  </dict>'
+            printf '%s\n' '  <key>destination</key><string>export</string>'
+            printf '%s\n' '  <key>compileBitcode</key><false/>'
+            printf '%s\n' '  <key>stripSwiftSymbols</key><true/>'
             printf '%s\n' '</dict>'
             printf '%s\n' '</plist>'
           } > /tmp/ExportOptions.plist
-          echo "📝 ExportOptions.plist created."
+          echo "📝 ExportOptions.plist created with manual provisioning profile mapping."
 
       - name: Build signed IPA (release)
         script: |
           set -e
-          # Eindeutige Buildnummer
           BN="${CM_BUILD_NUMBER:-${BUILD_NUMBER:-$(date +%Y%m%d%H%M)}}"
           flutter build ipa \
             --release \
@@ -105,32 +134,14 @@ workflows:
             --build-name=1.0.$BN \
             --build-number=$BN
 
-      - name: Export from archive (fallback)
+      - name: Export from archive (fallback)  # gleiche MANUAL-Logik
         script: |
           set -e
           if ! find build -type f -name "*.ipa" | grep -q .; then
             echo "📦 No IPA from flutter build. Exporting from .xcarchive …"
             ARCHIVE="build/ios/archive/Runner.xcarchive"
             [ -d "$ARCHIVE" ] || { echo "❌ Archive not found: $ARCHIVE"; find build -maxdepth 4 -type f -print || true; exit 1; }
-
-            TEAM_ID="${APPLE_TEAM_ID:-${CM_APPLE_TEAM_ID:-${APP_STORE_CONNECT_TEAM_ID:-}}}"
-            {
-              printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>'
-              printf '%s\n' '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
-              printf '%s\n' '<plist version="1.0">'
-              printf '%s\n' '<dict>'
-              printf '%s\n' '  <key>method</key><string>app-store-connect</string>'
-              printf '%s\n' '  <key>signingStyle</key><string>automatic</string>'
-              printf '%s\n' '  <key>destination</key><string>export</string>'
-              printf '%s\n' '  <key>compileBitcode</key><false/>'
-              printf '%s\n' '  <key>stripSwiftSymbols</key><true/>'
-              if [ -n "$TEAM_ID" ]; then
-                printf '  <key>teamID</key><string>%s</string>\n' "$TEAM_ID"
-              fi
-              printf '%s\n' '</dict>'
-              printf '%s\n' '</plist>'
-            } > /tmp/ExportOptions.plist
-
+            [ -f /tmp/ExportOptions.plist ] || { echo "❌ Missing /tmp/ExportOptions.plist"; exit 1; }
             mkdir -p build/ios/ipa
             /usr/bin/xcodebuild -exportArchive \
               -archivePath "$ARCHIVE" \
@@ -160,17 +171,15 @@ workflows:
             echo "✅ Primary upload OK"
           else
             echo "⚠️  Primary upload failed — trying Fastlane fallback…"
-            # JSON per printf schreiben (kein Heredoc → YAML-sicher)
+            # JSON sicher via printf (keine Heredocs)
             {
               printf '{\n'
               printf '  "key_id": "%s",\n'   "$APP_STORE_CONNECT_KEY_IDENTIFIER"
               printf '  "issuer_id": "%s",\n' "$APP_STORE_CONNECT_ISSUER_ID"
-              # Multiline p8 sicher in JSON: Zeilenumbrüche werden von Fastlane akzeptiert
               printf '  "key": "%s",\n'   "$(printf %s "$APP_STORE_CONNECT_PRIVATE_KEY" | sed ':a;N;$!ba;s/\n/\\n/g')"
               printf '  "in_house": false\n'
               printf '}\n'
             } > /tmp/asc_api_key.json
-
             if fastlane run upload_to_testflight \
                 ipa:"$IPA_PATH" \
                 api_key_path:/tmp/asc_api_key.json \
