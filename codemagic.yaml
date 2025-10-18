@@ -1,4 +1,4 @@
-xworkflows:
+workflows:
   ios_smoke:
     name: iOS Smoke (no signing)
     instance_type: mac_mini_m2
@@ -37,6 +37,7 @@ xworkflows:
         - appstore_connect
       vars:
         BUNDLE_ID: ch.zenyourself.app
+
     scripts:
       - name: Flutter pub get
         script: flutter pub get
@@ -57,9 +58,14 @@ xworkflows:
         script: |
           set -e
           keychain initialize
-          app-store-connect fetch-signing-files \
+          # Achtung: Bundle-ID ist *positionales* Argument, --key-id (nicht --key-identifier),
+          # und der RSA-Key wird via --certificate-key übergeben.
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --type IOS_APP_STORE \
-            --bundle-id "$BUNDLE_ID" \
+            --issuer-id "$APP_STORE_CONNECT_ISSUER_ID" \
+            --key-id "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
+            --private-key "$APP_STORE_CONNECT_PRIVATE_KEY" \
+            --certificate-key "$CERTIFICATE_PRIVATE_KEY" \
             --create \
             --verbose
           keychain add-certificates
@@ -83,7 +89,6 @@ xworkflows:
           echo "Searching for IPAs in build/…"
           find build -type f -name "*.ipa" -print
 
-      # Manueller Upload (robust, unabhängig vom 'publishing'-Block)
       - name: Upload to TestFlight (manual)
         script: |
           set -e
@@ -94,7 +99,7 @@ xworkflows:
           echo "Uploading $IPA_PATH"
           app-store-connect publish \
             --issuer-id "$APP_STORE_CONNECT_ISSUER_ID" \
-            --key-identifier "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
+            --key-id "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
             --private-key "$APP_STORE_CONNECT_PRIVATE_KEY" \
             --path "$IPA_PATH"
 
