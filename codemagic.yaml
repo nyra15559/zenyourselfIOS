@@ -1,1 +1,108 @@
-DEIN-YAML-HIER
+workflows:
+  ios_smoke:
+    name: iOS Smoke (no signing)
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Flutter pub get
+        script: flutter pub get
+      - name: Build IPA (no codesign)
+        script: flutter build ipa --no-codesign
+    artifacts:
+      - build/ios/ipa/*.ipa
+    cache:
+      cache_paths:
+        - $FLUTTER_ROOT/.pub-cache
+        - ~/.pub-cache
+        - ios/Pods
+
+  ios_release:
+    name: iOS Release (Signed + TestFlight)
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+      groups:
+        # In Codemagic (secure+masked) müssen liegen:
+        # APP_STORE_CONNECT_ISSUER_ID
+        # APP_STORE_CONNECT_KEY_IDENTIFIER
+        # APP_STORE_CONNECT_PRIVATE_KEY   (Inhalt der .p8 inkl. BEGIN/END)
+        # CERTIFICATE_PRIVATE_KEY         (RSA-Schlüssel im PEM-Format)
+        - appstore_connect
+      vars:
+        BUNDLE_ID: ch.zenyourself.app
+    scripts:
+      - name: Flutter pub get
+        script: flutter pub get
+
+      - name: Sanity verify ASC secrets
+        script: |
+          set -e
+          : "${APP_STORE_CONNECT_ISSUER_ID:?Missing APP_STORE_CONNECT_ISSUER_ID}"
+          : "${APP_STORE_CONNECT_KEY_IDENTIFIER:?Missing APP_STORE_CONNECT_KEY_IDENTIFIER}"
+          : "${APP_STORE_CONNECT_PRIVATE_KEY:?Missing APP_STORE_CONNECT_PRIVATE_KEY}"
+          : "${CERTIFICATE_PRIVATE_KEY:?Missing CERTIFICATE_PRIVATE_KEY}"
+          echo "p8 chars:  $(echo -n "$APP_STORE_CONNECT_PRIVATE_KEY" | wc -c)"
+          echo "rsa chars: $(echo -n "$CERTIFICATE_PRIVATE_KEY" | wc -c)"
+          echo "$APP_STORE_CONNECT_PRIVATE_KEY" | head -n1 | grep -q "BEGIN PRIVATE KEY"
+          echo "$CERTIFICATE_PRIVATE_KEY"       | head -n1 | grep -q "BEGIN RSA PRIVATE KEY"
+
+      - name: Automatic code signing (fetch & apply)
+        script: |
+          set -e
+          keychain initialize
+          app-store-connect fetch-signing-files \
+            --type IOS_APP_STORE \
+            --bundle-id "$BUNDLE_ID" \
+            --create \
+            --verbose
+          keychain add-certificates
+          xcode-project use-profiles --project ios/Runner.xcodeproj
+
+      - name: Echo bundle id
+        script: echo "BUNDLE_ID=$BUNDLE_ID"
+
+      - name: Build signed IPA (release)
+        script: |
+          flutter build ipa \
+            --release \
+            --export-method app-store \
+            --no-tree-shake-icons \
+            --build-name=${CM_BUILD_NUMBER:-1.0.0} \
+            --build-number=${CM_BUILD_NUMBER:-1}
+
+      - name: Verify IPA artifact
+        script: |
+          set -e
+          echo "Searching for IPAs in build/…"
+          find build -type f -name "*.ipa" -print
+
+      # Manueller Upload (robust, unabhängig vom 'publishing'-Block)
+      - name: Upload to TestFlight (manual)
+        script: |
+          set -e
+          IPA_PATH="$(find build -type f -name '*.ipa' | head -n1)"
+          if [ -z "$IPA_PATH" ]; then
+            echo "No IPA found under build/"; find build -maxdepth 4 -type f -print; exit 1
+          fi
+          echo "Uploading $IPA_PATH"
+          app-store-connect publish \
+            --issuer-id "$APP_STORE_CONNECT_ISSUER_ID" \
+            --key-identifier "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
+            --private-key "$APP_STORE_CONNECT_PRIVATE_KEY" \
+            --path "$IPA_PATH"
+
+    artifacts:
+      - build/**/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    cache:
+      cache_paths:
+        - $FLUTTER_ROOT/.pub-cache
+        - ~/.pub-cache
+        - ios/Pods
