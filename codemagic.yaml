@@ -35,15 +35,25 @@ workflows:
         script: flutter pub get
       - name: Update CocoaPods
         script: pod repo update
+      - name: Assert ASC env vars
+        script: |
+          : "${APP_STORE_CONNECT_ISSUER_ID:?Missing APP_STORE_CONNECT_ISSUER_ID}"
+          : "${APP_STORE_CONNECT_KEY_IDENTIFIER:?Missing APP_STORE_CONNECT_KEY_IDENTIFIER}"
+          : "${APP_STORE_CONNECT_PRIVATE_KEY:?Missing APP_STORE_CONNECT_PRIVATE_KEY}"
       - name: Automatic code signing (fetch & apply)
         script: |
           keychain initialize
           app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE \
-            --issuer-id $APP_STORE_CONNECT_ISSUER_ID \
-            --key-id $APP_STORE_CONNECT_KEY_IDENTIFIER \
-            --api-key "$APP_STORE_CONNECT_PRIVATE_KEY" --create
+            --issuer-id "$APP_STORE_CONNECT_ISSUER_ID" \
+            --key-id "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
+            --private-key "$APP_STORE_CONNECT_PRIVATE_KEY" \
+            --create
           keychain add-certificates
-          xcode-project use-profiles --path ios/Runner.xcodeproj
+          if [ -d ios/Runner.xcworkspace ]; then
+            xcode-project use-profiles --workspace ios/Runner.xcworkspace --scheme Runner
+          else
+            xcode-project use-profiles --project ios/Runner.xcodeproj --scheme Runner
+          fi
       - name: Build signed IPA (release)
         script: |
           flutter build ipa --release --no-tree-shake-icons \
