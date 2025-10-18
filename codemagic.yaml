@@ -1,25 +1,4 @@
 workflows:
-  ios_smoke:
-    name: iOS Smoke (no signing)
-    instance_type: mac_mini_m2
-    max_build_duration: 60
-    environment:
-      flutter: stable
-      xcode: latest
-      cocoapods: default
-    scripts:
-      - name: Flutter pub get
-        script: flutter pub get
-      - name: Build IPA (no codesign)
-        script: flutter build ipa --no-codesign
-    artifacts:
-      - build/ios/ipa/*.ipa
-    cache:
-      cache_paths:
-        - $FLUTTER_ROOT/.pub-cache
-        - ~/.pub-cache
-        - ios/Pods
-
   ios_release:
     name: iOS Release (Signed + TestFlight)
     instance_type: mac_mini_m2
@@ -29,56 +8,49 @@ workflows:
       xcode: latest
       cocoapods: default
       groups:
-        # In Codemagic als Gruppe (z.B. "appstore_connect") anlegen:
+        # In Codemagic als Gruppe anlegen (z.B. "appstore_connect") und setzen:
         # APP_STORE_CONNECT_ISSUER_ID
         # APP_STORE_CONNECT_KEY_IDENTIFIER
-        # APP_STORE_CONNECT_PRIVATE_KEY     (kompletter .p8-Inhalt)
+        # APP_STORE_CONNECT_PRIVATE_KEY   (kompletter .p8-Inhalt)
         # EINES von beidem für Zertifikate:
-        #   CERTIFICATE_PRIVATE_KEY         (RSA PEM)  ODER
+        #   CERTIFICATE_PRIVATE_KEY       (RSA PEM)  ODER
         #   IOS_P12_BASE64 + IOS_P12_PASSWORD
         - appstore_connect
       vars:
-        # <<<<<<<< Stelle sicher, dass das zu deiner App passt
         BUNDLE_ID: ch.zenyourself.app
+
     scripts:
       - name: Flutter pub get
         script: flutter pub get
 
-      - name: Sanity verify ASC + cert secrets
+      - name: Verify ASC & cert secrets
         script: |
           set -e
           : "${APP_STORE_CONNECT_ISSUER_ID:?Missing APP_STORE_CONNECT_ISSUER_ID}"
           : "${APP_STORE_CONNECT_KEY_IDENTIFIER:?Missing APP_STORE_CONNECT_KEY_IDENTIFIER}"
           : "${APP_STORE_CONNECT_PRIVATE_KEY:?Missing APP_STORE_CONNECT_PRIVATE_KEY}"
-          echo "✅ ASC Keys vorhanden."
           if [ -n "${CERTIFICATE_PRIVATE_KEY:-}" ]; then
-            echo "🗝️  CERTIFICATE_PRIVATE_KEY (RSA) gefunden."
+            echo "🔐 Using CERTIFICATE_PRIVATE_KEY (RSA)"
           elif [ -n "${IOS_P12_BASE64:-}" ] && [ -n "${IOS_P12_PASSWORD:-}" ]; then
-            echo "🗝️  IOS_P12_BASE64/IOS_P12_PASSWORD gefunden."
+            echo "🔐 Using IOS_P12_BASE64/IOS_P12_PASSWORD"
           else
-            echo "❌ Weder CERTIFICATE_PRIVATE_KEY noch IOS_P12_* gesetzt."; exit 2
+            echo "❌ Missing certs (RSA or P12)"; exit 2
           fi
 
       - name: Automatic code signing (fetch & apply)
         script: |
           set -e
           keychain initialize
-
-          # Zertifikate einspielen (zwei Wege)
           if [ -n "${CERTIFICATE_PRIVATE_KEY:-}" ]; then
-            echo "🔐 Verwende CERTIFICATE_PRIVATE_KEY (RSA PEM)."
             app-store-connect fetch-signing-files "$BUNDLE_ID" \
               --type IOS_APP_STORE \
               --issuer-id "$APP_STORE_CONNECT_ISSUER_ID" \
               --key-id "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
               --private-key "$APP_STORE_CONNECT_PRIVATE_KEY" \
               --certificate-key "$CERTIFICATE_PRIVATE_KEY" \
-              --create \
-              --verbose
+              --create --verbose
           else
-            echo "🔐 Importiere P12 & lade nur Provisioning Profiles."
             echo "$IOS_P12_BASE64" | base64 --decode > /tmp/dist.p12
-            # In CM-Keychain importieren
             KEYCHAIN_PATH="$(security default-keychain -d user | tr -d '"')"
             security import /tmp/dist.p12 -P "$IOS_P12_PASSWORD" -A -k "$KEYCHAIN_PATH"
             app-store-connect fetch-signing-files "$BUNDLE_ID" \
@@ -86,10 +58,8 @@ workflows:
               --issuer-id "$APP_STORE_CONNECT_ISSUER_ID" \
               --key-id "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
               --private-key "$APP_STORE_CONNECT_PRIVATE_KEY" \
-              --create \
-              --verbose
+              --create --verbose
           fi
-
           keychain add-certificates
           xcode-project use-profiles --project ios/Runner.xcodeproj
 
@@ -103,56 +73,60 @@ workflows:
         script: |
           set -e
           TEAM_ID="${APPLE_TEAM_ID:-${CM_APPLE_TEAM_ID:-${APP_STORE_CONNECT_TEAM_ID:-}}}"
-          cat >/tmp/ExportOptions.plist <<EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>method</key><string>app-store-connect</string>
-            <key>signingStyle</key><string>automatic</string>
-            <key>destination</key><string>export</string>
-            <key>compileBitcode</key><false/>
-            <key>stripSwiftSymbols</key><true/>
-            <!-- teamID optional; Xcode findet i.d.R. das Team trotzdem -->
-            $( [ -n "$TEAM_ID" ] && echo "<key>teamID</key><string>$TEAM_ID</string>" )
-          </dict>
-          </plist>
-          EOF
+          {
+            printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>'
+            printf '%s\n' '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
+            printf '%s\n' '<plist version="1.0">'
+            printf '%s\n' '<dict>'
+            printf '%s\n' '  <key>method</key><string>app-store-connect</string>'
+            printf '%s\n' '  <key>signingStyle</key><string>automatic</string>'
+            printf '%s\n' '  <key>destination</key><string>export</string>'
+            printf '%s\n' '  <key>compileBitcode</key><false/>'
+            printf '%s\n' '  <key>stripSwiftSymbols</key><true/>'
+            if [ -n "$TEAM_ID" ]; then
+              printf '  <key>teamID</key><string>%s</string>\n' "$TEAM_ID"
+            fi
+            printf '%s\n' '</dict>'
+            printf '%s\n' '</plist>'
+          } > /tmp/ExportOptions.plist
+          echo "📝 ExportOptions.plist created."
 
       - name: Build signed IPA (release)
         script: |
           set -e
+          BN="${CM_BUILD_NUMBER:-${BUILD_NUMBER:-$(date +%Y%m%d%H%M)}}"
           flutter build ipa \
             --release \
             --export-options-plist=/tmp/ExportOptions.plist \
             --no-tree-shake-icons \
-            --build-name=${CM_BUILD_NUMBER:-1.0.0} \
-            --build-number=${CM_BUILD_NUMBER:-1}
+            --build-name=1.0.$BN \
+            --build-number=$BN
 
       - name: Export from archive (fallback)
         script: |
           set -e
-          # Läuft auf macOS Runner; auf Linux wäre das ein No-Op.
           if ! find build -type f -name "*.ipa" | grep -q .; then
             echo "📦 No IPA from flutter build. Exporting from .xcarchive …"
             ARCHIVE="build/ios/archive/Runner.xcarchive"
             [ -d "$ARCHIVE" ] || { echo "❌ Archive not found: $ARCHIVE"; find build -maxdepth 4 -type f -print || true; exit 1; }
 
             TEAM_ID="${APPLE_TEAM_ID:-${CM_APPLE_TEAM_ID:-${APP_STORE_CONNECT_TEAM_ID:-}}}"
-            cat >/tmp/ExportOptions.plist <<EOF
-            <?xml version="1.0" encoding="UTF-8"?>
-            <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-            <plist version="1.0">
-            <dict>
-              <key>method</key><string>app-store-connect</string>
-              <key>signingStyle</key><string>automatic</string>
-              <key>destination</key><string>export</string>
-              <key>compileBitcode</key><false/>
-              <key>stripSwiftSymbols</key><true/>
-              $( [ -n "$TEAM_ID" ] && echo "<key>teamID</key><string>$TEAM_ID</string>" )
-            </dict>
-            </plist>
-            EOF
+            {
+              printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>'
+              printf '%s\n' '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
+              printf '%s\n' '<plist version="1.0">'
+              printf '%s\n' '<dict>'
+              printf '%s\n' '  <key>method</key><string>app-store-connect</string>'
+              printf '%s\n' '  <key>signingStyle</key><string>automatic</string>'
+              printf '%s\n' '  <key>destination</key><string>export</string>'
+              printf '%s\n' '  <key>compileBitcode</key><false/>'
+              printf '%s\n' '  <key>stripSwiftSymbols</key><true/>'
+              if [ -n "$TEAM_ID" ]; then
+                printf '  <key>teamID</key><string>%s</string>\n' "$TEAM_ID"
+              fi
+              printf '%s\n' '</dict>'
+              printf '%s\n' '</plist>'
+            } > /tmp/ExportOptions.plist
 
             mkdir -p build/ios/ipa
             /usr/bin/xcodebuild -exportArchive \
@@ -167,19 +141,43 @@ workflows:
           echo "🔎 Searching for IPAs…"
           find build -type f -name "*.ipa" -print
 
-      - name: Upload to TestFlight (manual)
+      - name: Upload to TestFlight (primary + fallback)
         script: |
           set -e
           IPA_PATH="$(find build -type f -name '*.ipa' | head -n1)"
-          if [ -z "$IPA_PATH" ]; then
-            echo "❌ No IPA found under build/"; find build -maxdepth 4 -type f -print; exit 1
+          [ -n "$IPA_PATH" ] || { echo "❌ No IPA found under build/"; find build -maxdepth 4 -type f -print; exit 1; }
+          echo "🚀 Uploading (primary: Codemagic CLI)…"
+          UPLOAD_OK=0
+          if app-store-connect publish \
+              --issuer-id "$APP_STORE_CONNECT_ISSUER_ID" \
+              --key-id "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
+              --private-key "$APP_STORE_CONNECT_PRIVATE_KEY" \
+              --path "$IPA_PATH" \
+              --verbose; then
+            echo "✅ Primary upload OK"
+            UPLOAD_OK=1
+          else
+            echo "⚠️  Primary upload failed — trying Fastlane fallback…"
+            cat >/tmp/asc_api_key.json <<JSON
+{
+  "key_id": "$APP_STORE_CONNECT_KEY_IDENTIFIER",
+  "issuer_id": "$APP_STORE_CONNECT_ISSUER_ID",
+  "key": "$APP_STORE_CONNECT_PRIVATE_KEY",
+  "in_house": false
+}
+JSON
+            if fastlane run upload_to_testflight \
+                ipa:"$IPA_PATH" \
+                api_key_path:/tmp/asc_api_key.json \
+                skip_waiting_for_build_processing:true \
+                reject_build_waiting_for_review:true; then
+              echo "✅ Fastlane upload OK"
+              UPLOAD_OK=1
+            fi
           fi
-          echo "🚀 Uploading $IPA_PATH"
-          app-store-connect publish \
-            --issuer-id "$APP_STORE_CONNECT_ISSUER_ID" \
-            --key-id "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
-            --private-key "$APP_STORE_CONNECT_PRIVATE_KEY" \
-            --path "$IPA_PATH"
+          if [ "$UPLOAD_OK" -ne 1 ]; then
+            echo "❌ Upload failed via both methods"; exit 1
+          fi
 
     artifacts:
       - build/**/*.ipa
