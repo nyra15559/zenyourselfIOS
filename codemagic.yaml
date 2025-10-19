@@ -115,6 +115,7 @@ workflows:
           set -e
           BN="${CM_BUILD_NUMBER:-${BUILD_NUMBER:-$(date +%Y%m%d%H%M)}}"
           flutter build ipa \
+            -t lib/safe_main.dart \
             --release \
             --export-options-plist=/tmp/ExportOptions.plist \
             --no-tree-shake-icons \
