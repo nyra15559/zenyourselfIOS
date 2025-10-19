@@ -1,6 +1,25 @@
+# ios/Podfile
 platform :ios, '13.0'
 use_frameworks! :linkage => :static
+ENV['COCOAPODS_DISABLE_STATS'] = 'true'
+
+# <- Das lädt die Flutter-Hilfsfunktionen (stellt u. a. flutter_install_all_ios_pods bereit)
+require File.expand_path(File.join('..', 'Flutter', 'podhelper'), __FILE__)
 
 target 'Runner' do
-  flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
+  flutter_ios_podfile_setup
+  flutter_install_all_ios_pods(File.dirname(File.realpath(__FILE__)))
+end
+
+post_install do |installer|
+  # Neueres Flutter (3.19+): eine Zeile genügt
+  flutter_additional_ios_build_settings(installer)
+
+  # Kleine Sicherheiten (optional)
+  installer.pods_project.targets.each do |t|
+    t.build_configurations.each do |config|
+      config.build_settings['SWIFT_VERSION'] = '5.0'
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'
+    end
+  end
 end
