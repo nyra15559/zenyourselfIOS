@@ -1,25 +1,18 @@
 // lib/features/reflection/reflection_screen.dart
 //
-// ReflectionScreen — Panda v3.21.0 (Oxford level; CH risk actions; no auto-nav)
+// ReflectionScreen — Panda v3.22.0 (Oxford level; CH risk actions; no auto-nav)
 // -----------------------------------------------------------------------------
 // Änderungen in diesem Build:
-// • helperSuggestion: Worker-Feld 'helper_suggestion' wird gelesen und an _PandaStep übergeben.
-// • closureFull: mood_intro-Text wird in round.moodIntro gespeichert (Bubble in Widgets),
-//   kein zusätzlicher Panda-Step für den Intro-Text.
-// • Sonstiges: kleine Robustheits-/Style-Anpassungen, keine Verhaltensänderung im Kern.
-// -----------------------------------------------------------------------------
-// Garantien / Änderungen (unverändert):
-// • KEIN automatisches Zurück ins Hauptmenü beim Mood-Wählen ODER Speichern.
-// • Save-Flow deterministisch: Button → (falls Mood fehlt) Picker → Persist → Calm Confirm → Panda-Danke.
-// • Closure-Respect: flow.mood_prompt / recommend_end → Leitfrage unterdrückt, Mood-Phase.
-// • Worker-Chips ONLY: nutzt answer_helpers (sanitisiert, max 3). KEINE abgeleiteten Heuristik-Chips.
-// • Error-Path ruhig: BottomSheet mit „Nochmal senden“; kein generisches Debug-Toast.
-// • talk[] optional, Safety bei risk_level mild/high.
-// • Footer-Disclaimer bleibt sichtbar.
-// • [GUARD] Mood-Guard: Picker max. 1× pro Runde, keine Doppel-Öffnungen.
-// • NEU (CH): Bei Risiko werden Schweizer Hilfenummern angezeigt (143/147/144/112/117) –
-//   als milder Safety-Text + eigene Card mit Call-Buttons (SwissHotlineCard).
+// • STT integriert: WhisperService wird automatisch angedockt.
+//   - Desktop & Web → Simulation EIN (sprechfertig ohne Native-Plugin)
+//   - iOS/Android → Simulation AUS (erwartet Native-Bridge; fällt stabil zurück)
+// • Mic-Start nutzt jetzt locale: 'de-DE' (besseres Diktat für Deutsch).
+// • Fehler-Handling: SpeechService.error$ wird leise getoastet (kein Crash).
+// • Bestehende Guarantees bleiben: deterministischer Save→Mood Flow, keine Auto-Navigation,
+//   CH-Safety-Hinweise & Hotlines, Enter-/Shift+Enter-Handling.
 //
+// Hinweis: Für echte STT auf iOS/Android muss die Native-Bridge für
+// MethodChannel('zen.whisper') + EventChannel('zen.whisper/events') vorhanden sein.
 // -----------------------------------------------------------------------------
 library reflection_screen;
 
@@ -61,6 +54,7 @@ import '../../providers/journal_entries_provider.dart';
 import '../../services/guidance_service.dart';
 import '../../services/speech_service.dart';
 import '../../services/core/api_service.dart'; // Mood speichern
+import '../../services/whisper_service.dart' show WhisperService; // <— STT-Engine
 
 // CH Hotlines (Call-Buttons) + Launcher-Utilities
 import '../../widgets/hotline_widget.dart'; // SwissHotlineCard / Section
@@ -131,6 +125,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
   // Speech
   final SpeechService _speech = SpeechService();
   StreamSubscription<String>? _finalSub;
+  StreamSubscription<String>? _speechErrorSub;
 
   // Runden / Session
   final List<ReflectionRound> _rounds = <ReflectionRound>[];
@@ -156,6 +151,26 @@ class _ReflectionScreenState extends State<ReflectionScreen>
   bool _didPromptMood = false; // wurde für diese Runde schon aktiv gefragt?
   bool _isMoodOpen = false; // ist der Picker aktuell offen?
 
+  bool get _isDesktop =>
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.linux ||
+          defaultTargetPlatform == TargetPlatform.windows ||
+          defaultTargetPlatform == TargetPlatform.macOS);
+
+  void _attachSttEngine() {
+    // Desktop/Web: Simulation EIN → sofort nutzbar ohne Native-Bridge.
+    // iOS/Android: Simulation AUS → erwartet Native (fällt stabil zurück, kein Crash).
+    final bool simulate = kIsWeb || _isDesktop;
+    _speech.attachWhisper(WhisperService(simulate: simulate));
+
+    // Fehler aus der Engine dezent anzeigen (kein Crash, kein UI-Blocker)
+    _speechErrorSub = _speech.error$.listen((msg) {
+      if (!mounted) return;
+      if ((msg).trim().isEmpty) return;
+      _toast(msg);
+    });
+  }
+
   @override
   void initState() {
     super.initState();
@@ -163,6 +178,9 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     // AnimationController früh anlegen (verhindert Crash bei dispose)
     _fadeSlideCtrl =
         AnimationController(vsync: this, duration: _animShort)..value = 1.0;
+
+    // STT-Engine andocken (siehe _attachSttEngine)
+    _attachSttEngine();
 
     // Live-Transkript → Eingabe
     _finalSub = _speech.transcript$.listen((t) {
@@ -205,6 +223,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
   @override
   void dispose() {
     _finalSub?.cancel();
+    _speechErrorSub?.cancel();
     _speech.dispose();
     _controller.dispose();
     _inputFocus.dispose();
@@ -256,7 +275,8 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       } else {
         HapticFeedback.selectionClick();
         FocusScope.of(context).unfocus();
-        await _speech.start();
+        // Sprache explizit auf Deutsch setzen
+        await _speech.start(locale: 'de-DE');
       }
       if (mounted) setState(() {});
     } catch (_) {

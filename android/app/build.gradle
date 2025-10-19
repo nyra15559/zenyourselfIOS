@@ -7,15 +7,13 @@ plugins {
 def localProperties = new Properties()
 def localPropertiesFile = rootProject.file('local.properties')
 if (localPropertiesFile.exists()) {
-    localPropertiesFile.withReader('UTF-8') { reader ->
-        localProperties.load(reader)
-    }
+    localPropertiesFile.withReader('UTF-8') { reader -> localProperties.load(reader) }
 }
 
-def flutterVersionCode = localProperties.getProperty('flutter.versionCode') ?: '1'
-def flutterVersionName = localProperties.getProperty('flutter.versionName') ?: '1.0'
+def flutterVersionCode = (localProperties.getProperty('flutter.versionCode') ?: '1')
+def flutterVersionName = (localProperties.getProperty('flutter.versionName') ?: '1.0')
 
-// ⬇️ Keystore-Properties laden (für Release-Signatur)
+// Keystore (für Release-Signatur)
 def keystoreProperties = new Properties()
 def keystorePropertiesFile = rootProject.file("key.properties")
 if (keystorePropertiesFile.exists()) {
@@ -23,18 +21,25 @@ if (keystorePropertiesFile.exists()) {
 }
 
 android {
-    // Nur eine namespace-Zeile
+    // MUSS zu Manifest + Kotlin-Paket passen
     namespace "ch.zenyourself.app"
 
-    compileSdk 36
-    ndkVersion "27.0.12077973"
+    // sichere Defaults (Flutter verwaltet diese Werte)
+    compileSdkVersion flutter.compileSdkVersion
+    ndkVersion flutter.ndkVersion
 
     defaultConfig {
+        // Play-Store Paket-ID
         applicationId "ch.zenyourself.app"
+
         minSdkVersion flutter.minSdkVersion
-        targetSdkVersion 36
+        targetSdkVersion flutter.targetSdkVersion
+
+        // Versionen kommen aus local.properties (oder überschreibe hier direkt)
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
+
+        multiDexEnabled true
     }
 
     compileOptions {
@@ -51,25 +56,26 @@ android {
         main.java.srcDirs += 'src/main/kotlin'
     }
 
-    // ⬇️ Release-Signing aus key.properties / my-release-key.jks
     signingConfigs {
         release {
-            keyAlias keystoreProperties['keyAlias']
-            keyPassword keystoreProperties['keyPassword']
-            storeFile file(keystoreProperties['storeFile'])
-            storePassword keystoreProperties['storePassword']
+            if (keystorePropertiesFile.exists()) {
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+                storeFile file(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+            }
         }
     }
 
     buildTypes {
         release {
-            signingConfig signingConfigs.release   // ← WICHTIG: nicht debug!
+            signingConfig signingConfigs.release
+            // Für die erste Einreichung auf "false" lassen; später ggf. aktivieren
             minifyEnabled false
             shrinkResources false
-            // proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            // proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
-        // Optional (nur wenn du Debug-Builds auch mit Release-Key signen willst):
-        // debug { signingConfig signingConfigs.release }
+        // debug { signingConfig signingConfigs.release } // optional
     }
 }
 
@@ -78,6 +84,6 @@ flutter {
 }
 
 dependencies {
-    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22" // Upgrade später (≥2.1.0)
+    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22"
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'
 }

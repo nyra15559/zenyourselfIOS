@@ -1,11 +1,12 @@
 // lib/features/start/start_screen.dart
 //
-// StartScreen — ZenYourself · v6.0 (responsive, overflow-safe)
+// StartScreen — ZenYourself · v6.1 (responsive, overflow-safe)
 // -----------------------------------------------------------------------------
 // - 1 CTA: „Beginnen“ (Erststart → Reflection, sonst → JourneyMap)
 // - Voll responsiv mit Breakpoints (xs/sm 1-Spalten-Layout, Scroll immer erlaubt)
 // - Footer/Links sind Teil des Scroll-Contents (kein Overlay/Stack)
 // - TextScaler lokal geklemmt (verhindert Layout-Sprengungen)
+// - Fix: Dialog-Titel sind overflow-safe (Expanded + maxLines + ellipsis)
 // -----------------------------------------------------------------------------
 
 import 'package:flutter/material.dart';
@@ -95,14 +96,14 @@ class _StartScrollable extends StatelessWidget {
             ),
 
             // Haupt-Content (Panda, Titel, Bullets, Info, CTA)
-            SliverToBoxAdapter(
+            const SliverToBoxAdapter(
               child: _StartContent(),
             ),
 
             // Footer-Links + Made in CH
             SliverPadding(
               padding: EdgeInsets.only(top: isXsSm ? 12 : 16, bottom: isXsSm ? 6 : 10),
-              sliver: SliverToBoxAdapter(child: _SecondaryActions()),
+              sliver: const SliverToBoxAdapter(child: _SecondaryActions()),
             ),
             SliverToBoxAdapter(
               child: Opacity(
@@ -125,6 +126,8 @@ class _StartScrollable extends StatelessWidget {
 }
 
 class _StartContent extends StatelessWidget {
+  const _StartContent();
+
   @override
   Widget build(BuildContext context) {
     final width = MediaQuery.of(context).size.width;
@@ -311,6 +314,8 @@ class _BulletRow extends StatelessWidget {
 }
 
 class _SecondaryActions extends StatelessWidget {
+  const _SecondaryActions();
+
   @override
   Widget build(BuildContext context) {
     final isXsSm = MediaQuery.of(context).size.width < 480;
@@ -332,13 +337,13 @@ class _SecondaryActions extends StatelessWidget {
             onTap: () => _showHowItWorks(context),
             style: linkStyle,
           ),
-          _Dot(),
+          const _Dot(),
           _TextLink(
             label: 'Datenschutz',
             onTap: () => _showPrivacy(context),
             style: linkStyle,
           ),
-          _Dot(),
+          const _Dot(),
           _TextLink(
             label: 'Impressum',
             onTap: () => _showImprint(context),
@@ -351,6 +356,8 @@ class _SecondaryActions extends StatelessWidget {
 }
 
 class _Dot extends StatelessWidget {
+  const _Dot();
+
   @override
   Widget build(BuildContext context) {
     final isXsSm = MediaQuery.of(context).size.width < 480;
@@ -405,11 +412,16 @@ void _showHowItWorks(BuildContext context) {
                 children: [
                   const Icon(Icons.info_outline_rounded, color: ZenColors.deepSage),
                   const SizedBox(width: 8),
-                  Text(
-                    'Wie funktioniert ZenYourself?',
-                    style: ZenTextStyles.title.copyWith(
-                      color: ZenColors.deepSage,
-                      fontWeight: FontWeight.w800,
+                  Expanded(
+                    child: Text(
+                      'Wie funktioniert ZenYourself?',
+                      style: ZenTextStyles.title.copyWith(
+                        color: ZenColors.deepSage,
+                        fontWeight: FontWeight.w800,
+                      ),
+                      maxLines: 2,
+                      softWrap: true,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 ],
@@ -453,11 +465,16 @@ void _showPrivacy(BuildContext context) {
                 children: [
                   const Icon(Icons.lock_outline_rounded, color: ZenColors.deepSage),
                   const SizedBox(width: 8),
-                  Text(
-                    'Datenschutz',
-                    style: ZenTextStyles.title.copyWith(
-                      color: ZenColors.deepSage,
-                      fontWeight: FontWeight.w800,
+                  Expanded(
+                    child: Text(
+                      'Datenschutz',
+                      style: ZenTextStyles.title.copyWith(
+                        color: ZenColors.deepSage,
+                        fontWeight: FontWeight.w800,
+                      ),
+                      maxLines: 2,
+                      softWrap: true,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 ],
@@ -500,11 +517,16 @@ void _showImprint(BuildContext context) {
                 children: [
                   const Icon(Icons.badge_outlined, color: ZenColors.deepSage),
                   const SizedBox(width: 8),
-                  Text(
-                    'Impressum',
-                    style: ZenTextStyles.title.copyWith(
-                      color: ZenColors.deepSage,
-                      fontWeight: FontWeight.w800,
+                  Expanded(
+                    child: Text(
+                      'Impressum',
+                      style: ZenTextStyles.title.copyWith(
+                        color: ZenColors.deepSage,
+                        fontWeight: FontWeight.w800,
+                      ),
+                      maxLines: 2,
+                      softWrap: true,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 ],

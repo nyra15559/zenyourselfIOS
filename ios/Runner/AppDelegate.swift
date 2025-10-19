@@ -4,7 +4,7 @@ import Flutter
 @main
 class AppDelegate: FlutterAppDelegate {
 
-  // Keine eigene 'var window' deklarieren – FlutterAppDelegate hat sie bereits.
+  // Keine eigene 'var window' anlegen – ist in der Superklasse vorhanden.
   lazy var flutterEngine = FlutterEngine(name: "zen_engine")
 
   override func application(
@@ -15,6 +15,10 @@ class AppDelegate: FlutterAppDelegate {
     // Flutter Engine starten und Plugins registrieren
     flutterEngine.run()
     GeneratedPluginRegistrant.register(with: flutterEngine)
+
+    // iOS Bridges registrieren (Method/EventChannels)
+    WhisperBridge.register(with: flutterEngine.binaryMessenger) // STT
+    TtsBridge.register(with: flutterEngine.binaryMessenger)      // TTS  ← NEU
 
     // Programmatic UIWindow + FlutterViewController
     let win = UIWindow(frame: UIScreen.main.bounds)

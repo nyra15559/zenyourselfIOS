@@ -1,0 +1,105 @@
+lib
+├── app
+│   ├── app.dart
+│   └── app_root.dart
+├── app_theme.dart
+├── audio
+│   └── soundscape_manager.dart
+├── core
+│   └── models
+│       └── reflect_request.dart
+├── data
+│   ├── mood_entry.dart
+│   └── reflection_entry.dart
+├── diag_entry.dart
+├── env_config.dart
+├── env_runtime_io.dart
+├── env_runtime_stub.dart
+├── features
+│   ├── accessibility
+│   │   ├── a11y_utils.dart
+│   │   ├── color_blind_mode.dart
+│   │   └── large_text_mode.dart
+│   ├── calendar
+│   │   └── mood_heatmap.dart
+│   ├── impulse
+│   │   └── impulse_screen.dart
+│   ├── journal
+│   │   ├── journal_day_screen.dart
+│   │   ├── journal_entry_editor.dart
+│   │   ├── journal_entry_editor.dart.bak
+│   │   ├── journal_entry_view.dart
+│   │   ├── journal_entry_view.dart.bak
+│   │   ├── journal_screen.dart
+│   │   └── widgets
+│   │       └── journal_entry_card.dart
+│   ├── journey
+│   │   └── journey_map.dart
+│   ├── pro
+│   │   └── pro_screen.dart
+│   ├── reflection
+│   │   ├── 1reflection_screen.dart
+│   │   ├── reflection_models.dart
+│   │   ├── reflection_screen.dart
+│   │   ├── reflection_screen.dart.bak
+│   │   └── reflection_widgets.dart
+│   ├── start
+│   │   ├── start_screen.dart
+│   │   └── zen_home_screen.dart.bak
+│   ├── story
+│   │   └── story_screen.dart
+│   └── therapist
+│       ├── anon_export.dart
+│       └── dashboard.dart
+├── main.dart
+├── main.dart.tmp
+├── models
+│   ├── app_settings.dart
+│   ├── community_question.dart
+│   ├── gedankenbuch_entry.dart
+│   ├── journal_entry.dart
+│   ├── mood_entries_provider.dart
+│   ├── panda_mood.dart
+│   ├── question.dart
+│   ├── reflect_response.dart
+│   ├── reflection_entries_provider.dart
+│   ├── user.dart
+│   └── user_profile_provider.dart
+├── providers
+│   └── journal_entries_provider.dart
+├── safe_main.dart
+├── services
+│   ├── 1guidance_service.dart
+│   ├── analytics.dart
+│   ├── api_client.dart
+│   ├── auth.dart
+│   ├── core
+│   │   └── api_service.dart
+│   ├── guidance
+│   │   └── dtos.dart
+│   ├── guidance_service.dart
+│   ├── local_storage.dart
+│   ├── persistence_adapter.dart
+│   ├── persistence_file_io.dart
+│   ├── persistence_file_stub.dart
+│   ├── persistence_serializer.dart
+│   ├── speech_service.dart
+│   ├── tts_service.dart
+│   └── whisper_service.dart
+├── shared
+│   ├── launching.dart
+│   ├── ui
+│   │   ├── safety_banner.dart
+│   │   ├── zen_shadows.dart
+│   │   ├── zen_tabbar.dart
+│   │   ├── zen_widgets.dart
+│   │   └── zen_widgets.dart.bak
+│   └── zen_style.dart
+├── utils
+│   └── formatting.dart
+└── widgets
+    ├── hotline_widget.dart
+    ├── panda_mood_chip.dart
+    └── panda_mood_picker.dart
+
+27 directories, 76 files

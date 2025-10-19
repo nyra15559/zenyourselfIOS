@@ -1073,9 +1073,8 @@ class ApiService {
     // ---- ANSWER HELPERS (aus Worker-Varianten einsammeln) --------------------
     final helpers = _readAnswerHelpers(json);
 
-    // Followups hier bewusst NICHT mit Fragen befüllen; falls Worker nur Chips liefert,
-    // spiegeln wir diese als followups (harmlose Duplizierung, UI zeigt primär answer_helpers).
-    final followups = helpers;
+    // Followups: nur echte Followups aus dem JSON (nicht Chips duplizieren)
+    final followups = _parseStringList(json['followups']);
 
     final talkDyn = (json['talk'] as List?) ?? const [];
     final talk = talkDyn.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList(growable: true);
@@ -1174,8 +1173,8 @@ class ApiService {
         .where((s) => s.isNotEmpty)
         .toList();
 
-    // Dedupe + Limit
-    return _dedupeStrings(cleaned).take(4).toList(growable: false);
+    // Dedupe + Limit → **max 3** Chips
+    return _dedupeStrings(cleaned).take(3).toList(growable: false);
   }
 
   static String _extractPrimary(Map<String, dynamic> json) {

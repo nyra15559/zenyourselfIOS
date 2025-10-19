@@ -144,6 +144,24 @@ class GuidanceService {
     return _turnToJson(turn);
   }
 
+  /// Optionaler Smalltalk/„Ich will nur erzählen“-Pfad (talkOnly=true Workers)
+  Future<Json> talk({
+    required ReflectionSession session,
+    String? userText,
+    String locale = 'de',
+    String tz = 'Europe/Zurich',
+    List<Map<String, String>>? history,
+  }) async {
+    final turn = await ApiService.instance.talk(
+      session: session,
+      userText: userText,
+      locale: locale,
+      tz: tz,
+      history: history,
+    );
+    return _turnToJson(turn);
+  }
+
   // ---------------------------------------------------------------------------
   // Closure / Mood-Intro
   // ---------------------------------------------------------------------------
@@ -230,7 +248,7 @@ class GuidanceService {
     var x = s.trim();
     // En-dash, Minus, Bullet, Whitespace
     x = x.replaceAll(RegExp(r'^[\u2013\-\u2022\s]+'), '');
-    // Anführungen (Deutsch/Franz/Single/Double) — KEIN raw string wegen '
+    // Anführungen (Deutsch/Franz/Single/Double)
     x = x.replaceAll(RegExp("^[\\u201E\"'\\u203A\\u2039\\u00AB\\u00BB]+"), '');
     // Satz-Endzeichen
     x = x.replaceAll(RegExp(r'\s*[\?\!\.]+$'), '');

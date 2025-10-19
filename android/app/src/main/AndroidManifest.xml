@@ -1,12 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="ch.zenyourself.app">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!-- Netzwerk & Spracheingabe -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
-    <!-- Optional (Android 13+): nur nötig, wenn ihr eigene Notifications zeigt -->
+    <!-- Optional (Android 13+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- App funktioniert auch ohne physisches Mikrofon (z. B. Emulator/Desktop) -->
@@ -47,7 +46,7 @@
             android:value="2" />
     </application>
 
-    <!-- Optional: Erlaubt das Teilen/Verarbeiten von markiertem Text mit anderen Apps -->
+    <!-- Optional: Teilen/Verarbeiten von markiertem Text -->
     <queries>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT" />

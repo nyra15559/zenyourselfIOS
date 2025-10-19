@@ -1,8 +1,8 @@
 // lib/widgets/hotline_widget.dart
 // -----------------------------------------------------------------------------
-// Oxford–Zen v1.2 — Schweizer Hotlines (kompakt, 2 Kernnummern)
+// Oxford–Zen v1.3 — Schweizer Hotlines (kompakt, 2 Kernnummern)
 // - Klare, barrierearme Darstellung der wichtigsten CH-Hotlines
-// - Primär-Call-Button je Eintrag; Long-Press kopiert die Nummer
+// - Primär-Call-Button je Eintrag; Long-Press kopiert die Nummer (mit SnackBar)
 // - Nutzt Launching.openTel() (lib/shared/launching.dart)
 // - Design: ruhig, kompakt; kompatibel mit ZenGlassCard (falls vorhanden)
 // -----------------------------------------------------------------------------
@@ -30,7 +30,10 @@ class _Helpline {
   });
 }
 
-// Kompakte Kernliste: nur 143 (Gespräch) und 144 (Notruf)
+// Farbkonstante (ruhiges Jade/Deep-Sage)
+const Color _kDeepSage = Color(0xFF2F5F49);
+
+// Kompakte Kernliste: 143 (Gespräch) und 144 (Notruf)
 const List<_Helpline> _chHelplines = [
   _Helpline(
     title: 'Dargebotene Hand',
@@ -212,18 +215,28 @@ class _HotlineRow extends StatelessWidget {
   final _Helpline helpline;
   const _HotlineRow({required this.helpline});
 
+  void _copyWithFeedback(BuildContext context, String number) {
+    Clipboard.setData(ClipboardData(text: number));
+    HapticFeedback.selectionClick();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Nummer kopiert: $number'),
+        duration: const Duration(milliseconds: 1200),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final tt = Theme.of(context).textTheme;
-    final color = helpline.emphasized ? Colors.redAccent : const Color(0xFF2F5F49);
+    final color = helpline.emphasized ? Colors.redAccent : _kDeepSage;
 
     return InkWell(
       borderRadius: BorderRadius.circular(12),
       onTap: () => Launching.openTel(helpline.phone),
-      onLongPress: () {
-        Clipboard.setData(ClipboardData(text: helpline.phone));
-        HapticFeedback.selectionClick();
-      },
+      onLongPress: () => _copyWithFeedback(context, helpline.phone),
       child: Container(
         padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
         decoration: BoxDecoration(
@@ -280,11 +293,11 @@ class _CallButton extends StatelessWidget {
     final label = emphasized ? 'Soforthilfe' : 'Anrufen';
     return Semantics(
       button: true,
-      label: '$label',
+      label: '$label, ${emphasized ? 'Notfallnummer' : 'Telefonnummer'} $phone',
       child: ElevatedButton.icon(
         style: ElevatedButton.styleFrom(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          backgroundColor: emphasized ? Colors.redAccent : const Color(0xFF2F5F49),
+          backgroundColor: emphasized ? Colors.redAccent : _kDeepSage,
           foregroundColor: Colors.white,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           elevation: 0,

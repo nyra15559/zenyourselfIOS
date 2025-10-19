@@ -1,6 +1,6 @@
 // lib/services/whisper_service.dart
 //
-// WhisperService — Streaming STT Bridge v1.2 (prod-safe, reentrancy-proof)
+// WhisperService — Streaming STT Bridge v1.3 (no fake levels by default)
 // -----------------------------------------------------------------------------
 // Zweck
 // • Einheitliche Streaming-Schnittstelle für Live-Spracherkennung (STT).
@@ -8,7 +8,14 @@
 // • Streams: partial$ (laufende Hypothesen), final$ (finale Segmente),
 //            level$ (0.0..1.0 VU-Meter).
 //
-// Eigenschaften
+// Änderungen ggü. v1.2:
+// • KEIN generierter Level-Jitter mehr im Normalbetrieb.
+//   Der Level-Ticker wird nur im Simulationsmodus gestartet.
+// • Startet keinen künstlichen Ticker, wenn Native-Events fehlen.
+//   → Wenn deine Native-Bridge keine "level"-Events sendet, bleibt der
+//     UI-Pegel ruhig (0), statt "so zu tun als ob".
+//
+// Eigenschaften (wie zuvor)
 // • Idempotentes start/stop/pause/resume; Schutz gegen Reentrancy.
 // • Simulationsmodus via Konstruktor-Flag (simulate: true).
 // • Optionale Native-Bridge via MethodChannel (default: 'zen.whisper')
@@ -18,11 +25,9 @@
 //     - {type:'level',   value:0.0..1.0}
 //
 // Hinweise
-// • Auf Web & Plattformen ohne Channels wird automatisch in einen
-//   no-crash Modus gewechselt (Simulation falls aktiviert, sonst still).
-// • level$ ist 0.0..1.0 normalisiert.
-// -----------------------------------------------------------------------------
-
+// • Auf Web & Plattformen ohne Channels kein Absturz; Simulation wird nur
+//   verwendet, wenn simulate: true gesetzt wurde.
+//
 import 'dart:async';
 import 'dart:math';
 
@@ -30,7 +35,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 /// Standardisierte Schnittstelle für beliebige STT-Engines.
-/// Wird von `WhisperService` implementiert und vom `SpeechService` konsumiert.
 abstract class SpeechTranscriber {
   Future<void> start({String? locale});
   Future<String?> stop();
@@ -74,7 +78,7 @@ class WhisperService implements SpeechTranscriber {
   bool get isPaused => _paused;
 
   StreamSubscription? _nativeSub;
-  Timer? _levelTick;
+  Timer? _levelTick; // nur Simulation
   Timer? _simuTimer;
 
   // Anti-Dedupe für sehr schnelle doppelte Finals aus dem Native-Layer
@@ -91,11 +95,12 @@ class WhisperService implements SpeechTranscriber {
     _active = true;
     _paused = false;
 
-    _startLevelTicker();
-
     if (_simulate || kIsWeb) {
-      // Web: Channels sind oft nicht vorhanden → Simulation nur wenn explizit gewünscht.
-      if (_simulate) _startSimulation();
+      // Web: Channels sind oft nicht vorhanden → Simulation nur, wenn explizit gewünscht.
+      if (_simulate) {
+        _startLevelTicker(); // VU-Anzeige nur im Simulationsmodus
+        _startSimulation();
+      }
       _debug('[WhisperService] start (simulate:$_simulate web:$kIsWeb)');
       return;
     }
@@ -138,8 +143,8 @@ class WhisperService implements SpeechTranscriber {
       });
     } catch (e) {
       _debug('[WhisperService] start failed → ${e.runtimeType}: $e');
-      // Kein harter Fail – Service bleibt aktiv (Level-Ticker läuft), UI kann weiterleben.
-      // Simulation bewusst NICHT automatisch aktivieren (Prod-Transparenz).
+      // Kein harter Fail – Service bleibt aktiv, aber ohne Simulation.
+      // UI erhält einfach keine Events, bis ein erneuter Start klappt.
     }
   }
 
@@ -150,7 +155,7 @@ class WhisperService implements SpeechTranscriber {
     _active = false;
     _paused = false;
 
-    _stopLevelTicker();
+    _stopLevelTicker(); // sicherheitshalber
     _stopSimulation();
     await _nativeSub?.cancel();
     _nativeSub = null;
@@ -181,7 +186,7 @@ class WhisperService implements SpeechTranscriber {
     _paused = true;
 
     if (_simulate || kIsWeb) {
-      // Simulation: nichts weiter tun (Level-Ticker läuft weiter, aber wir deckeln Level)
+      // Simulation: Level-Ticker läuft weiter, _pushLevel dämpft in _startLevelTicker().
       return;
     }
     try {
@@ -247,26 +252,23 @@ class WhisperService implements SpeechTranscriber {
     if (!_levelCtrl.isClosed) _levelCtrl.add(clamped);
   }
 
-  // ---------------- Level Jitter ----------------
+  // ---------------- Level Jitter (nur Simulation) ----------------
 
   void _startLevelTicker() {
     _stopLevelTicker();
+    if (!_simulate) return;
     final rnd = Random();
     _levelTick = Timer.periodic(const Duration(milliseconds: 120), (_) {
       if (!_active) return;
-
-      if (_paused) {
-        _pushLevel(0.04);
-        return;
-      }
 
       // Dreiecks-Welle + leichtes Rauschen (ruhige Bewegung für UI)
       final ms = DateTime.now().millisecondsSinceEpoch;
       final phase = (ms % 1600) / 1600.0; // 0..1
       final tri = phase < 0.5 ? (phase * 2) : (2 - phase * 2);
       final noise = (rnd.nextDouble() * 0.08) - 0.04; // ±0.04
-      final lvl = (0.08 + tri * 0.75 + noise).clamp(0.05, 0.95);
-      _pushLevel(lvl);
+      final base = (0.08 + tri * 0.75 + noise).clamp(0.05, 0.95);
+      final display = _paused ? 0.04 : base;
+      _pushLevel(display);
     });
   }
 
@@ -275,17 +277,17 @@ class WhisperService implements SpeechTranscriber {
     _levelTick = null;
   }
 
-  // ---------------- Simulation (Debug/Dev) ----------------
+  // ---------------- Simulation (nur wenn explizit aktiviert) ----------------
 
   void _startSimulation() {
     _stopSimulation();
     if (!_active) return;
+    if (!_simulate) return;
 
     final lines = <String>[
-      '… ich denke gerade über',
-      '… ich denke gerade über einen Wechsel nach',
-      '… ich denke gerade über einen Wechsel nach, weil',
-      '… ich denke gerade über einen Wechsel nach, weil mir Stabilität wichtig ist',
+      '… (Simulation) ich denke gerade über',
+      '… (Simulation) einen Wechsel nach',
+      '… (Simulation) weil mir Stabilität wichtig ist',
     ];
     int i = 0;
 

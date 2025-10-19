@@ -1,13 +1,14 @@
 // lib/features/journey/journey_map.dart
 //
-// JourneyMapScreen — v8.1.1 Oxford (responsive grid, overflow-safe)
+// JourneyMapScreen — v9.0 Oxford (responsive grid, overflow-safe)
 // -----------------------------------------------------------------------------
 // • Volle Responsivität (xs/sm: 1 Spalte; md+: 2 Spalten)
 // • Grid via Slivers; Footer als eigener Sliver (kein Overlay)
 // • SliverFadeTransition statt FadeTransition (Sliver ↔︎ Sliver!)
 // • mainAxisExtent statt AspectRatio → Kacheln passen sich Höhe je Breakpoint an
 // • TextScaler lokal geklemmt
-// • FIX: Back-Button wird als LETZTES Stack-Kind gerendert → ist immer klickbar
+// • FIX: Zurück-Button liegt jetzt in einer SliverAppBar (nimmt Platz ein),
+//   ragt somit nicht mehr in den Content hinein und bleibt zuverlässig klickbar.
 // -----------------------------------------------------------------------------
 
 import 'package:flutter/material.dart';
@@ -212,13 +213,31 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
             children: [
               const PositionedFillBackdrop(),
 
-              // Content als Sliver-Scroll (inkl. Footer)
+              // Content als Sliver-Scroll (inkl. AppBar + Footer)
               SafeArea(
+                top: false, // wir verwenden eine SliverAppBar, die selbst Höhe einnimmt
+                bottom: false,
                 child: Center(
                   child: ConstrainedBox(
                     constraints: BoxConstraints(minWidth: 320, maxWidth: maxGridWidth),
                     child: CustomScrollView(
                       slivers: [
+                        // ---------- Fix: Zurück-Button als SliverAppBar (nimmt Platz ein) ----------
+                        SliverAppBar(
+                          pinned: false,
+                          floating: false,
+                          snap: false,
+                          elevation: 0,
+                          backgroundColor: Colors.transparent,
+                          automaticallyImplyLeading: false,
+                          toolbarHeight: 64,
+                          leadingWidth: 64,
+                          leading: Padding(
+                            padding: EdgeInsets.only(left: zs.ZenSpacing.m),
+                            child: const _BackButton(),
+                          ),
+                        ),
+
                         // Headline
                         SliverToBoxAdapter(
                           child: ScaleTransition(
@@ -226,7 +245,7 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
                             child: Padding(
                               padding: EdgeInsets.fromLTRB(
                                 zs.ZenSpacing.m,
-                                size.height < 700 ? zs.ZenSpacing.m : zs.ZenSpacing.xl,
+                                size.height < 700 ? zs.ZenSpacing.s : zs.ZenSpacing.l,
                                 zs.ZenSpacing.m,
                                 zs.ZenSpacing.m,
                               ),
@@ -284,12 +303,12 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
                         ),
 
                         // Abstand vor Footer
-                        const SliverToBoxAdapter(child: SizedBox(height: zs.ZenSpacing.l)),
+                        SliverToBoxAdapter(child: SizedBox(height: zs.ZenSpacing.l)),
 
                         // Footer (Zitat + Privacy)
                         SliverToBoxAdapter(
                           child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: zs.ZenSpacing.m),
+                            padding: EdgeInsets.symmetric(horizontal: zs.ZenSpacing.m),
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
@@ -321,7 +340,7 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
                                     color: zs.ZenColors.deepSage.withValues(alpha: .82),
                                   ),
                                 ),
-                                const SizedBox(height: zs.ZenSpacing.l),
+                                SizedBox(height: zs.ZenSpacing.l),
                               ],
                             ),
                           ),
@@ -329,14 +348,6 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
                       ],
                     ),
                   ),
-                ),
-              ),
-
-              // Back-Button (SafeArea) — WICHTIG: als LETZTES Kind → liegt oben & ist klickbar
-              const SafeArea(
-                child: Padding(
-                  padding: EdgeInsets.only(top: zs.ZenSpacing.l, left: zs.ZenSpacing.l),
-                  child: _BackButton(),
                 ),
               ),
             ],
@@ -411,6 +422,8 @@ class _BackButton extends StatelessWidget {
         child: InkWell(
           borderRadius: const BorderRadius.all(zs.ZenRadii.l),
           onTap: () => Navigator.maybeOf(context)?.maybePop(),
+          splashColor: zs.ZenColors.surface.withValues(alpha: .12),
+          highlightColor: zs.ZenColors.surface.withValues(alpha: .06),
           child: Container(
             width: 46,
             height: 46,

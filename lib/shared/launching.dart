@@ -1,9 +1,9 @@
 // lib/shared/launching.dart
 // -----------------------------------------------------------------------------
-// Oxford–Zen v1.2 — Einheitliches Öffnen von Links, Telefon, Mail & SMS
+// Oxford–Zen v1.3 — Einheitliches Öffnen von Links, Telefon, Mail & SMS
 // - Sichere Normalisierung von CH-Telefonnummern (E.164, Kurznummern 143/144…)
 // - Einheitliches Fehler-Handling (silent, mit Haptik + debugPrint)
-// - Immer "externalApplication", damit Browser/Telefon-App geöffnet wird
+// - Web/Desktop/Mobile: sinnvolle LaunchModes & _blank auf Web
 // - Null- und Whitespace-Schutz, automatische https://-Präfixe
 // -----------------------------------------------------------------------------
 
@@ -35,7 +35,11 @@ class Launching {
     final normalized = _normalizeCHPhone(input);
     final qp = <String, String>{};
     if ((body ?? '').trim().isNotEmpty) qp['body'] = body!.trim();
-    final uri = Uri(scheme: 'sms', path: normalized, queryParameters: qp.isEmpty ? null : qp);
+    final uri = Uri(
+      scheme: 'sms',
+      path: normalized,
+      queryParameters: qp.isEmpty ? null : qp,
+    );
     return _launch(uri, external: true);
   }
 
@@ -64,8 +68,28 @@ class Launching {
 
   static Future<bool> _launch(Uri uri, {required bool external}) async {
     try {
-      final mode = external ? ul.LaunchMode.externalApplication : ul.LaunchMode.platformDefault;
-      final ok = await ul.launchUrl(uri, mode: mode);
+      // Auf Web ist externalApplication häufig nicht sinnvoll/verfügbar.
+      final bool isWeb = kIsWeb;
+      final ul.LaunchMode mode = (external && !isWeb)
+          ? ul.LaunchMode.externalApplication
+          : ul.LaunchMode.platformDefault;
+
+      // Web: sauber in neuem Tab öffnen (wo es Sinn ergibt).
+      final String? webTarget =
+          isWeb ? '_blank' : null; // ignoriert auf nicht-Web Plattformen
+
+      // Hinweis: tel:/sms: sind im Web teils eingeschränkt – wir versuchen es trotzdem,
+      // geben aber einen sanften Log-Hinweis.
+      if (isWeb && (uri.scheme == 'tel' || uri.scheme == 'sms')) {
+        debugPrint('[Launching] Hinweis: ${uri.scheme}: wird im Web nicht überall unterstützt → $uri');
+      }
+
+      final ok = await ul.launchUrl(
+        uri,
+        mode: mode,
+        webOnlyWindowName: webTarget,
+      );
+
       if (!ok) {
         debugPrint('[Launching] Konnte nicht öffnen: $uri');
         HapticFeedback.selectionClick();
@@ -86,7 +110,7 @@ class Launching {
   }
 
   /// Normalisiert Schweizer Nummern:
-  /// - Kurznummern (z. B. 143, 144, 117, 118, 112, 147, 145) bleiben dreistellig.
+  /// - Kurznummern (z. B. 143, 144, 117, 118, 112, 147, 145) bleiben 3–4-stellig.
   /// - "0041…" → "+41…"
   /// - "0xx…" → "+41xx…"
   /// - Entfernt Leerzeichen, Klammern, Bindestriche.
@@ -99,10 +123,12 @@ class Launching {
 
     var s = digitsOnly;
 
+    // 00 → + (international)
     if (s.startsWith('00')) {
       s = '+${s.substring(2)}';
     }
 
+    // Bereits E.164
     if (s.startsWith('+')) {
       return s;
     }
@@ -112,12 +138,12 @@ class Launching {
       return '+41${s.substring(1)}';
     }
 
-    // Falls keine führende 0/+/00 und lang genug: als CH interpretieren
+    // Falls keine führende 0/+/00 und lang genug: pragmatisch als CH interpretieren
     if (s.length >= 6) {
       return '+41$s';
     }
 
-    // Fallback (z. B. exotische Eingabe) – lieber roh wählen
+    // Fallback (rohe Wahl, z. B. exotische Eingabe)
     return short;
   }
 }

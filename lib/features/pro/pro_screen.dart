@@ -1,15 +1,15 @@
 // lib/features/pro/pro_screen.dart
 //
-// ProScreen — Oxford Journey Board (v3.9 · 2025-10-16)
+// ProScreen — Oxford Journey Board (v4.3 · 2025-10-19)
 // ------------------------------------------------------------------
-// Neu & verfeinert (Oxford Dashboard):
-// • Range-Switcher (7/30/90 Tage) steuert Trend + Ø-Mood.
-// • Mobile: statt Zahlenchips jetzt echte Mini-Balken (ohne Zahlen).
-// • Entfernt: unbenutztes Zahnrad oben rechts.
-// • Streak (aufeinanderfolgende aktive Tage) + ruhige Empty-States.
-// • Sanfte Appear-Animation, konsistente Typo/Weights/Schatten.
-// • Provider-first, stabile Legacy-Fallbacks (MoodEntry/ReflectionEntry).
-//
+// Neu:
+// • Mobile Clean View: Insights auf Phones ausgeblendet.
+// • Export-Karte enthält Datenschutz-Hinweise.
+// • Bunter Mood-Graph (mehrfarbiger Gradient, Glows, farbige Dots).
+// • Heat-Band: zarte horizontale Zonen für −2…+2.
+// • Wellen-Emojis an Peaks (🌊) und Dips (💧) – dezent, begrenzt auf wenige.
+// • Fix: fl_chart-Tooltip ohne tooltipBgColor (kompatibel mit v1.0.0).
+// ------------------------------------------------------------------
 
 import 'dart:ui';
 import 'package:flutter/material.dart';
@@ -75,6 +75,7 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
     final tt = Theme.of(context).textTheme;
     final size = MediaQuery.of(context).size;
     final isMobile = size.width < 470;
+    final isPhoneTall = size.height > 720;
 
     // ---- Provider (optional) -------------------------------------------------
     final prov = context.watch<JournalEntriesProvider?>();
@@ -106,13 +107,13 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
     final last7MoodLegacy = widget.moodEntries.takeLast(7);
     final last7FromSeries = series.takeLast(7);
 
+    // Graph zeigen, wenn genug Platz/Daten vorhanden
     final showMoodGraph =
         size.width > 410 && size.height > 670 && (series.length >= 4);
 
     return Scaffold(
       extendBodyBehindAppBar: true,
       backgroundColor: Colors.transparent,
-      // Zahnrad entfernt (keine actions)
       appBar: const zw.ZenAppBar(title: null, showBack: true),
       body: Stack(
         children: [
@@ -145,7 +146,7 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
                     vertical: isMobile ? 20 : 36,
                   ),
                   child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 620),
+                    constraints: const BoxConstraints(maxWidth: 640),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
@@ -197,7 +198,7 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
 
                         const SizedBox(height: 12),
 
-                        // Mood-Trend — Glas-Bubble im Journey-Stil
+                        // Mood-Trend — Glas-Bubble (bunt + Heat-Band + Emojis)
                         ClipRRect(
                           borderRadius: const BorderRadius.all(zs.ZenRadii.l),
                           child: BackdropFilter(
@@ -304,7 +305,7 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
 
                         const SizedBox(height: 24),
 
-                        // Export-Bereich — Bubble (PDF guarded, CSV stabil)
+                        // Export-Bereich — Bubble (inkl. Datenschutz-Hinweise)
                         ClipRRect(
                           borderRadius: const BorderRadius.all(zs.ZenRadii.m),
                           child: BackdropFilter(
@@ -387,6 +388,20 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
                                       ),
                                     ],
                                   ),
+                                  const SizedBox(height: 12),
+                                  // Datenschutz-/Feature-Hinweise — jetzt hier integriert
+                                  Opacity(
+                                    opacity: .85,
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        _privacyRow('Daten bleiben lokal & anonym', tt),
+                                        _privacyRow('Export jederzeit möglich', tt),
+                                        _privacyRow('Deine Reflexionen gehören nur dir', tt),
+                                        _privacyRow('Keine Werbung, maximale Kontrolle', tt),
+                                      ],
+                                    ),
+                                  ),
                                 ],
                               ),
                             ),
@@ -395,9 +410,10 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
 
                         const SizedBox(height: 18),
 
-                        // Letzte Einsichten — Bubble (Provider-first)
-                        if ((hasProv && lastInsights.isNotEmpty) ||
-                            widget.reflectionEntries.isNotEmpty)
+                        // Letzte Einsichten — MOBILE: bewusst ausgeblendet
+                        if (!isMobile &&
+                            ((hasProv && lastInsights.isNotEmpty) ||
+                                widget.reflectionEntries.isNotEmpty))
                           ClipRRect(
                             borderRadius: const BorderRadius.all(zs.ZenRadii.m),
                             child: BackdropFilter(
@@ -420,7 +436,7 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
                                       'Deine letzten Einsichten',
                                       style: tt.titleMedium!.copyWith(
                                         color: zs.ZenColors.sage,
-                                        fontSize: isMobile ? 14.3 : 15.5,
+                                        fontSize: 15.5,
                                       ),
                                     ),
                                     const SizedBox(height: 7),
@@ -431,54 +447,14 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
                                       lastInsights: lastInsights,
                                       legacy: widget.reflectionEntries,
                                     ),
-                                    if ((hasProv && lastInsights.isEmpty) &&
-                                        widget.reflectionEntries.isEmpty)
-                                      const _EmptyRowHint(
-                                        icon: Icons.bubble_chart_rounded,
-                                        text: 'Noch keine Reflexionen.',
-                                      ),
                                   ],
                                 ),
                               ),
                             ),
                           ),
-
-                        // Privacy / Features — kleine Bubble
-                        Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 2.0),
-                          child: ClipRRect(
-                            borderRadius: const BorderRadius.all(zs.ZenRadii.s),
-                            child: BackdropFilter(
-                              filter: ImageFilter.blur(sigmaX: 4, sigmaY: 4),
-                              child: zw.ZenGlassCard(
-                                topOpacity: .16,
-                                bottomOpacity: .08,
-                                borderOpacity: .12,
-                                borderRadius:
-                                    const BorderRadius.all(zs.ZenRadii.s),
-                                padding: const EdgeInsets.symmetric(
-                                    vertical: 8, horizontal: 10),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text('• Daten bleiben lokal & anonym',
-                                        style: tt.bodySmall),
-                                    Text('• Export jederzeit möglich',
-                                        style: tt.bodySmall),
-                                    Text('• Deine Reflexionen gehören nur dir',
-                                        style: tt.bodySmall),
-                                    Text('• Keine Werbung, maximale Kontrolle',
-                                        style: tt.bodySmall),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-
-                        const SizedBox(height: 12),
 
                         // Affirmation
+                        if (isPhoneTall) const SizedBox(height: 6),
                         Opacity(
                           opacity: 0.96,
                           child: Row(
@@ -731,11 +707,10 @@ class _RangeChip extends StatelessWidget {
             ],
             Text(
               label,
-              style: TextStyle(
+              style: const TextStyle(
                 fontWeight: FontWeight.w700,
-                color: fg,
                 fontSize: 12.8,
-              ),
+              ).copyWith(color: fg),
             ),
           ],
         ),
@@ -909,7 +884,28 @@ class _ZenMoodBarSeries extends StatelessWidget {
   }
 }
 
-// MoodGraph (fl_chart) – Provider-Serie (−2 … +2) in Glas-Bubble
+// Heat-Band Hintergrund (horizontale Zonen −2…+2)
+class _HeatBand extends StatelessWidget {
+  const _HeatBand();
+
+  @override
+  Widget build(BuildContext context) {
+    // 4 Bänder: −2..−1, −1..0, 0..1, 1..2
+    final colors = [
+      const Color(0xFF7C3AED).withValues(alpha: .06), // violett
+      const Color(0xFF06B6D4).withValues(alpha: .06), // türkis
+      zs.ZenColors.sage.withValues(alpha: .06),       // jade
+      const Color(0xFFF59E0B).withValues(alpha: .06), // honig
+    ];
+    return IgnorePointer(
+      child: Column(
+        children: List.generate(4, (i) => Expanded(child: Container(color: colors[i]))),
+      ),
+    );
+  }
+}
+
+// MoodGraph (fl_chart) – Provider-Serie (−2 … +2) in Glas-Bubble, bunt/glow, Heat-Band + Emojis
 class ZenMoodGraphSeries extends StatelessWidget {
   final List<double> series; // −2 … +2; ältestes → neuestes
   const ZenMoodGraphSeries({super.key, required this.series});
@@ -917,58 +913,152 @@ class ZenMoodGraphSeries extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final data = series.takeLast(90); // falls Range 90 gewählt wurde
+    if (data.isEmpty) {
+      return const SizedBox(height: 124);
+    }
+
+    // Mehrfarbiger Gradient (links→rechts)
+    const lineGradient = LinearGradient(
+      colors: [
+        Color(0xFF7C3AED), // violett
+        Color(0xFF06B6D4), // türkis
+        zs.ZenColors.sage, // jade
+        Color(0xFFF59E0B), // honig
+      ],
+    );
+
+    // Kleine Hilfsfunktionen für Deko
+    List<int> findPeaks(List<double> d) {
+      final peaks = <int>[];
+      for (var i = 1; i < d.length - 1; i++) {
+        if (d[i] > d[i - 1] && d[i] > d[i + 1] && d[i] >= 0.8) {
+          peaks.add(i);
+        }
+      }
+      return peaks.take(4).toList(); // dezent halten
+    }
+
+    List<int> findDips(List<double> d) {
+      final dips = <int>[];
+      for (var i = 1; i < d.length - 1; i++) {
+        if (d[i] < d[i - 1] && d[i] < d[i + 1] && d[i] <= -0.8) {
+          dips.add(i);
+        }
+      }
+      return dips.take(3).toList();
+    }
+
+    final peaks = findPeaks(data);
+    final dips = findDips(data);
 
     return SizedBox(
-      height: 118,
-      child: LineChart(
-        LineChartData(
-          minY: -2,
-          maxY: 2,
-          gridData: const FlGridData(show: false),
-          borderData: FlBorderData(show: false),
-          titlesData: const FlTitlesData(show: false),
-          lineBarsData: [
-            LineChartBarData(
-              spots: List.generate(
-                data.length,
-                (i) => FlSpot(i.toDouble(), data[i]),
-              ),
-              isCurved: true,
-              gradient: const LinearGradient(
-                colors: [zs.ZenColors.deepSage, zs.ZenColors.sage],
-              ),
-              barWidth: 5.0,
-              dotData: const FlDotData(show: false),
-              belowBarData: BarAreaData(
-                show: true,
-                gradient: LinearGradient(
-                  colors: [
-                    zs.ZenColors.sage.withValues(alpha: 0.16),
-                    Colors.white.withValues(alpha: 0.10),
-                  ],
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
+      height: 124,
+      child: LayoutBuilder(
+        builder: (context, c) {
+          // Pixel-Mapping für Emojis (x: 0..n-1 → Breite, y: −2..2 → Höhe)
+          Offset pt(int i, double y) {
+            final n = data.length;
+            if (n <= 1) return Offset.zero;
+            final x = (i / (n - 1)) * c.maxWidth;
+            final py = ((2 - y) / 4.0) * c.maxHeight;
+            return Offset(x, py);
+          }
+
+          return Stack(
+            children: [
+              const Positioned.fill(child: _HeatBand()), // Zonen-Hintergrund
+              // Chart
+              Positioned.fill(
+                child: LineChart(
+                  LineChartData(
+                    minY: -2,
+                    maxY: 2,
+                    gridData: const FlGridData(show: false),
+                    borderData: FlBorderData(show: false),
+                    titlesData: const FlTitlesData(show: false),
+                    lineBarsData: [
+                      LineChartBarData(
+                        spots: List.generate(
+                          data.length,
+                          (i) => FlSpot(i.toDouble(), data[i]),
+                        ),
+                        isCurved: true,
+                        gradient: lineGradient,
+                        barWidth: 4.8,
+                        dotData: FlDotData(
+                          show: true,
+                          getDotPainter: (s, _, __, ___) {
+                            final y = s.y;
+                            Color cDot;
+                            if (y <= -0.5) {
+                              cDot = const Color(0xFF7C3AED);
+                            } else if (y >= 0.8) {
+                              cDot = zs.ZenColors.deepSage;
+                            } else {
+                              cDot = const Color(0xFFF59E0B);
+                            }
+                            return FlDotCirclePainter(
+                              radius: 2.8,
+                              color: Colors.white,
+                              strokeWidth: 2.2,
+                              strokeColor: cDot,
+                            );
+                          },
+                        ),
+                        belowBarData: BarAreaData(
+                          show: true,
+                          gradient: LinearGradient(
+                            colors: [
+                              const Color(0xFF06B6D4).withValues(alpha: 0.20),
+                              zs.ZenColors.sage.withValues(alpha: 0.16),
+                              Colors.white.withValues(alpha: 0.08),
+                            ],
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                          ),
+                        ),
+                      ),
+                    ],
+                    lineTouchData: LineTouchData(
+                      touchTooltipData: LineTouchTooltipData(
+                        // Kein tooltipBgColor (API-Change), Standard verwenden:
+                        getTooltipItems: (spots) => spots
+                            .map(
+                              (t) => LineTooltipItem(
+                                'Stimmung: ${t.y.toStringAsFixed(2)}',
+                                const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            )
+                            .toList(),
+                      ),
+                      handleBuiltInTouches: true,
+                    ),
+                  ),
                 ),
               ),
-            ),
-          ],
-          lineTouchData: LineTouchData(
-            touchTooltipData: LineTouchTooltipData(
-              getTooltipItems: (touchedSpots) => touchedSpots
-                  .map(
-                    (t) => LineTooltipItem(
-                      'Wert: ${t.y.toStringAsFixed(2)}',
-                      const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  )
-                  .toList(),
-            ),
-            handleBuiltInTouches: true,
-          ),
-        ),
+              // Deko: Wellen-Emojis (oben) & Tropfen (unten)
+              ...peaks.map((i) {
+                final o = pt(i, data[i]);
+                return Positioned(
+                  left: (o.dx - 8).clamp(0, c.maxWidth - 16),
+                  top: (o.dy - 22).clamp(0, c.maxHeight - 22),
+                  child: const Text('🌊', style: TextStyle(fontSize: 16)),
+                );
+              }),
+              ...dips.map((i) {
+                final o = pt(i, data[i]);
+                return Positioned(
+                  left: (o.dx - 7).clamp(0, c.maxWidth - 14),
+                  top: (o.dy + 4).clamp(0, c.maxHeight - 18),
+                  child: const Text('💧', style: TextStyle(fontSize: 14)),
+                );
+              }),
+            ],
+          );
+        },
       ),
     );
   }
@@ -999,7 +1089,7 @@ class _ProStatTile extends StatelessWidget {
     return Column(
       children: [
         CircleAvatar(
-          backgroundColor: zs.ZenColors.sage.withValues(alpha: 0.18),
+          backgroundColor: zs.ZenColors.sage.withValues(alpha: .18),
           radius: 20.5,
           child: Icon(icon, color: zs.ZenColors.sage, size: 20.5),
         ),
@@ -1064,6 +1154,18 @@ class _ProExportCircleButton extends StatelessWidget {
     );
   }
 }
+
+// kleine Helferzeile für Datenschutz-Hinweise
+Widget _privacyRow(String text, TextTheme tt) => Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2.0),
+      child: Row(
+        children: [
+          const Icon(Icons.verified_user_rounded, size: 14, color: zs.ZenColors.sage),
+          const SizedBox(width: 6),
+          Expanded(child: Text(text, style: tt.bodySmall)),
+        ],
+      ),
+    );
 
 // takeLast-Extension
 extension ListTakeLast<T> on List<T> {

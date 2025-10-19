@@ -1,23 +1,27 @@
 // lib/services/speech_service.dart
 //
-// SpeechService — Oxford Safety Edition v2.4 (prod-safe, reentrancy-proof)
-// Update: 2025-09-24
+// SpeechService — Oxford Safety Edition v2.5 (no auto-sim, prod-safe)
+// Aktualisiert: 2025-10-19
 // -----------------------------------------------------------------------
-// Drop-in-Kompatibilität zur v2.3-API:
+// Drop-in-Kompatibilität zur v2.3/2.4-API:
 //   - Klasse: SpeechService (ChangeNotifier)
 //   - Properties: isRecording, isPaused, isActive, transcript$, partial$,
 //                 level$, elapsed$, elapsedSeconds$, totalSeconds
 //   - Methoden: start/stop/pause/resume/toggle/reset/dispose
-//   - Debug-Simulation optional (kDebugMode)
 //   - attachTranscriber(...) & attachWhisper(...)
-// Änderungen ggü. v2.3:
-//   • Permissions: echter Check via permission_handler (graceful Fallback auf true
-//     bei Web/fehlender Plattform-Unterstützung, kein harter Fail).
-//   • Stabilität: defensive Guards gegen doppelte State-Wechsel, bessere
-//     Fehlerweitergabe ohne UI-Crash.
-//   • Kommentar- und Log-Feinschliff.
-// -----------------------------------------------------------------------
-
+// Änderungen ggü. v2.4:
+//   • WICHTIG: KEINE automatische Simulation mehr im Debug/ohne Engine.
+//     _simulate = simulate ?? false;
+//     → Simulation nur, wenn explizit angefordert.
+//   • Wenn keine Engine vorhanden oder Start fehlschlägt (und nicht simuliert
+//     werden soll), wechselt der Service in einen ruhigen Error-State.
+//   • Kommentare/Logs geschärft.
+//
+// Hinweis:
+//   Für echte Erkennung musst du eine Engine andocken:
+//     _speech.attachWhisper(WhisperService(simulate: false));
+//   und beim Start (z. B. im UI) optional: _speech.start(simulate: false, locale: 'de-DE').
+//
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:permission_handler/permission_handler.dart' as ph;
@@ -85,12 +89,12 @@ class SpeechService with ChangeNotifier {
   String? _lastFinalText;
   DateTime? _lastFinalAt;
 
-  // Debug-Simulation
+  // Simulation (nur wenn explizit gewünscht)
   bool _simulate = false;
   Timer? _simuTimer;
 
   // ---------------- Transcriber-Engine (Whisper etc.) ----------------
-  stt.SpeechTranscriber? _engine; // optional – bei Nichtsetzung nur Simulation
+  stt.SpeechTranscriber? _engine; // optional – ohne Engine keine Erkennung
   StreamSubscription<String>? _engPartialSub;
   StreamSubscription<String>? _engFinalSub;
   StreamSubscription<double>? _engLevelSub;
@@ -126,7 +130,7 @@ class SpeechService with ChangeNotifier {
   // ---------------- API: Start / Stop / Pause / Resume ----------------
 
   /// Startet Aufnahme & (falls Engine vorhanden) die Transkription.
-  /// simulate: null → im Debug-Build true, sonst false.
+  /// simulate: null → **false** (keine Auto-Simulation).
   Future<void> start({bool? simulate, Duration? maxDuration, String? locale}) async {
     if (_disposed) return;
     if (_state == SpeechState.stopping) return; // mitten im Stop → ignoriere
@@ -139,7 +143,7 @@ class SpeechService with ChangeNotifier {
       return;
     }
 
-    _simulate = simulate ?? kDebugMode; // Prod-Default: false
+    _simulate = simulate ?? false; // <<< WICHTIG: keine Auto-Simulation mehr
     _setState(SpeechState.recording);
     _recordingSince = DateTime.now();
 
@@ -177,8 +181,9 @@ class SpeechService with ChangeNotifier {
       try {
         await _engine!.start(locale: locale);
       } catch (e) {
-        // v2.4: Kein Error-State, wenn Simulation aktiv – stattdessen Warnung + Simulation.
+        // Keine Auto-Simulation mehr – klarer Fehlerpfad
         if (_simulate) {
+          // Nur wenn EXPLIZIT simuliert werden soll
           if (!_errorCtrl.isClosed) {
             _errorCtrl.add('Transcriber-Start fehlgeschlagen – wechsle in Simulation');
           }
@@ -187,8 +192,13 @@ class SpeechService with ChangeNotifier {
           _fail('Transcriber-Start fehlgeschlagen', error: e);
         }
       }
-    } else if (_simulate) {
-      _startSimulation();
+    } else {
+      // Keine Engine angebunden
+      if (_simulate) {
+        _startSimulation();
+      } else {
+        _fail('Keine Transcriber-Engine angebunden');
+      }
     }
   }
 
@@ -343,7 +353,7 @@ class SpeechService with ChangeNotifier {
       if (_elapsedCtrl.isClosed) return;
       _elapsedCtrl.add(_sw.elapsed);
       if (_simulate) {
-        // kleiner Pegel-Jitter für UI-Feedback (0..1..0 Dreieck)
+        // Ruhiger Pegel-Jitter (nur in Simulation)
         final ms = _sw.elapsedMilliseconds % 2000;
         final double base = ms < 1000 ? ms / 1000.0 : (2000 - ms) / 1000.0;
         final num clampedNum = base.clamp(0.05, 0.9);
@@ -364,16 +374,16 @@ class SpeechService with ChangeNotifier {
     _tick = null;
   }
 
-  // ---------------- Simulation (nur Dev) ----------------
+  // ---------------- Simulation (nur wenn explizit aktiviert) ----------------
 
   void _startSimulation() {
     _simuTimer?.cancel();
 
     final lines = <String>[
-      '… ich fühle mich heute',
-      '… ich fühle mich heute etwas müde',
-      '… ich fühle mich heute etwas müde, aber',
-      '… ich fühle mich heute etwas müde, aber hoffnungsvoll',
+      // bewusst kurz & neutral
+      '… (Simulation) ich spreche gerade',
+      '… (Simulation) kurzer Beispielsatz',
+      '… (Simulation) letzter Teil des Beispiels',
     ];
     int i = 0;
 
@@ -395,16 +405,10 @@ class SpeechService with ChangeNotifier {
   }
 
   // ---------------- Permissions ----------------
-  //
-  // Nutzt permission_handler, fällt aber auf true zurück, wenn:
-  // - Web (Browser zeigt eigenen Prompt),
-  // - Plattform die Abfrage nicht unterstützt,
-  // - ein Fehler geworfen wird (wir verhindern harte Crashes).
-  //
+
   Future<bool> _checkMicrophonePermission() async {
     try {
       if (kIsWeb) return true; // Browser fragt selbst
-      // Einige Desktop-Targets haben (noch) keine vollen Permission-APIs.
       final status = await ph.Permission.microphone.status;
       if (status.isGranted) return true;
       final req = await ph.Permission.microphone.request();
@@ -430,10 +434,7 @@ class SpeechService with ChangeNotifier {
 
   void _setState(SpeechState s) {
     if (_disposed) return;
-    if (_state == s) {
-      // keine UI-Flut
-      return;
-    }
+    if (_state == s) return;
     _state = s;
     try {
       if (!_disposed) notifyListeners();
