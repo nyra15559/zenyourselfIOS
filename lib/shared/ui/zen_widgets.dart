@@ -1,6 +1,6 @@
 // lib/shared/ui/zen_widgets.dart
 //
-// Oxford–Zen UI Widgets (v6.90 · 2025-09-17)
+// Oxford–Zen UI Widgets (v6.91 · 2025-10-22)
 // ---------------------------------------------------------------------------
 // WICHTIG – Vereinheitlichung v6.1 (ohne neue Dateien):
 // • Glas: Blur σ=18, bg White @0.20, border White @0.22, Shadow (0,8,20,0.10), Radius 20
@@ -90,11 +90,11 @@ class ZenAppScaffold extends StatelessWidget {
           if (backdropAsset != null)
             ZenBackdrop(
               asset: backdropAsset!,
-              wash: backdropWash ?? .06,
-              saturation: backdropSaturation ?? .95,
-              glow: backdropGlow ?? .28,
-              vignette: backdropVignette ?? .12,
-              milk: (backdropMilk ?? .10).clamp(0.0, 1.0),
+              wash: (backdropWash ?? .06),
+              saturation: (backdropSaturation ?? .95),
+              glow: (backdropGlow ?? .28),
+              vignette: (backdropVignette ?? .12),
+              milk: ((backdropMilk ?? .10).clamp(0.0, 1.0) as double),
             )
           else
             const DecoratedBox(decoration: BoxDecoration(color: ZenColors.bg)),
@@ -505,7 +505,7 @@ class ZenBackdrop extends StatelessWidget {
         // Bild mit Sättigungsfilter
         Positioned.fill(
           child: ColorFiltered(
-            colorFilter: _saturationFilter(saturation.clamp(0.0, 1.0)),
+            colorFilter: _saturationFilter((saturation.clamp(0.0, 1.0) as double)),
             child: ZenSafeImage.asset(
               asset,
               fit: BoxFit.cover,
@@ -517,7 +517,7 @@ class ZenBackdrop extends StatelessWidget {
         // Wash (Weißschleier)
         if (wash > 0)
           Positioned.fill(
-            child: Container(color: Colors.white.withValues(alpha: wash.clamp(0, 1))),
+            child: Container(color: Colors.white.withValues(alpha: (wash.clamp(0.0, 1.0) as double))),
           ),
 
         // Milk (zusätzliche, weiche „Milchigkeit“)
@@ -544,7 +544,7 @@ class ZenBackdrop extends StatelessWidget {
                     center: alignment,
                     radius: 1.0,
                     colors: [
-                      Colors.white.withValues(alpha: glow.clamp(0, 1) * .55),
+                      Colors.white.withValues(alpha: ((glow.clamp(0.0, 1.0) as double) * .55)),
                       Colors.transparent,
                     ],
                     stops: const [0.0, 1.0],
@@ -560,15 +560,17 @@ class ZenBackdrop extends StatelessWidget {
             child: IgnorePointer(
               child: DecoratedBox(
                 decoration: BoxDecoration(
-                  gradient: RadialGradient(
-                    center: Alignment.center,
-                    radius: 1.1,
-                    colors: [
-                      Colors.transparent,
-                      Colors.black.withValues(alpha: vignette.clamp(0, 1)),
-                    ],
-                    stops: const [0.65, 1.0],
-                  ),
+                  gradient: BoxDecoration(
+                    gradient: RadialGradient(
+                      center: Alignment.center,
+                      radius: 1.1,
+                      colors: [
+                        Colors.transparent,
+                        Colors.black.withValues(alpha: (vignette.clamp(0.0, 1.0) as double)),
+                      ],
+                      stops: const [0.65, 1.0],
+                    ),
+                  ).gradient!,
                 ),
               ),
             ),
@@ -580,7 +582,7 @@ class ZenBackdrop extends StatelessWidget {
             child: BackdropFilter(
               filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
               child: Container(
-                color: Colors.white.withValues(alpha: hazeStrength.clamp(0, 1)),
+                color: Colors.white.withValues(alpha: (hazeStrength.clamp(0.0, 1.0) as double)),
               ),
             ),
           ),
@@ -767,6 +769,13 @@ class ZenPrimaryButton extends StatelessWidget {
   final double height;
   final double? width;
 
+  /// NEU (optional): Tooltip-Text für Hover/Long-Press.
+  final String? tooltip;
+
+  /// Optional: explizite A11y-Texte (überschreiben Standard)
+  final String? semanticsLabel;
+  final String? semanticsHint;
+
   const ZenPrimaryButton({
     super.key,
     required this.label,
@@ -774,11 +783,14 @@ class ZenPrimaryButton extends StatelessWidget {
     this.icon,
     this.height = 48, // v6.1
     this.width,
+    this.tooltip,
+    this.semanticsLabel,
+    this.semanticsHint,
   });
 
   @override
   Widget build(BuildContext context) {
-    final child = Row(
+    final buttonChild = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         if (icon != null) ...[
@@ -788,24 +800,50 @@ class ZenPrimaryButton extends StatelessWidget {
         Text(
           label,
           style: const TextStyle(
-              fontWeight: FontWeight.w700, fontSize: 17, color: Colors.white),
+            fontWeight: FontWeight.w700,
+            fontSize: 17,
+            color: Colors.white,
+          ),
         ),
       ],
     );
 
-    return ElevatedButton(
+    Widget btn = ElevatedButton(
       onPressed: onPressed,
       style: ElevatedButton.styleFrom(
         backgroundColor: ZenColors.cta,
         foregroundColor: Colors.white,
         minimumSize: Size(width ?? 0, height),
         shape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(ZenRadii.l)),
+          borderRadius: BorderRadius.all(ZenRadii.l),
+        ),
         elevation: 1.5,
         padding: const EdgeInsets.symmetric(horizontal: 18),
       ),
-      child: child,
+      child: buttonChild,
     );
+
+    // Optionaler Tooltip
+    if (tooltip != null && tooltip!.trim().isNotEmpty) {
+      btn = Tooltip(
+        message: tooltip!,
+        waitDuration: const Duration(milliseconds: 600),
+        child: btn,
+      );
+    }
+
+    // Optionale explizite Semantics
+    if ((semanticsLabel != null && semanticsLabel!.isNotEmpty) ||
+        (semanticsHint != null && semanticsHint!.isNotEmpty)) {
+      btn = Semantics(
+        button: true,
+        label: semanticsLabel,
+        hint: semanticsHint,
+        child: btn,
+      );
+    }
+
+    return btn;
   }
 }
 

@@ -11,7 +11,6 @@ library launching;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/material.dart' show debugPrint;
 import 'package:url_launcher/url_launcher.dart' as ul;
 
 class Launching {
@@ -68,18 +67,13 @@ class Launching {
 
   static Future<bool> _launch(Uri uri, {required bool external}) async {
     try {
-      // Auf Web ist externalApplication häufig nicht sinnvoll/verfügbar.
-      final bool isWeb = kIsWeb;
+      const bool isWeb = kIsWeb;
       final ul.LaunchMode mode = (external && !isWeb)
           ? ul.LaunchMode.externalApplication
           : ul.LaunchMode.platformDefault;
 
-      // Web: sauber in neuem Tab öffnen (wo es Sinn ergibt).
-      final String? webTarget =
-          isWeb ? '_blank' : null; // ignoriert auf nicht-Web Plattformen
+      final String? webTarget = isWeb ? '_blank' : null; // ignoriert außerhalb Web
 
-      // Hinweis: tel:/sms: sind im Web teils eingeschränkt – wir versuchen es trotzdem,
-      // geben aber einen sanften Log-Hinweis.
       if (isWeb && (uri.scheme == 'tel' || uri.scheme == 'sms')) {
         debugPrint('[Launching] Hinweis: ${uri.scheme}: wird im Web nicht überall unterstützt → $uri');
       }

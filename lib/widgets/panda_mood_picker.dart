@@ -1,20 +1,19 @@
 // lib/widgets/panda_mood_picker.dart
 //
-// PandaMoodPicker — Bottom-Sheet (kompakt, a11y-freundlich)
-// - 4 Spalten (bei sehr schmalen Screens 3)
-// - Kleine Icons (~36–44dp), ruhige Labels 12–13sp
-// - Tap wählt und schließt; "Überspringen" gibt null zurück
-// - KEINE Snackbars/Autosave hier
-//
-// WICHTIG:
-// • Kein rootNavigator-Pop & Reentrancy-Guard → verhindert Doppel-Pop/Zurückspringen
-// • A11y: klare Semantics-Labels, Buttons korrekt ausgezeichnet
+// PandaMoodPicker — Bottom-Sheet (kompakt, a11y-first, color-blind-safe)
+// Update: 2025-10-22
+// ---------------------------------------------------------------------------
+// • 3–4 Spalten je nach Breite; Touchziele ≥ 44dp, Text ellipsized.
+// • Semantics: Grid als Liste von Buttons, klare Labels/Hints.
+// • Reentrancy-Guard (kein Doppel-Pop), kein Root-Pop.
+// • TextScaler-Clamp im Sheet (Overflow-Schutz).
 
 import 'dart:async';
 import 'package:flutter/foundation.dart' show kDebugMode, debugPrint;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/panda_mood.dart';
+import 'panda_mood_chip.dart';
 
 class PandaMoodPicker extends StatefulWidget {
   final void Function(PandaMood mood) onSelected;
@@ -85,27 +84,35 @@ class _PandaMoodPickerState extends State<PandaMoodPicker> {
         final w = MediaQuery.of(context).size.width;
         final cols = w < 380 ? 3 : 4;
 
-        return GridView.builder(
-          padding: widget.padding,
-          itemCount: moods.length,
-          physics: const BouncingScrollPhysics(),
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: cols,
-            crossAxisSpacing: 12,
-            mainAxisSpacing: 12,
-            childAspectRatio: 0.95, // etwas höher als breit – Platz fürs Label
+        return Scrollbar(
+          child: GridView.builder(
+            padding: widget.padding,
+            itemCount: moods.length,
+            physics: const BouncingScrollPhysics(),
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: cols,
+              crossAxisSpacing: 12,
+              mainAxisSpacing: 12,
+              childAspectRatio: 0.95, // etwas höher als breit – Platz fürs Label
+            ),
+            itemBuilder: (context, i) {
+              final m = moods[i];
+              return Semantics(
+                label: 'Stimmung wählen: ${m.labelDe}',
+                hint: 'Doppeltippen zum Auswählen',
+                button: true,
+                child: PandaMoodChip(
+                  mood: m,
+                  selected: false,
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    // KEIN Pop hier – obere Convenicence-Funktion steuert das Schließen.
+                    widget.onSelected(m);
+                  },
+                ),
+              );
+            },
           ),
-          itemBuilder: (context, i) {
-            final m = moods[i];
-            return _MoodTile(
-              mood: m,
-              onTap: () {
-                HapticFeedback.selectionClick();
-                // WICHTIG: Hier KEIN Pop! (Schließen steuert der Sheet-Builder)
-                widget.onSelected(m);
-              },
-            );
-          },
         );
       },
     );
@@ -175,6 +182,8 @@ class _MoodTile extends StatelessWidget {
               child: Image.asset(
                 mood.asset,
                 fit: BoxFit.contain,
+                errorBuilder: (_, __, ___) =>
+                    Icon(Icons.emoji_emotions, size: icon, color: theme.colorScheme.primary),
               ),
             ),
             const SizedBox(height: 8),
@@ -206,7 +215,7 @@ Future<PandaMood?> showPandaMoodPicker(
 
   final fut = showModalBottomSheet<PandaMood>(
     context: context,
-    useRootNavigator: false, // WICHTIG: im lokalen Navigator bleiben
+    useRootNavigator: false, // im lokalen Navigator bleiben
     isScrollControlled: true,
     useSafeArea: true,
     showDragHandle: true, // falls verfügbar
@@ -220,7 +229,9 @@ Future<PandaMood?> showPandaMoodPicker(
       final closing = ValueNotifier<bool>(false); // Reentrancy-Guard
 
       // Maximal 60% der Höhe, damit nichts erschlägt.
-      final maxHeight = MediaQuery.of(sheetContext).size.height * 0.60;
+      final rawMedia = MediaQuery.of(sheetContext);
+      final maxHeight = rawMedia.size.height * 0.60;
+      final clamped = rawMedia.textScaler.clamp(maxScaleFactor: 1.20, minScaleFactor: 0.90);
 
       if (kDebugMode) {
         debugPrint('[PandaMoodPicker] Sheet geöffnet (maxHeight=${maxHeight.toStringAsFixed(0)}).');
@@ -232,62 +243,66 @@ Future<PandaMood?> showPandaMoodPicker(
         Navigator.of(sheetContext).pop(value);
       }
 
-      return ConstrainedBox(
-        constraints: BoxConstraints(maxHeight: maxHeight),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // (Drag-Handle wird von showDragHandle gezeichnet; hier dezenter Balken als Fallback)
-            const SizedBox(height: 10),
-            Container(
-              width: 36,
-              height: 4,
-              decoration: BoxDecoration(
-                color: theme.colorScheme.outlineVariant,
-                borderRadius: BorderRadius.circular(2),
+      return MediaQuery(
+        data: rawMedia.copyWith(textScaler: clamped),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: maxHeight),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 10),
+              Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.outlineVariant,
+                  borderRadius: BorderRadius.circular(2),
+                ),
               ),
-            ),
-            const SizedBox(height: 12),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Semantics(
-                      header: true,
-                      child: Text(
-                        title,
-                        style: theme.textTheme.titleMedium,
+              const SizedBox(height: 12),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Semantics(
+                        header: true,
+                        child: Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleMedium,
+                        ),
                       ),
                     ),
-                  ),
-                  Semantics(
-                    button: true,
-                    label: 'Überspringen, keine Stimmung wählen',
-                    child: TextButton(
-                      onPressed: () {
-                        HapticFeedback.selectionClick();
-                        // Nur Sheet schließen (kein Root-Pop)
-                        safePop(chosen); // gibt null zurück
-                      },
-                      child: const Text('Überspringen'),
+                    Semantics(
+                      button: true,
+                      label: 'Überspringen, keine Stimmung wählen',
+                      child: TextButton(
+                        onPressed: () {
+                          HapticFeedback.selectionClick();
+                          // Nur Sheet schließen (kein Root-Pop)
+                          safePop(chosen); // gibt null zurück
+                        },
+                        child: const Text('Überspringen'),
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            Expanded(
-              child: PandaMoodPicker(
-                onSelected: (m) {
-                  if (closing.value) return;
-                  chosen = m;
-                  HapticFeedback.selectionClick();
-                  // Einziger Pop: Bottom-Sheet schließen und Ergebnis zurückgeben.
-                  safePop(m);
-                },
+              Expanded(
+                child: PandaMoodPicker(
+                  onSelected: (m) {
+                    if (closing.value) return;
+                    chosen = m;
+                    HapticFeedback.selectionClick();
+                    // Einziger Pop: Bottom-Sheet schließen und Ergebnis zurückgeben.
+                    safePop(m);
+                  },
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       );
     },

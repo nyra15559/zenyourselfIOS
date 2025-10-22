@@ -1,28 +1,39 @@
 // lib/services/guidance_service.dart
 //
-// ZenYourself — Guidance / Coaching Service (PANDA-REFLECT-12.2)
-// Facade über core/ApiService mit UI-freundlicher Normalisierung
+// ZenYourself — Guidance / Coaching Service (PANDA-REFLECT-12.6)
 // -----------------------------------------------------------------------------
-// Checkliste / Ziele dieses Moduls
-// ✅ UI erhält NUR "answer_helpers" (max 3, sanitisiert). Fallback intern aus
-//    followups, wenn helpers leer sind. UI selbst sieht keine followups.
-// ✅ Frage wird unterdrückt, wenn flow.mood_prompt/recommend_end aktiv.
-// ✅ Ruhige Bubbles – Service erzwingt nichts; liefert nur Worker-Daten.
-// ✅ Fester Footer-Disclaimer wird immer durchgereicht.
-// ✅ Risk-Mapping: {none|mild|high}; risk = true bei mild/high.
-// ✅ Session passthrough (threadId/turnIndex usw. bleiben erhalten).
-// ✅ Sanfte Fallbacks auf ältere Worker (v12.1 / legacy keys).
-// ✅ Keine Breaking Changes an Journal/Provider; reiner UI-Service.
-// -----------------------------------------------------------------------------
+// Fassade über core/ApiService mit UI-freundlicher Normalisierung.
+// Garantien / Verhalten:
+// • UI erhält NUR answer_helpers (max. 3, sanitisiert). Interner Fallback auf
+//   followups, aber diese werden NICHT an die UI zurückgereicht.
+// • Mindestens 2 Answer-Chips: Liefert der Worker nur 1, ergänzt der Service
+//   sanft einen zweiten generischen Starter („Wichtig ist mir außerdem“).
+// • Zusätzlich answer_helpers_insert: Variante zum direkten Einfügen ins Textfeld
+//   (ohne „…“, ohne Satzzeichen, ohne Auto-Send).
+// • Chips sind Insert-only, persistieren bis User-Interaktion, werden NICHT
+//   inline als Chat-Bubble gerendert (composer_only).
+// • Frage wird unterdrückt, wenn flow.mood_prompt bzw. recommend_end aktiv ist.
+// • Ruhiger Ton: Mirror wird von Instruktionssätzen befreit; reine Frage ≠ Mirror.
+// • Risk-Mapping {none|mild|high}; risk=true bei mild/high.
+// • Session passthrough; Legacy-Keys werden robust behandelt.
+// • Footer-Disclaimer wird immer durchgereicht.
+// • recentTopics()/recentHelpers(): liefern bewusst leere Listen
+//   (Themenchips laufen „nur im Background“ / UI zeigt nichts).
+//
+// Hinweis: Dieser Service ruft NUR Methoden, die in ApiService vorhanden sind.
+// Keine harte Abhängigkeit auf entfernte/optionale ApiService-Methoden.
+//
 
 library guidance_service;
 
 import 'dart:async';
 import 'package:flutter/foundation.dart' show debugPrint, kDebugMode;
 
-// *** WICHTIG: korrekte relative Imports, weil diese Datei in lib/services/ liegt ***
 import 'core/api_service.dart';
 import 'guidance/dtos.dart';
+
+// Memory-Fassade (für UI-Bridge/Hope & optionalen Debug-Hint)
+import '../core/memory/memory_service.dart' as mem;
 
 typedef Json = Map<String, dynamic>;
 
@@ -30,19 +41,18 @@ class GuidanceService {
   GuidanceService._();
   static final GuidanceService instance = GuidanceService._();
 
-  /// Einheitlicher Offline-/Fehlertext.
   static const String kOfflineError =
       'ZenYourself hat die Blümchen nicht gefunden. Bitte Verbindung prüfen.';
-
-  /// Footer-Disclaimer (UI blendet diesen unten permanent ein).
   static const String kFooterDisclaimer =
       'Dies ist keine Therapie, sondern eine mentale Begleitungs-App.';
 
-  /// Kurzer Transport-/Fehlerhinweis (durchgereicht aus ApiService).
+  // Sanfter, universeller Fallback-Text für den 2. Chip
+  static const String _kFallbackChipSeed = 'Wichtig ist mir außerdem';
+
   String get errorHint => ApiService.errorHint;
 
   // ---------------------------------------------------------------------------
-  // HTTP/Worker-Setup
+  // HTTP / Worker
   // ---------------------------------------------------------------------------
   void configureHttp({
     HttpInvoker? invoker,
@@ -60,23 +70,20 @@ class GuidanceService {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Health
-  // ---------------------------------------------------------------------------
   Future<bool> health() => ApiService.instance.healthCheck();
 
   // ---------------------------------------------------------------------------
   // Reflect / Session
   // ---------------------------------------------------------------------------
 
-  /// Legacy-Start (Kompatibilität für ältere Call-Sites).
+  /// Legacy-Start (Kompatibilität).
   Future<Json> startSession({
     required String text,
     String locale = 'de',
     String tz = 'Europe/Zurich',
     int maxTurns = 3,
     List<Map<String, String>>? history,
-    Map<String, dynamic>? clientContext,
+    Map<String, dynamic>? clientContext, // bleibt toleriert, derzeit ungenutzt
   }) async {
     final turn = await ApiService.instance.startSessionFull(
       text: text,
@@ -89,7 +96,7 @@ class GuidanceService {
     return _turnToJson(turn);
   }
 
-  /// Start einer v12-Reflexionsrunde.
+  /// Start einer v12-Runde (voll).
   Future<Json> startSessionFull({
     required String text,
     ReflectionSession? session,
@@ -109,7 +116,7 @@ class GuidanceService {
     return _turnToJson(turn);
   }
 
-  /// Fortsetzung einer bestehenden Reflexion.
+  /// Fortsetzung (voll).
   Future<Json> nextTurnFull({
     required ReflectionSession session,
     required String text,
@@ -127,8 +134,7 @@ class GuidanceService {
     return _turnToJson(turn);
   }
 
-  /// Fallback-Shim für alte Call-Sites, die `reflectFull` aufrufen.
-  /// Ruft intern `nextTurnFull` auf.
+  /// Shim für alte Call-Sites.
   Future<Json> reflectFull({
     required ReflectionSession session,
     required String text,
@@ -144,7 +150,7 @@ class GuidanceService {
     return _turnToJson(turn);
   }
 
-  /// Optionaler Smalltalk/„Ich will nur erzählen“-Pfad (talkOnly=true Workers)
+  /// Smalltalk / „Ich will nur erzählen“ (talkOnly-Pfad).
   Future<Json> talk({
     required ReflectionSession session,
     String? userText,
@@ -178,19 +184,39 @@ class GuidanceService {
         locale: locale,
         tz: tz,
       );
-      // Disclaimer ergänzen, ohne Struktur zu verändern
+      final norm = _normalizeClosureResponse(res);
       return {
-        ...res,
+        ...norm,
         'disclaimer': kFooterDisclaimer,
       };
     } on NoSuchMethodError {
-      // Sanfter Fallback für sehr alte Builds
+      // Sehr alte Builds: minimaler Fallback
       return <String, dynamic>{
         'flow': {
           'recommend_end': true,
           'mood_prompt': true,
         },
         if (session != null) 'session': session.toJson(),
+        'closure': {
+          'mood_intro': {'text': ''},
+          'hope_reply': '',
+          'closure_prompt': '',
+        },
+        'disclaimer': kFooterDisclaimer,
+      };
+    } catch (_) {
+      // Netz/Worker-Fehler: minimal
+      return <String, dynamic>{
+        'flow': {
+          'recommend_end': true,
+          'mood_prompt': true,
+        },
+        if (session != null) 'session': session.toJson(),
+        'closure': {
+          'mood_intro': {'text': ''},
+          'hope_reply': '',
+          'closure_prompt': '',
+        },
         'disclaimer': kFooterDisclaimer,
       };
     }
@@ -225,123 +251,307 @@ class GuidanceService {
   }
 
   // ---------------------------------------------------------------------------
+  // Memory-Recall (UI-Fassade) — Phase 1
+  // ---------------------------------------------------------------------------
+
+  /// Liefert deduplizierte Top-Themen aus dem lokalen Memory (für Bridge/Hope).
+  /// *Kein* Einfluss auf den Worker — der `context_hint` wird bereits im ApiService
+  /// automatisch mitgeschickt.
+  Future<List<String>> recallTopics({int limit = 6, String? topicHint}) async {
+    try {
+      // Signatur-tolerant: nur limit übergeben; optional nachträglich filtern.
+      final items = await mem.MemoryService.instance.recall(limit: limit);
+
+      final out = <String>[];
+      String topicOf(dynamic it) {
+        // tolerant gegenüber Map, DTO, toJson()
+        if (it is Map) {
+          final m = Map<String, dynamic>.from(it);
+          return (m['topic'] ?? m['tag'] ?? '').toString();
+        }
+        try {
+          final m = (it as dynamic).toJson?.call();
+          if (m is Map) return (m['topic'] ?? m['tag'] ?? '').toString();
+        } catch (_) {}
+        try {
+          final t = (it as dynamic).topic;
+          if (t != null) return t.toString();
+        } catch (_) {}
+        return it?.toString() ?? '';
+      }
+
+      final hint = (topicHint ?? '').trim().toLowerCase();
+      bool matchesHint(String s) {
+        if (hint.isEmpty) return true;
+        final t = s.toLowerCase();
+        return t.contains(hint);
+      }
+
+      for (final it in items) {
+        final t = topicOf(it).trim();
+        if (t.isEmpty) continue;
+        if (!matchesHint(t)) continue;
+        final key = t.toLowerCase();
+        if (!out.any((e) => e.toLowerCase() == key)) {
+          out.add(t);
+          if (out.length >= limit) break;
+        }
+      }
+      return out;
+    } catch (_) {
+      return <String>[];
+    }
+  }
+
+  /// Optionaler Debug-/Telemetry-Helfer: Gibt den aktuellen Kontext-Hint
+  /// (die kompakte Payload) so zurück, wie er an den Worker gesendet wird.
+  /// Praktisch für Logs oder A/B-Checks – UI nutzt das nicht direkt.
+  Future<Json?> contextHint({
+    int maxFacets = 3,
+    int maxTags = 5,
+    int maxAgeDays = 14,
+  }) async {
+    try {
+      final hint = mem.MemoryService.instance.buildContextHint(
+        maxFacets: maxFacets,
+        maxTags: maxTags,
+        maxAgeDays: maxAgeDays,
+      );
+      if (hint == null) return null;
+
+      List<String>? asList(dynamic v) {
+        if (v == null) return null;
+        if (v is List) {
+          return v
+              .where((e) => e != null)
+              .map((e) => e.toString())
+              .where((s) => s.trim().isNotEmpty)
+              .toList();
+        }
+        return null;
+      }
+
+      // tolerant: Feldnamen wie in MemoryContextHint (facets/tags/topics)
+      final facets = asList((hint as dynamic).facets);
+      final tags = asList((hint as dynamic).tags);
+      final topics = asList((hint as dynamic).topics);
+
+      final out = <String, dynamic>{};
+      if (facets != null && facets.isNotEmpty) out['recent_facets'] = facets;
+      if (tags != null && tags.isNotEmpty) out['recent_tags'] = tags;
+      if (topics != null && topics.isNotEmpty) out['last_themes'] = topics;
+      return out.isEmpty ? null : out;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Home/Starter-Chips: bewusst leer (nur „Background“)
+  // ---------------------------------------------------------------------------
+
+  /// Themen-Starter: aktuell leer lassen (UI zeigt nichts an).
+  Future<List<String>> recentTopics({int limit = 6}) async => <String>[];
+
+  /// Letzte Answer-Chips: aktuell leer lassen (UI optional).
+  Future<List<String>> recentHelpers({int limit = 3}) async => <String>[];
+
+  // ---------------------------------------------------------------------------
   // Helpers (Sanitizer / Normalisierung)
   // ---------------------------------------------------------------------------
 
-  /// Extrahiert und säubert Antwort-Chips (max 3) – bevorzugt `answer_helpers`,
-  /// Fallback auf `followups`, wenn leer/fehlend (nur intern, UI sieht followups nicht).
+  /// Extrahiert & säubert Answer-Chips (max. 3). Fallback auf followups (intern).
+  /// ACHTUNG: Mindestens 2 Chips sicherstellen (Service-seitig).
   List<String> _extractAnswerHelpers(ReflectionTurn t) {
-    final List<String> primary = t.answerHelpers;
-    final List<String> legacy = t.followups;
-    final List<String> candidates = primary.isNotEmpty ? primary : legacy;
+    final primary = t.answerHelpers;
+    final legacy = t.followups;
+    final candidates = primary.isNotEmpty ? primary : legacy;
 
     final out = <String>[];
     for (final f in candidates) {
-      final cleaned = _cleanChip(f);
+      final cleaned = _cleanChipForDisplay(f);
       if (cleaned.isNotEmpty) out.add(cleaned);
       if (out.length >= 3) break;
+    }
+
+    if (out.length == 1) {
+      // Sanfter zweiter Starter (Display-Variante mit „…“)
+      out.add(_cleanChipForDisplay(_kFallbackChipSeed));
     }
     return out;
   }
 
-  String _cleanChip(String s) {
+  /// Anzeige-Variante (Bubble/Chips).
+  String _cleanChipForDisplay(String s) {
     var x = s.trim();
-    // En-dash, Minus, Bullet, Whitespace
+    x = x.replaceAll(RegExp(r'^[0-9]+[.)]\s+'), '');
     x = x.replaceAll(RegExp(r'^[\u2013\-\u2022\s]+'), '');
-    // Anführungen (Deutsch/Franz/Single/Double)
-    x = x.replaceAll(RegExp("^[\\u201E\"'\\u203A\\u2039\\u00AB\\u00BB]+"), '');
-    // Satz-Endzeichen
-    x = x.replaceAll(RegExp(r'\s*[\?\!\.]+$'), '');
-    // Innenräume normalisieren
+    x = x.replaceAll(RegExp('^[„“"\'»«]+'), '');
     x = x.replaceAll(RegExp(r'\s+'), ' ').trim();
-    // Länge weich begrenzen
-    if (x.length > 72) x = x.substring(0, 72).trimRight() + '...';
+    x = x.replaceAll(RegExp(r'\s*[?!]+$'), '');
+    if (x.length > 72) x = '${x.substring(0, 72).trimRight()}…';
+    if (!x.endsWith('…')) x = '$x…';
+    return x.trim();
+  }
+
+  /// Einfüge-Variante (Textfeld, Insert-only).
+  String _cleanChipForInsert(String s) {
+    var x = s.trim();
+    x = x.replaceAll(RegExp(r'^[0-9]+[.)]\s+'), '');
+    x = x.replaceAll(RegExp(r'^[\u2013\-\u2022\s]+'), '');
+    x = x.replaceAll(RegExp('^[„“"\'»«]+'), '');
+    x = x.replaceAll(RegExp(r'[…]+$'), '');
+    x = x.replaceAll(RegExp(r'\s*[?!.\u2026]+$'), '');
+    x = x.replaceAll(RegExp(r'\s+'), ' ').trim();
     return x;
   }
 
-  /// Entfernt Instruktionssätze aus dem Mirror (z. B. Chip-Hinweis).
+  /// Entfernt Instruktions-Sätze aus dem Mirror (und reine Fragen).
   String? _cleanMirror(String? mirror) {
     if (mirror == null) return null;
     var text = mirror.trim();
 
-    // ASCII/Unicode-sichere Patterns (keine raw-Strings mit Apostroph)
     final patterns = <RegExp>[
       RegExp(r'^\s*Unten\s+findest\s+du\s+Antwort[-\s]?Chips.*$', caseSensitive: false, multiLine: true),
       RegExp(r'^\s*Unter\s+dem\s+Eingabefeld\s+findest\s+du\s+Antwort.*$', caseSensitive: false, multiLine: true),
-      RegExp(r'^\s*Waehle\s+einen\s+Antwort[-\s]?Chip.*$', caseSensitive: false, multiLine: true),
+      RegExp(r'^\s*Wähle\s+einen\s+Antwort[-\s]?Chip.*$', caseSensitive: false, multiLine: true),
       RegExp(r'you\s+can\s+use\s+the\s+answer\s+chips.*', caseSensitive: false, dotAll: true),
-      RegExp("below\\s+you'll\\s+find\\s+answer\\s+chips.*", caseSensitive: false, dotAll: true),
-      // Deutsche Variante ohne Umlaut (saetz statt sätz), Bindestrich optional
-      RegExp(r'antworte\s+in\s+\d+\s*-?\s*\d+\s*saetz', caseSensitive: false, dotAll: true),
+      RegExp(r"below\s+you'll\s+find\s+answer\s+chips.*", caseSensitive: false, dotAll: true),
+      RegExp(r'antworte\s+in\s+\d+\s*(?:bis|–|-)\s*\d+\s*sätz', caseSensitive: false, dotAll: true),
     ];
     for (final p in patterns) {
       text = text.replaceAll(p, '').trim();
     }
 
-    // Mehrere Leerzeilen normalisieren
     text = text.replaceAll(RegExp(r'\n{3,}'), '\n\n').trim();
 
-    // Kein Mirror, wenn es eigentlich eine reine Frage ist
-    if (text.endsWith('?')) return null;
-
+    if (text.endsWith('?')) return null; // reine Frage ≠ Mirror
     return text.isEmpty ? null : text;
   }
 
+  Map<String, dynamic> _normalizeClosureResponse(Map<String, dynamic> src) {
+    Map<String, dynamic> m(dynamic x) =>
+        (x is Map<String, dynamic>) ? x : (x is Map ? Map<String, dynamic>.from(x) : <String, dynamic>{});
+
+    final flow = m(src['flow']);
+    final closure = m(src['closure']);
+    final moodIntro = m(closure['mood_intro']);
+
+    return {
+      ...src,
+      'flow': {
+        ...flow,
+        'mood_prompt': flow['mood_prompt'] == true || flow['recommend_end'] == true,
+        'recommend_end': flow['recommend_end'] == true,
+      },
+      'closure': {
+        ...closure,
+        'mood_intro': {
+          'text': (moodIntro['text'] ?? '').toString(),
+        },
+        'hope_reply': (closure['hope_reply'] ?? '').toString(),
+        'closure_prompt': (closure['closure_prompt'] ?? '').toString(),
+      },
+    };
+  }
+
   // ---------------------------------------------------------------------------
-  // Normalisierung -> UI-freundliches JSON
+  // Normalisierung → UI-freundliches JSON
   // ---------------------------------------------------------------------------
   Json _turnToJson(ReflectionTurn t) {
-    final ReflectionFlow flow = t.flow ??
-        const ReflectionFlow(
-          recommendEnd: false,
-          suggestBreak: false,
-        );
-    final Map<String, dynamic> flowMap = flow.toJson();
+    final ReflectionFlow flow =
+        t.flow ?? const ReflectionFlow(recommendEnd: false, suggestBreak: false);
 
+    final flowJson = flow.toJson();
+    final flowOut = <String, dynamic>{
+      ...flowJson,
+      'mood_prompt': (flowJson['mood_prompt'] == true) || (flow.recommendEnd == true),
+      'recommend_end': flow.recommendEnd == true,
+    };
     final bool shouldPromptMood =
-        (flowMap['mood_prompt'] == true) || (flow.recommendEnd == true);
-
-    // kompatibel auch wenn outputText non-nullable ist
-    final String output = t.outputText;
-    final bool outputIsOk =
-        output.trim().isNotEmpty && output != ApiService.errorHint;
+        (flowOut['mood_prompt'] == true) || (flow.recommendEnd == true);
 
     // Risk-Mapping
-    String riskLevelOut;
-    switch (t.riskFlag) {
-      case 'crisis':
-        riskLevelOut = 'high';
-        break;
-      case 'support':
-        riskLevelOut = 'mild';
-        break;
-      default:
-        riskLevelOut = 'none';
-    }
+    final String riskLevelOut = switch (t.riskFlag) {
+      'crisis' => 'high',
+      'support' => 'mild',
+      _ => 'none',
+    };
+    final bool riskBool = (riskLevelOut == 'high' || riskLevelOut == 'mild');
 
-    final List<String> answerHelpersOut = _extractAnswerHelpers(t);
+    // Mirror (gereinigt)
     final String? cleanedMirror = _cleanMirror(t.mirror);
 
-    // kein Control-Flow im Map-Literal -> maximal kompatibel
+    // Primäre Frage (falls vorhanden)
+    final String? primaryQuestion =
+        (t.questions.isNotEmpty) ? t.questions.first : null;
+
+    // Facetten: wir nutzen t.tags als thematische Facetten
+    final List<String> facets =
+        t.tags.map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+
+    // Chips (Display & Insert) — mind. 2 sicherstellen
+    List<String> answerHelpersDisplay = _extractAnswerHelpers(t);
+    List<String> answerHelpersInsert =
+        answerHelpersDisplay.map(_cleanChipForInsert).where((e) => e.isNotEmpty).toList(growable: false);
+    if (answerHelpersDisplay.length == 1) {
+      // identischen Fallback in beide Varianten einfügen
+      final fbDisplay = _cleanChipForDisplay(_kFallbackChipSeed);
+      final fbInsert  = _cleanChipForInsert(_kFallbackChipSeed);
+      answerHelpersDisplay = [...answerHelpersDisplay, fbDisplay];
+      answerHelpersInsert  = [...answerHelpersInsert,  fbInsert];
+    }
+
+    // Chip-Typ nur als Stil-Hinweis
+    final String chipType = _inferChipType(primaryQuestion, t.tags);
+
+    // Stabile Chip-Set-ID (inkl. finaler Display-Chips)
+    final sessMap = t.session.toJson();
+    final sid = (sessMap['thread_id'] ?? sessMap['id'] ?? '').toString();
+    final sturn = (sessMap['turn_index'] ?? sessMap['turn'] ?? 0).toString();
+    final chipSetId = '$sid:$sturn:${answerHelpersDisplay.join("|").hashCode}';
+
     final map = <String, dynamic>{
       'session': t.session.toJson(),
       'risk_level': riskLevelOut,
-      'risk': riskLevelOut == 'high' || riskLevelOut == 'mild',
-      'flow': flowMap,
+      'risk': riskBool,
+      'flow': flowOut,
       'disclaimer': kFooterDisclaimer,
+      'understanding': {
+        'facets': facets,
+      },
+      'ui': {
+        'chips': {
+          'insert_only': true,
+          'auto_send': false,
+          'persist_until': 'user_interaction',
+          'place': 'composer_only',
+          'type': chipType,
+          'set_id': chipSetId,
+          'reset_suggestion': shouldPromptMood,
+        },
+      },
     };
+
+    // insight_score (falls vorhanden)
+    final dynamic maybeInsight = flowJson['insight_score'];
+    if (maybeInsight is num) {
+      map['insight_score'] = maybeInsight;
+    }
 
     if (cleanedMirror != null) {
       map['mirror'] = cleanedMirror;
     }
-    if (!shouldPromptMood && t.primaryQuestion != null) {
-      map['question'] = t.primaryQuestion;
+    if (!shouldPromptMood && (primaryQuestion?.trim().isNotEmpty ?? false)) {
+      map['question'] = primaryQuestion;
     }
-    if (answerHelpersOut.isNotEmpty) {
-      map['answer_helpers'] = answerHelpersOut;
+    if (answerHelpersDisplay.isNotEmpty) {
+      map['answer_helpers'] = answerHelpersDisplay;
+      map['answer_helpers_insert'] = answerHelpersInsert;
+      map['chip_set_id'] = chipSetId;
     }
-    if (outputIsOk) {
-      map['output_text'] = output;
+    if (t.outputText.trim().isNotEmpty && t.outputText != ApiService.errorHint) {
+      map['output_text'] = t.outputText;
     }
     if (t.talk.isNotEmpty) {
       map['talk'] = t.talk;
@@ -352,7 +562,24 @@ class GuidanceService {
     if (t.context.isNotEmpty) {
       map['context'] = t.context;
     }
+    // NEW: helper_suggestion aus Worker durchreichen (Screen zeigt sie nahe der Frage)
+    final hs = (t.helperSuggestion ?? '').trim();
+    if (hs.isNotEmpty) {
+      map['helper_suggestion'] = hs;
+    }
 
     return map;
+  }
+
+  // Nur Stil-Hinweis
+  String _inferChipType(String? question, List<String> tags) {
+    final q = (question ?? '').toLowerCase();
+    if (q.contains('kleine option') || (q.contains('kurz') && q.contains('ausprobieren'))) {
+      return 'tips';
+    }
+    if (tags.any((t) => t.toLowerCase().contains('tip') || t.toLowerCase().contains('übung'))) {
+      return 'tips';
+    }
+    return 'reflect';
   }
 }

@@ -11,6 +11,7 @@
 // • Suche, Range, Export/Import (tolerant)
 // • Stabil: O(1)-Lookup per ID-Index, stabile Sortierung
 // • NEU in v9.2: storyBody wird sauber persistiert (addEntry/addStory), niemals gekürzt
+// • Feinschliff: Suche berücksichtigt auch storyBody; Day-Gruppierung mit ID-Tie-Break.
 //
 // Projektregeln (wichtig):
 // • JournalEntry.storyBody wird NIE gekürzt/entfernt.
@@ -69,7 +70,7 @@ class JournalEntriesProvider with ChangeNotifier {
       _entries.where((e) => e.kind == EntryKind.journal).toList(growable: false);
 
   List<JournalEntry> get reflections =>
-    _entries.where((e) => e.kind == EntryKind.reflection).toList(growable: false);
+      _entries.where((e) => e.kind == EntryKind.reflection).toList(growable: false);
 
   List<JournalEntry> get stories =>
       _entries.where((e) => e.kind == EntryKind.story).toList(growable: false);
@@ -81,7 +82,7 @@ class JournalEntriesProvider with ChangeNotifier {
       if (e.kind == EntryKind.reflection) return e;
     }
     return null;
-  }
+    }
 
   JournalEntry? byId(String id) {
     final i = _idIndex[id];
@@ -462,7 +463,8 @@ class JournalEntriesProvider with ChangeNotifier {
     String id, {
     List<String>? questions,
     String? mirror,
-    String? riskLevel, // 'none' | 'mild' | 'high'
+    String? riskLevel // 'none' | 'mild' | 'high'
+    ,
     DateTime? ts,
   }) {
     final idx = _idIndex[id];
@@ -611,7 +613,11 @@ class JournalEntriesProvider with ChangeNotifier {
     final sortedKeys = buckets.keys.toList()..sort((a, b) => b.compareTo(a));
     for (final k in sortedKeys) {
       final day = _keyToLocalDay(k);
-      final items = buckets[k]!..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      final items = buckets[k]!
+        ..sort((a, b) {
+          final c = b.createdAt.compareTo(a.createdAt);
+          return c != 0 ? c : b.id.compareTo(a.id);
+        });
       groups.add(JournalDayGroup(
         day: day,
         label: _dayLabel(day, nowLocal),
@@ -724,6 +730,7 @@ class JournalEntriesProvider with ChangeNotifier {
         e.userAnswer,
         e.storyTitle,
         e.storyTeaser,
+        e.storyBody, // storyBody explizit durchsuchbar
         e.tags.join(' '),
       ].whereType<String>().join(' ').toLowerCase();
       if (hay.contains(q)) out.add(e);
@@ -850,6 +857,15 @@ class JournalEntriesProvider with ChangeNotifier {
     'Glücklich': 2.0,
   };
 
+  static const Map<String, double> _moodMapLower = {
+    'wütend': -2.0,
+    'gestresst': -1.0,
+    'traurig': -1.0,
+    'neutral': 0.0,
+    'ruhig': 1.0,
+    'glücklich': 2.0,
+  };
+
   static double? _moodScoreFromTags(List<String> tags) {
     // 1) moodScore:<n> priorisieren (0..4 → -2..+2)
     for (final t in tags) {
@@ -859,12 +875,12 @@ class JournalEntriesProvider with ChangeNotifier {
         if (n != null) return (-2 + (n.clamp(0, 4) * 1.0));
       }
     }
-    // 2) mood:<Label>
+    // 2) mood:<Label> (case-insensitiv)
     for (final t in tags) {
       final s = t.trim();
       if (s.startsWith('mood:')) {
-        final label = s.substring(5);
-        return _moodMap[label];
+        final label = s.substring(5).trim();
+        return _moodMap[label] ?? _moodMapLower[label.toLowerCase()];
       }
     }
     return null;

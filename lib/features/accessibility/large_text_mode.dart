@@ -3,10 +3,9 @@
 // LargeTextMode — sichere, a11y-freundliche Textskalierung
 // --------------------------------------------------------
 // • Vier Stufen: System / Normal / Groß / XL
-// • Respektiert systemweite Einstellungen (nimmt niemals weniger als das System)
-// • Persistenz via SharedPreferences (über App-Neustarts hinweg)
-// • Saubere Semantik & Tooltips, klare Kontraste
-// • Clamping (0.8–2.0), um Layoutbrüche zu vermeiden
+// • Respektiert System (nimmt nie weniger als System)
+// • Persistenz via SharedPreferences
+// • TextScaler (Flutter ≥3.12), Clamping [0.8, 2.0]
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -14,10 +13,10 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'a11y_utils.dart';
 
-/// Verschiedene Stufen für die Textgröße (system/normal/large/xl)
+/// Verschiedene Stufen für die Textgröße
 enum LargeTextScale { system, normal, large, xl }
 
-/// Provider für Large-Text-Mode (globale Accessibility)
+/// Provider für Large-Text-Mode (global)
 class LargeTextModeProvider with ChangeNotifier {
   static const _prefsKey = 'a11y.textScale';
   LargeTextScale _scale;
@@ -26,7 +25,6 @@ class LargeTextModeProvider with ChangeNotifier {
 
   LargeTextScale get scale => _scale;
 
-  /// Setzt die Skala, speichert sie und benachrichtigt Listener.
   set scale(LargeTextScale v) {
     if (_scale != v) {
       _scale = v;
@@ -35,7 +33,7 @@ class LargeTextModeProvider with ChangeNotifier {
     }
   }
 
-  /// Faktor für MediaQuery.textScaleFactor.
+  /// Faktor für linearen TextScaler.
   /// -1 bedeutet: Systemwert unverändert durchreichen.
   double get factor {
     switch (_scale) {
@@ -50,23 +48,20 @@ class LargeTextModeProvider with ChangeNotifier {
     }
   }
 
-  /// Persistiert die aktuelle Wahl in SharedPreferences.
   Future<void> _persist() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_prefsKey, _scale.name);
     } catch (_) {
-      // bewusst schlucken: A11y darf nie crashen
+      // A11y-Fehler nie crashen lassen
     }
   }
 
-  /// Lädt den gespeicherten Wert (optional im App-Start aufrufen).
   Future<void> load() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final saved = prefs.getString(_prefsKey);
       if (saved != null) {
-        // byName kann werfen – defensiv auffangen
         final parsed = LargeTextScale.values.firstWhere(
           (e) => e.name == saved,
           orElse: () => _scale,
@@ -74,13 +69,11 @@ class LargeTextModeProvider with ChangeNotifier {
         _scale = parsed;
         notifyListeners();
       }
-    } catch (_) {
-      // still: sicher weiterlaufen
-    }
+    } catch (_) {}
   }
 }
 
-/// Umschalter für Settings-Screen – inklusive Erklärung/Tooltip
+/// Umschalter für Settings
 class LargeTextModeSwitcher extends StatelessWidget {
   const LargeTextModeSwitcher({super.key});
 
@@ -150,12 +143,8 @@ class LargeTextModeSwitcher extends StatelessWidget {
   }
 }
 
-/// Provider-Widget, das MediaQuery.textScaleFactor global setzt.
+/// Provider-Widget, das MediaQuery.textScaler global setzt.
 /// GANZ OBEN im Widget-Tree einbinden!
-/// Sicherheitslogik:
-///  • Wenn "System": gib unverändert durch
-///  • Sonst: nimm das Maximum aus System- und gewählter Skala (reduziert nie A11y)
-///  • Clamp auf [0.8, 2.0], um UI-Brüche zu vermeiden
 class LargeTextProvider extends StatelessWidget {
   final Widget child;
   const LargeTextProvider({super.key, required this.child});
@@ -169,12 +158,12 @@ class LargeTextProvider extends StatelessWidget {
     }
 
     final media = MediaQuery.of(context);
-    final base = media.textScaleFactor;
-    final effective = _clampDouble(
-      base >= chosen ? base : chosen, // niemals kleiner als System
-      0.8,
-      2.0,
-    );
+    // System-Faktor aus TextScaler approximieren
+    final systemScale = MediaQuery.textScalerOf(context).scale(16.0) / 16.0;
+
+    // Niemals kleiner als System; dann clampen
+    final maxed = systemScale >= chosen ? systemScale : chosen;
+    final effective = _clampDouble(maxed, 0.8, 2.0);
 
     return MediaQuery(
       data: media.copyWith(textScaler: TextScaler.linear(effective)),
@@ -186,10 +175,10 @@ class LargeTextProvider extends StatelessWidget {
     if (v < min) return min;
     if (v > max) return max;
     return v;
-    }
+  }
 }
 
-// Tipp zur Verwendung:
+// Beispiel-Verwendung:
 //
 // ChangeNotifierProvider(
 //   create: (_) {

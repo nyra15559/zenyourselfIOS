@@ -1,11 +1,14 @@
 // lib/services/persistence_serializer.dart
 //
 // PersistenceSerializer — v6 (robust, tolerant, backwards-friendly)
+// ------------------------------------------------------------------
 // - Akzeptiert Wrapper {schema,version,count,journal:[...]} ODER rohe Liste
 // - Items dürfen Map ODER JSON-String (Map) sein
-// - Toleriert verschiedene Feldnamen (type/kind, createdAt/created_at/timestamp)
-// - Sortiert stabil DESC nach createdAt
+// - Toleriert verschiedene Feldnamen (type/kind, createdAt/created_at/timestamp/ts/date/time)
+// - Sortiert stabil DESC nach createdAt, bei Gleichstand DESC nach id
 // - Zusätzliche Helfer: decodeList, decodeEntry, decodeJsonLines
+//
+// Lizenz: ZenYourself (v6zenyourself) — Oxford–Zen Style
 
 import 'dart:convert';
 import '../models/journal_entry.dart' as jm;
@@ -50,8 +53,8 @@ class PersistenceSerializer {
       if (entry != null) out.add(entry);
     }
 
-    // Stabil: DESC nach createdAt
-    out.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    // Stabil: DESC nach createdAt, bei Gleichstand ID DESC
+    out.sort(_stableDescComparator);
     return out;
   }
 
@@ -63,13 +66,13 @@ class PersistenceSerializer {
       final e = decodeEntry(item);
       if (e != null) out.add(e);
     }
-    out.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    out.sort(_stableDescComparator);
     return out;
   }
 
   /// Robustes Item-Decoding:
   /// - akzeptiert Map ODER JSON-String(Map)
-  /// - normalisiert Feldnamen (type/kind, createdAt/created_at/timestamp)
+  /// - normalisiert Feldnamen (type/kind, createdAt/created_at/timestamp/ts/date/time)
   static jm.JournalEntry? decodeEntry(dynamic item) {
     Map<String, dynamic>? map;
 
@@ -106,16 +109,27 @@ class PersistenceSerializer {
   }
 
   /// JSON-Lines (eine JSON-Struktur pro Zeile) → Liste
+  /// - jede Zeile darf Wrapper, Map oder List sein
   static List<jm.JournalEntry> decodeJsonLines(String? lines) {
     if (lines == null || lines.trim().isEmpty) {
       return const <jm.JournalEntry>[];
     }
     final out = <jm.JournalEntry>[];
     for (final line in const LineSplitter().convert(lines)) {
-      final e = decode(line);
-      if (e.isNotEmpty) out.addAll(e);
+      final trimmed = line.trim();
+      if (trimmed.isEmpty) continue;
+      // Zeile kann Liste, Map (oder Wrapper) enthalten
+      final decodedList = decode(trimmed);
+      if (decodedList.isNotEmpty) {
+        out.addAll(decodedList);
+        continue;
+      }
+      // Fallback: Einzel-Entry
+      final e = decodeEntry(trimmed);
+      if (e != null) out.add(e);
     }
-    return out..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    out.sort(_stableDescComparator);
+    return out;
   }
 
   // ---------------- intern ----------------
@@ -123,8 +137,15 @@ class PersistenceSerializer {
   static List _extractList(dynamic data) {
     if (data is List) return data;
     if (data is Map<String, dynamic>) {
+      // Präferiertes Feld
       final j = data['journal'];
       if (j is List) return j;
+
+      // Bekannte Alternativen (ganz alte Exporte)
+      for (final key in const ['entries', 'items', 'data']) {
+        final v = data[key];
+        if (v is List) return v;
+      }
 
       // Fallback: erste List-Val in Map nehmen (sehr alt)
       final possible = data.values.firstWhere(
@@ -142,18 +163,31 @@ class PersistenceSerializer {
       m['kind'] = m['type'];
     }
 
-    // createdAt-Varianten
+    // createdAt-Varianten → createdAt
     if (!m.containsKey('createdAt')) {
-      if (m.containsKey('created_at')) {
-        m['createdAt'] = m['created_at'];
-      } else if (m.containsKey('timestamp')) {
-        m['createdAt'] = m['timestamp'];
+      for (final k in const [
+        'created_at',
+        'timestamp',
+        'ts',
+        'date',
+        'time',
+        'created',
+      ]) {
+        if (m.containsKey(k)) {
+          m['createdAt'] = m[k];
+          break;
+        }
       }
     }
 
-    // id-Fallback
-    if (!m.containsKey('id') && m.containsKey('_id')) {
-      m['id'] = m['_id'];
+    // id-Fallbacks
+    if (!m.containsKey('id')) {
+      for (final k in const ['_id', 'uid']) {
+        if (m.containsKey(k)) {
+          m['id'] = m[k];
+          break;
+        }
+      }
     }
   }
 
@@ -162,11 +196,16 @@ class PersistenceSerializer {
 
     // ISO-String unverändert (sofern parsebar)
     if (v is String) {
+      // numeric string?
+      final numVal = num.tryParse(v.trim());
+      if (numVal != null) {
+        return _normalizeCreatedAt(numVal);
+      }
       try {
         final dt = DateTime.parse(v).toUtc();
         return dt.toIso8601String();
       } catch (_) {
-        // weiter unten evtl. als Zahl interpretieren
+        // fällt durch
       }
     }
 
@@ -183,5 +222,11 @@ class PersistenceSerializer {
     }
 
     return null;
+  }
+
+  static int _stableDescComparator(jm.JournalEntry a, jm.JournalEntry b) {
+    final c = b.createdAt.compareTo(a.createdAt);
+    if (c != 0) return c;
+    return b.id.compareTo(a.id);
   }
 }

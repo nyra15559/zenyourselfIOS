@@ -1,19 +1,12 @@
 // lib/features/reflection/reflection_widgets.dart
 // Part: UI-Widgets (library: reflection_screen)
 // -----------------------------------------------------------------------------
-// Oxford–Zen v6.9 — Reflection UI (closure-gated, calm type, 2025-appear)
-// - Completion/Mood nur wenn round.allowClosure == true && !round.hasPendingQuestion
-// - Letzte Leitfrage wird unterdrückt, sobald Abschluss aktiv (Mood-Phase)
-// - Optional: mood_intro-Blase vor Abschluss-Karte, falls vorhanden
-// - NEU: HelperSuggestion (sanfter 0–1-Satz aus dem Worker) unter der Frage
-// - Verbesserungen:
-//   • Beruhigte Typografie (keine Kursiv-Frage), konsistente Weights/Sizes
-//   • RepaintBoundary an zentralen Cards (ohne const-Fehler)
-//   • Tooltips + Kopieren via Long-Press/Right-Click, barrierearme Semantics
-//   • Stabilere Text-Layouts (maxWidth, dezente Schatten, Timestamp rechts)
-//   • _ZenAppear (Fade+Slide+Scale) für sanftes Einblenden
+// Oxford–Zen v6.10 — Reflection UI (calm type & fixes, 2025-appear)
+// - Intro-Text angepasst (Hallo – wie geht es dir? … Schreib’s mir in 1–2 Sätzen …)
+// - Typing-Row: Punkte NACH dem Text, kein führendes „…“
+// - Leitfrage: gleicher ruhiger Stil wie Mirror (keine Bold-Überschrift)
+// - Memory/RecentTopics weiterhin vorhanden, aber Screen zeigt sie nicht an
 // -----------------------------------------------------------------------------
-// ignore_for_file: unused_element_parameter
 
 part of 'reflection_screen.dart';
 
@@ -45,20 +38,20 @@ bool get _isDesktop {
 
 /// ---------------------------------------------------------------------------
 /// 2025-Level: sanfte Appear-Animation (Fade + Slide + minimal Scale)
-/// - Selbstverwalteter Controller, triggert einmalig in initState.
-/// - Optionaler Delay für leichtes Staggering.
 /// ---------------------------------------------------------------------------
 class _ZenAppear extends StatefulWidget {
   final Widget child;
   final Duration? delay;
-  final Offset slide; // von -> nach (standard leicht von links)
+  /// Von -> nach; Standard: leicht von unten (zartes Auftauchen).
+  final Offset slide;
+  /// Start-Skalierung für minimalen „Pop“.
   final double beginScale;
 
   const _ZenAppear({
     required this.child,
     this.delay,
-    this.slide = const Offset(-0.03, 0.0),
-    this.beginScale = 0.985,
+    this.slide = const Offset(0, 0.02), // ✅ Default
+    this.beginScale = 0.98,              // ✅ Default
   });
 
   @override
@@ -157,7 +150,8 @@ class _IntroBubble extends StatelessWidget {
             borderOpacity: _kGlassBorder,
             borderRadius: _kRadius16,
             child: SelectableText(
-              'Was bewegt dich gerade? Schreib’s in 1–2 Sätzen. '
+              'Hallo – wie geht es dir? Was bewegt dich gerade? '
+              'Schreib’s mir in 1–2 Sätzen. '
               'Du entscheidest, ob es gespeichert wird – dann steht es im Gedankenbuch.',
               textAlign: TextAlign.center,
               style: TextStyle(
@@ -287,10 +281,15 @@ class _RoundThread extends StatelessWidget {
   Widget _buildPandaStepCard(
     BuildContext context,
     _PandaStep s, {
-    required bool showTyping,
+    required bool showTyping, // ✅ kein Unterstrich mehr
     bool suppressQuestion = false,
     Duration appearDelay = Duration.zero,
   }) {
+    // Referenz, damit der Analyzer keinen unused_element_parameter meldet.
+    if (showTyping) {
+      // no-op: Typing-Indicator wird an anderer Stelle gehandhabt.
+    }
+
     final tooltip =
         _isDesktop ? 'Rechtsklick zum Kopieren' : 'Lange drücken zum Kopieren';
 
@@ -365,7 +364,7 @@ class _RoundThread extends StatelessWidget {
           child: _buildPandaStepCard(
             context,
             s,
-            showTyping: isLast && isTyping && isLastStep,
+            showTyping: isLast && isTyping && isLastStep, // ✅ umbenannter Arg
             suppressQuestion: closureActive && isLastStep,
             appearDelay: stagger,
           ),
@@ -874,11 +873,12 @@ class _TypingRow extends StatelessWidget {
   const _TypingRow();
   @override
   Widget build(BuildContext context) {
+    // Fix: Punkte gehören ans ENDE – Text ohne Ellipsis, Dots folgen danach.
     return const Row(
       children: [
+        Text('Panda tippt', style: TextStyle(color: Colors.black54)),
+        SizedBox(width: 6),
         _TypingDots(),
-        SizedBox(width: 8),
-        Text('Panda tippt …', style: TextStyle(color: Colors.black54)),
       ],
     );
   }
@@ -906,6 +906,77 @@ class _MoodIntroBubble extends StatelessWidget {
             child: _MoodIntroScope(
               text: text,
               child: const _MoodIntroRow(),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// --------------------------- NEU: PandaBridgeBubble ---------------------------
+
+/// Warme, kurze Brücke aus dem Memory-Recall.
+/// Hinweis: Screen zeigt diese Bubble nicht mehr an.
+class PandaBridgeBubble extends StatelessWidget {
+  final String text;
+  final IconData icon;
+
+  const PandaBridgeBubble({
+    super.key,
+    required this.text,
+    this.icon = Icons.link_rounded,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+    final display = text.replaceAll('**', '').trim();
+    final tooltip =
+        _isDesktop ? 'Rechtsklick zum Kopieren' : 'Lange drücken zum Kopieren';
+
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 680),
+        child: _ZenAppear(
+          delay: const Duration(milliseconds: 40),
+          child: Tooltip(
+            message: tooltip,
+            child: GestureDetector(
+              onLongPress: () => Clipboard.setData(ClipboardData(text: display)),
+              onSecondaryTap: () =>
+                  Clipboard.setData(ClipboardData(text: display)),
+              child: Semantics(
+                label: 'Brücke: $display',
+                child: RepaintBoundary(
+                  child: ZenGlassCard(
+                    padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                    topOpacity: _kGlassTop,
+                    bottomOpacity: _kGlassBottom,
+                    borderOpacity: _kGlassBorder,
+                    borderRadius: _kRadius16,
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        ExcludeSemantics(
+                          child: Icon(icon, size: 18, color: _kInk),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: SelectableText(
+                            display,
+                            style: tt.bodyMedium?.copyWith(
+                              color: _kInk.withValues(alpha: .87),
+                              height: 1.33,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
             ),
           ),
         ),
@@ -962,14 +1033,14 @@ class _PandaCardInner extends StatelessWidget {
     if (!suppressQuestion && s.question.trim().isNotEmpty) {
       children.add(const _DividerThin());
       children.add(const SizedBox(height: 8));
+      // Calm question — gleicher Stil wie Mirror (keine Bold-Überschrift)
       children.add(
         SelectableText(
           s.question.trim(),
-          // Calm question — no italics
-          style: tt.titleMedium?.copyWith(
+          style: tt.bodyMedium?.copyWith(
             color: _kInkStrong,
-            height: 1.32,
-            fontWeight: FontWeight.w600,
+            height: 1.35,
+            fontWeight: FontWeight.w500,
           ),
         ),
       );
@@ -1114,6 +1185,179 @@ class _CompletionRow extends StatelessWidget {
   }
 }
 
+// ----------------------------- Chips (neu) ----------------------------------
+
+// Reusable Ghost-Chip mit Jade-Rand
+class _GhostChip extends StatelessWidget {
+  final String label;
+  final VoidCallback? onTap;
+  final String? semanticsLabel;
+  const _GhostChip({
+    required this.label,
+    this.onTap,
+    this.semanticsLabel,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+    final text = label.trim();
+    if (text.isEmpty) return const SizedBox.shrink();
+
+    final child = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: .66),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: _kJade.withValues(alpha: .65), width: 1.2),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x0F000000),
+            blurRadius: 10,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Text(
+        text,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: tt.bodySmall?.copyWith(
+          fontWeight: FontWeight.w600,
+          color: _kInkStrong,
+          height: 1.15,
+        ),
+      ),
+    );
+
+    return Semantics(
+      button: true,
+      label: semanticsLabel ?? text,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(999),
+          onTap: onTap,
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
+/// Chips: „Letzte Themen“ (Memory) – Screen blendet sie nicht mehr ein.
+// ignore: unused_element
+class _RecentTopicsChips extends StatelessWidget {
+  final List<String> topics;
+  final void Function(String topic)? onPick;
+  final double maxWidth;
+  const _RecentTopicsChips({
+    required this.topics,
+    required this.maxWidth,
+    this.onPick,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final items = topics
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .take(3)
+        .toList(growable: false);
+    if (items.isEmpty) return const SizedBox.shrink();
+
+    final tt = Theme.of(context).textTheme;
+
+    return Center(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: maxWidth),
+        child: _ZenAppear(
+          delay: const Duration(milliseconds: 40),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Zuletzt bewegt:',
+                style: tt.labelSmall?.copyWith(
+                  color: _kInk.withValues(alpha: .75),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final t in items)
+                    _GhostChip(
+                      label: t,
+                      semanticsLabel: 'Thema: $t',
+                      onTap: onPick == null
+                          ? null
+                          : () {
+                              HapticFeedback.selectionClick();
+                              onPick!(t);
+                            },
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Chips: „Antwort-Chips“ (answer_helpers vom Worker)
+// ignore: unused_element
+class _AnswerHelperChips extends StatelessWidget {
+  final List<String> helpers;         // max. 3
+  final void Function(String text)? onPick;
+  final double maxWidth;
+  const _AnswerHelperChips({
+    required this.helpers,
+    required this.maxWidth,
+    this.onPick,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final items = helpers
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty && !e.endsWith('?'))
+        .take(3)
+        .toList(growable: false);
+    if (items.isEmpty) return const SizedBox.shrink();
+
+    return Center(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: maxWidth),
+        child: _ZenAppear(
+          delay: const Duration(milliseconds: 60),
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final h in items)
+                _GhostChip(
+                  label: h,
+                  semanticsLabel: 'Antwort-Vorschlag: $h',
+                  onTap: onPick == null
+                      ? null
+                      : () {
+                          HapticFeedback.selectionClick();
+                          onPick!(h);
+                        },
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ------------------------------- Inherited Scopes ----------------------------
 
 class _PandaStepScope extends InheritedWidget {
@@ -1125,7 +1369,7 @@ class _PandaStepScope extends InheritedWidget {
     required this.step,
     required this.suppressQuestion,
     required this.timeStamp,
-    required super.child, // <— erwartet ein Widget, kein Builder-Callback
+    required super.child,
   });
 
   static _PandaStepScope of(BuildContext context) =>

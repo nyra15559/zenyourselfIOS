@@ -1,6 +1,6 @@
 // lib/features/journal/journal_entry_editor.dart
 //
-// v9.1 — JournalEntryEditor (Oxford-Zen, SenStyleDart)
+// v9.2 — JournalEntryEditor (Oxford-Zen, Theme-safe, Save→Mood Tags)
 // -----------------------------------------------------------------------------
 // • Ruhiger Editor nur für Journal-Einträge (EntryKind.journal) – optional
 //   Titelzeile, die beim Speichern in den Body gemerged wird.
@@ -12,11 +12,10 @@
 // • Edit-Modus: vorhandenen Journal-Text überschreiben; Mood-Tag wird
 //   ersetzt (vorhandene mood:/moodScore: im Tag-Set werden entfernt).
 //
-// Abhängigkeiten:
-//   zen_style.dart als `zs` (ohne Widgets), zen_widgets.dart als `zw`
-//   providers/journal_entries_provider.dart als `jp`
-//   models/journal_entry.dart als `jm`
-//   services/speech_service.dart (transcript$ / start / stop / isRecording)
+// Hinweise (Projektregeln):
+// – KEIN const bei ZenAppBar / ZenBackdrop / Positioned.fill.
+// – Color.withOpacity → withValues(alpha: …) bereits umgesetzt.
+// – Provider-Calls: addDiary / addReflection / updateById.
 
 import 'dart:async';
 
@@ -91,11 +90,13 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
     if (ex != null && ex.kind == jm.EntryKind.journal) {
       _editorCtrl.text = (ex.thoughtText ?? '').trim();
       _titleCtrl.text  = ''; // Titel wird als Teil des Texts geführt
-      _mood = ex.moodLabel.trim().isNotEmpty == true ? ex.moodLabel.trim() : 'Neutral';
+      final m = ex.moodLabel.trim();
+      _mood = m.isNotEmpty ? m : 'Neutral';
     } else {
       _editorCtrl.text = (widget.initialText ?? '').trim();
       _titleCtrl.text  = (widget.initialTitle ?? '').trim();
-      _mood = (widget.initialMood ?? (_editorCtrl.text.isEmpty && _titleCtrl.text.isEmpty ? 'Neutral' : 'Ruhig'));
+      _mood = (widget.initialMood ??
+          (_editorCtrl.text.isEmpty && _titleCtrl.text.isEmpty ? 'Neutral' : 'Ruhig'));
     }
 
     // Mic → Quick-Input
@@ -106,7 +107,9 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
         final cur = _quickCtrl.text.trim();
         final joined = (cur.isEmpty ? t : '$cur\n$t').trim();
         _quickCtrl.text = joined;
-        _quickCtrl.selection = TextSelection.fromPosition(TextPosition(offset: _quickCtrl.text.length));
+        _quickCtrl.selection = TextSelection.fromPosition(
+          TextPosition(offset: _quickCtrl.text.length),
+        );
         FocusScope.of(context).requestFocus(_quickFocus);
       });
     });
@@ -133,15 +136,16 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
   // ---------------- Keyboard Shortcuts ---------------------------------------
 
   KeyEventResult _handleKey(KeyEvent e) {
-    // Nur auf KeyDown reagieren, um Doppeltrigger zu vermeiden
     if (e is! KeyDownEvent) return KeyEventResult.ignored;
 
     if (e.logicalKey == LogicalKeyboardKey.escape && _speech.isRecording) {
       _toggleMic();
       return KeyEventResult.handled;
     }
-    final isEnter = e.logicalKey == LogicalKeyboardKey.enter || e.logicalKey == LogicalKeyboardKey.numpadEnter;
-    final withCtrlOrCmd = HardwareKeyboard.instance.isControlPressed || HardwareKeyboard.instance.isMetaPressed;
+    final isEnter = e.logicalKey == LogicalKeyboardKey.enter ||
+        e.logicalKey == LogicalKeyboardKey.numpadEnter;
+    final withCtrlOrCmd = HardwareKeyboard.instance.isControlPressed ||
+        HardwareKeyboard.instance.isMetaPressed;
     if (withCtrlOrCmd && isEnter) {
       _appendQuick();
       return KeyEventResult.handled;
@@ -161,7 +165,9 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
     final base = _editorCtrl.text.trimRight();
     final next = base.isEmpty ? add : '$base\n\n$add';
     setState(() => _editorCtrl.text = next);
-    _editorCtrl.selection = TextSelection.fromPosition(TextPosition(offset: _editorCtrl.text.length));
+    _editorCtrl.selection = TextSelection.fromPosition(
+      TextPosition(offset: _editorCtrl.text.length),
+    );
     _quickCtrl.clear();
     _scrollToBottom();
     HapticFeedback.selectionClick();
@@ -189,7 +195,9 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
     final after  = _autoCleanPipeline(before);
     if (after != before) {
       setState(() => _editorCtrl.text = after);
-      _editorCtrl.selection = TextSelection.fromPosition(TextPosition(offset: _editorCtrl.text.length));
+      _editorCtrl.selection = TextSelection.fromPosition(
+        TextPosition(offset: _editorCtrl.text.length),
+      );
     }
     HapticFeedback.selectionClick();
     zw.ZenToast.show(context, 'Text vorsichtig korrigiert');
@@ -215,12 +223,12 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
       final prov = context.read<jp.JournalEntriesProvider>();
 
       if (asReflection) {
-        // Immer NEUE Reflexion (Journal-Editor erstellt/ändert keine Stories)
+        // Immer NEUE Reflexion (Editor erstellt keine Stories)
         prov.addReflection(text: merged, moodLabel: _mood, aiQuestion: null);
       } else {
         final ex = widget.existing;
         if (ex != null) {
-          // Tags: mood:* ersetzen (und moodScore:*), Rest beibehalten
+          // Tags: mood:* / moodScore:* ersetzen
           final nextTags = <String>[
             ...ex.tags.where((t) => !t.startsWith('mood:') && !t.startsWith('moodScore:')),
             if (_mood.trim().isNotEmpty) 'mood:${_mood.trim()}',
@@ -229,7 +237,7 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
             ex.id,
             thoughtText: merged,
             tags: nextTags,
-            createdAt: ex.createdAt, // ruhige Chronologie beibehalten
+            createdAt: ex.createdAt, // Chronologie beibehalten
             kind: jm.EntryKind.journal,
           );
         } else {
@@ -269,8 +277,7 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
     s = s.replaceAllMapped(RegExp(r'([,.!?;:])(?!\s|\n|$)'), (m) => '${m.group(1)} ');
 
     // Ellipsen
-    s = s.replaceAll(RegExp(r'\.{3,}'), '…');
-    s = s.replaceAll(RegExp(r'…{2,}'), '…');
+    s = s.replaceAll(RegExp(r'\.{3,}'), '…').replaceAll(RegExp(r'…{2,}'), '…');
 
     // Gedankenstrich
     s = s.replaceAll(RegExp(r'(?<=\w)\s-\s(?=\w)'), ' – ');
@@ -278,7 +285,7 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
     // Doppelte Satzzeichen zusammenziehen
     s = s.replaceAll(RegExp(r'([!?])\s+\1'), r'$1$1');
 
-    // Häufige DE-Tippfehler (sehr konservativ)
+    // Häufige DE-Tippfehler (konservativ)
     final Map<RegExp, String> typo = <RegExp, String>{
       RegExp(r'\bvieleicht\b', caseSensitive: false): 'vielleicht',
       RegExp(r'\bdefinitv\b', caseSensitive: false): 'definitiv',
@@ -300,8 +307,7 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
     });
 
     // Letzte Kosmetik
-    s = s.replaceAll(RegExp(r'[ \t]+\n'), '\n');
-    s = s.trimRight();
+    s = s.replaceAll(RegExp(r'[ \t]+\n'), '\n').trimRight();
     return s;
   }
 
@@ -325,10 +331,12 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
         child: Scaffold(
           extendBodyBehindAppBar: true,
           backgroundColor: Colors.transparent,
-          appBar: const zw.ZenAppBar(title: null, showBack: true),
+          // WICHTIG: kein const
+          appBar: zw.ZenAppBar(title: null, showBack: true),
           body: Stack(
             children: [
-              const Positioned.fill(
+              // WICHTIG: kein const
+              Positioned.fill(
                 child: zw.ZenBackdrop(
                   asset: 'assets/schoen.png',
                   alignment: Alignment.center,

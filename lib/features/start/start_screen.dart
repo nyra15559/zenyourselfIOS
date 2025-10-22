@@ -1,12 +1,13 @@
 // lib/features/start/start_screen.dart
 //
-// StartScreen — ZenYourself · v6.1 (responsive, overflow-safe)
+// StartScreen — ZenYourself · v6.2 (responsive, overflow-safe, a11y-first)
 // -----------------------------------------------------------------------------
-// - 1 CTA: „Beginnen“ (Erststart → Reflection, sonst → JourneyMap)
-// - Voll responsiv mit Breakpoints (xs/sm 1-Spalten-Layout, Scroll immer erlaubt)
-// - Footer/Links sind Teil des Scroll-Contents (kein Overlay/Stack)
-// - TextScaler lokal geklemmt (verhindert Layout-Sprengungen)
-// - Fix: Dialog-Titel sind overflow-safe (Expanded + maxLines + ellipsis)
+// • 1 CTA: „Beginnen“ (Erststart → Reflection, sonst → JourneyMap)
+// • Voll responsiv mit Breakpoints; Scroll immer erlaubt
+// • Footer/Links sind Teil des Scroll-Contents (kein Overlay/Stack)
+// • TextScaler lokal geklemmt (verhindert Layout-Sprengungen)
+// • Dialog-Titel overflow-safe (Expanded + maxLines + ellipsis)
+// • A11y: Semantics für Heading, Panda-Illustration, CTA; Keyboard: Enter/Space
 // -----------------------------------------------------------------------------
 
 import 'package:flutter/material.dart';
@@ -39,19 +40,6 @@ class StartScreen extends StatelessWidget {
         ? SystemUiOverlayStyle.light
         : SystemUiOverlayStyle.dark;
 
-    final size = MediaQuery.of(context).size;
-    final width = size.width;
-
-    // Breakpoints
-    final bool isXsSm = width < 480;
-    final bool isLg = width >= 760;
-
-    // Typo/Paddings responsiv
-    final double pandaSize = isXsSm ? 160 : 200;
-    final EdgeInsets pad =
-        EdgeInsets.fromLTRB(isXsSm ? 16 : 24, isXsSm ? 12 : 20, isXsSm ? 16 : 24, isXsSm ? 18 : 28);
-
-    // TextScaling lokal zähmen (damit große OS-Schriften das Layout nicht sprengen)
     final media = MediaQuery.of(context);
     final clamped = media.textScaler.clamp(maxScaleFactor: 1.15, minScaleFactor: 0.90);
 
@@ -62,16 +50,14 @@ class StartScreen extends StatelessWidget {
         child: ZenAppScaffold(
           appBar: null,
           maxBodyWidth: 760,
-          bodyPadding: pad,
+          bodyPadding: const EdgeInsets.fromLTRB(24, 20, 24, 28),
           backdropAsset: 'assets/startscreen1.png',
           backdropWash: .06,
           backdropSaturation: .96,
           backdropGlow: .30,
           backdropVignette: .12,
           backdropMilk: .10,
-          body: const SafeArea(
-            child: _StartScrollable(),
-          ),
+          body: const SafeArea(child: _StartScrollable()),
         ),
       ),
     );
@@ -83,36 +69,24 @@ class _StartScrollable extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final width = MediaQuery.of(context).size.width;
-    final bool isXsSm = width < 480;
-
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(minWidth: 320, maxWidth: 760),
         child: CustomScrollView(
           slivers: [
+            const SliverPadding(padding: EdgeInsets.only(top: 12)),
+            const SliverToBoxAdapter(child: _StartContent()),
             SliverPadding(
-              padding: EdgeInsets.only(top: isXsSm ? 8 : 16),
-            ),
-
-            // Haupt-Content (Panda, Titel, Bullets, Info, CTA)
-            const SliverToBoxAdapter(
-              child: _StartContent(),
-            ),
-
-            // Footer-Links + Made in CH
-            SliverPadding(
-              padding: EdgeInsets.only(top: isXsSm ? 12 : 16, bottom: isXsSm ? 6 : 10),
+              padding: const EdgeInsets.only(top: 16, bottom: 10),
               sliver: const SliverToBoxAdapter(child: _SecondaryActions()),
             ),
-            SliverToBoxAdapter(
+            const SliverToBoxAdapter(
               child: Opacity(
                 opacity: .70,
                 child: Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
+                  padding: EdgeInsets.only(bottom: 8),
                   child: Text(
                     'Designed in Switzerland.',
-                    style: ZenTextStyles.caption.copyWith(color: ZenColors.ink),
                     textAlign: TextAlign.center,
                   ),
                 ),
@@ -133,7 +107,6 @@ class _StartContent extends StatelessWidget {
     final width = MediaQuery.of(context).size.width;
     final bool isXsSm = width < 480;
     final bool isNarrow = width < 420;
-    final double pandaSize = isXsSm ? 160 : 200;
 
     // Gibt es bereits Einträge?
     final hasEntries = context.select<JournalEntriesProvider, bool>(
@@ -145,9 +118,9 @@ class _StartContent extends StatelessWidget {
         ? const [
             _BulletRow(icon: Icons.local_florist_rounded, text: 'Geführte Reflexion'),
             SizedBox(height: 8),
-            _BulletRow(icon: Icons.lock_outline_rounded, text: 'Deine Antworten bleiben privat'),
+            _BulletRow(icon: Icons.lock_outline_rounded, text: 'Privat – du entscheidest, was du teilst'),
             SizedBox(height: 8),
-            _BulletRow(icon: Icons.groups_2_rounded, text: 'Entwickelt mit Experten & Betroffenen'),
+            _BulletRow(icon: Icons.groups_2_rounded, text: 'Mit Psychologen & Betroffenen entwickelt'),
           ]
         : const [
             _BulletRow(
@@ -171,38 +144,45 @@ class _StartContent extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          // Panda
-          Container(
-            margin: EdgeInsets.only(bottom: isNarrow ? 10 : 12),
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: ZenColors.deepSage.withValues(alpha: .14),
-                  blurRadius: 28,
-                  spreadRadius: 2,
-                  offset: const Offset(0, 6),
-                ),
-              ],
-            ),
-            child: ZenSafeImage.asset(
-              'assets/star_pa.png',
-              width: pandaSize,
-              height: pandaSize,
+          // Panda (mit Semantics)
+          Semantics(
+            label: 'Panda-Illustration',
+            image: true,
+            child: Container(
+              margin: EdgeInsets.only(bottom: isNarrow ? 10 : 12),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: ZenColors.deepSage.withValues(alpha: .14),
+                    blurRadius: 28,
+                    spreadRadius: 2,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+              ),
+              child: const ZenSafeImage.asset(
+                'assets/star_pa.png',
+                width: 200,
+                height: 200,
+              ),
             ),
           ),
 
-          // Titel + Tagline
-          Text(
-            'ZenYourself',
-            textAlign: TextAlign.center,
-            style: ZenTextStyles.h2.copyWith(
-              fontWeight: FontWeight.w800,
-              color: ZenColors.deepSage,
-              fontSize: isXsSm ? 26 : null,
+          // Titel + Tagline (mit Header-Semantics)
+          Semantics(
+            header: true,
+            child: Text(
+              'ZenYourself',
+              textAlign: TextAlign.center,
+              style: ZenTextStyles.h2.copyWith(
+                fontWeight: FontWeight.w800,
+                color: ZenColors.deepSage,
+                fontSize: isXsSm ? 26 : null,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
           ),
           SizedBox(height: isNarrow ? 4 : 6),
           Text(
@@ -233,49 +213,75 @@ class _StartContent extends StatelessWidget {
             constraints: const BoxConstraints(maxWidth: 620),
             child: ZenInfoBar(
               message: isXsSm
-                  ? 'Erster Start: Beginnen öffnet die Reflexion. Ab dem ersten Eintrag führt Beginnen zum Hauptmenü.'
-                  : 'Erster Start: Beginnen führt dich in die Reflexion.\nAb dem ersten Eintrag öffnet Beginnen das Hauptmenü.',
+                  ? 'Erster Start: „Beginnen“ öffnet die Reflexion. Ab dem ersten Eintrag führt „Beginnen“ zum Hauptmenü.'
+                  : 'Erster Start: „Beginnen“ führt dich in die Reflexion.\nAb dem ersten Eintrag öffnet „Beginnen“ das Hauptmenü.',
               color: ZenColors.jade.withValues(alpha: .08),
             ),
           ),
 
-          // CTA
+          // CTA (mit Semantics & Keyboard-Aktivierung)
           SizedBox(height: isNarrow ? 18 : 22),
           ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 360),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Expanded(
-                  child: ZenPrimaryButton(
-                    label: 'Beginnen',
-                    icon: Icons.spa_rounded,
-                    height: 50,
-                    onPressed: () {
-                      HapticFeedback.selectionClick();
-                      if (hasEntries) {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => const JourneyMapScreen(
-                              moodEntries: [],
-                              reflections: [],
-                            ),
-                          ),
-                        );
-                      } else {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => const ReflectionScreen(),
-                          ),
-                        );
-                      }
-                    },
-                  ),
-                ),
-              ],
-            ),
+            child: _BeginButton(hasEntries: hasEntries),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _BeginButton extends StatelessWidget {
+  final bool hasEntries;
+  const _BeginButton({required this.hasEntries});
+
+  @override
+  Widget build(BuildContext context) {
+    void go() {
+      HapticFeedback.selectionClick();
+      if (hasEntries) {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => const JourneyMapScreen(
+              moodEntries: [],
+              reflections: [],
+            ),
+          ),
+        );
+      } else {
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const ReflectionScreen()),
+        );
+      }
+    }
+
+    return Semantics(
+      button: true,
+      label: 'Beginnen',
+      hint: hasEntries
+          ? 'Öffnet das Hauptmenü.'
+          : 'Startet die Reflexion.',
+      child: FocusableActionDetector(
+        actions: <Type, Action<Intent>>{
+          ActivateIntent: CallbackAction<Intent>(onInvoke: (_) {
+            go();
+            return null;
+          }),
+        },
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Expanded(
+              child: ZenPrimaryButton(
+                label: 'Beginnen',
+                icon: Icons.spa_rounded,
+                height: 50,
+                onPressed: go,
+                tooltip: hasEntries ? 'Hauptmenü öffnen' : 'Reflexion starten',
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -534,7 +540,7 @@ void _showImprint(BuildContext context) {
               const SizedBox(height: 12),
               Text(
                 'ZenYourself · Switzerland\n'
-                'Kontakt: hello@zenyourself.app\n'
+                'Kontakt: info@mta-solution.ch\n'
                 'Hinweis: Dies ist eine mentale Unterstützungs-App und ersetzt keine Therapie.',
                 style: ZenTextStyles.body.copyWith(color: ZenColors.ink, height: 1.34),
               ),

@@ -1,18 +1,16 @@
 // lib/features/reflection/reflection_screen.dart
 //
-// ReflectionScreen — Panda v3.22.0 (Oxford level; CH risk actions; no auto-nav)
+// ReflectionScreen — Panda v3.23.1 (Oxford level; CH risk actions; no auto-nav)
 // -----------------------------------------------------------------------------
 // Änderungen in diesem Build:
-// • STT integriert: WhisperService wird automatisch angedockt.
-//   - Desktop & Web → Simulation EIN (sprechfertig ohne Native-Plugin)
-//   - iOS/Android → Simulation AUS (erwartet Native-Bridge; fällt stabil zurück)
-// • Mic-Start nutzt jetzt locale: 'de-DE' (besseres Diktat für Deutsch).
-// • Fehler-Handling: SpeechService.error$ wird leise getoastet (kein Crash).
+// • Intro-Bubble ist jetzt "pinned" und bleibt immer sichtbar.
+// • Memory-Bridge (Recall-Bubble) wird NICHT mehr angezeigt.
+// • Save-Hinweis erscheint, sobald Speichern möglich ist (nach 2 Runden):
+//   „Lies die Frage kurz, antworte in 1–2 Sätzen, speichere bitte deine Session …“
+// • Antwort-Chips: Minimum 2 — bei nur 1 Worker-Chip ergänzt der Screen sanft einen zweiten.
 // • Bestehende Guarantees bleiben: deterministischer Save→Mood Flow, keine Auto-Navigation,
 //   CH-Safety-Hinweise & Hotlines, Enter-/Shift+Enter-Handling.
-//
-// Hinweis: Für echte STT auf iOS/Android muss die Native-Bridge für
-// MethodChannel('zen.whisper') + EventChannel('zen.whisper/events') vorhanden sein.
+// • Kleinfix: expliziter Import der Whisper-Engine.
 // -----------------------------------------------------------------------------
 library reflection_screen;
 
@@ -53,12 +51,14 @@ import '../../providers/journal_entries_provider.dart';
 // Services
 import '../../services/guidance_service.dart';
 import '../../services/speech_service.dart';
+import '../../services/whisper_service.dart'; // STT-Engine
 import '../../services/core/api_service.dart'; // Mood speichern
-import '../../services/whisper_service.dart' show WhisperService; // <— STT-Engine
+
+// NEU: Memory-Layer (Recall / Bridge)
+import '../../core/memory/memory_service.dart';
 
 // CH Hotlines (Call-Buttons) + Launcher-Utilities
 import '../../widgets/hotline_widget.dart'; // SwissHotlineCard / Section
-import '../../shared/launching.dart'; // (nicht direkt hier genutzt; in Card verwendet)
 
 // Parts
 part 'reflection_models.dart';
@@ -157,13 +157,68 @@ class _ReflectionScreenState extends State<ReflectionScreen>
           defaultTargetPlatform == TargetPlatform.windows ||
           defaultTargetPlatform == TargetPlatform.macOS);
 
+  // ---------------- NEW: Memory Recall / Bridge ------------------------------
+  String? _bridgeText; // (nicht mehr angezeigt; nur für Worker-Kontext)
+  // ignore: unused_element
+  bool get _hasBridge => (_bridgeText != null && _bridgeText!.trim().isNotEmpty);
+
+  Future<void> _prefetchRecall() async {
+    // Best-effort: Recall laden, UI bleibt nie blockiert.
+    try {
+      final recall = await MemoryService.instance.recall(limit: 6);
+      final text = _composeBridgeText(recall);
+      if (!mounted) return;
+      setState(() => _bridgeText = text);
+    } catch (_) {
+      // Fehlende Memory-Implementierung darf niemals bremsen
+    }
+  }
+
+  /// Baut einen warmen, kurzen Brückensatz aus Recall-Items (nur intern).
+  String? _composeBridgeText(dynamic recall) {
+    if (recall == null) return null;
+    final tokens = <String>[];
+
+    void addToken(String? s) {
+      final t = (s ?? '').trim();
+      if (t.isEmpty) return;
+      final key = t.toLowerCase();
+      if (!tokens.any((x) => x.toLowerCase() == key)) tokens.add(t);
+    }
+
+    if (recall is List) {
+      for (final it in recall) {
+        if (it is String) {
+          addToken(it);
+          continue;
+        }
+        if (it is Map) {
+          addToken((it['topic'] ?? it['tag'] ?? '').toString());
+          final facets = (it['facets'] as List?)
+                  ?.map((e) => e?.toString() ?? '')
+                  .toList() ??
+              const [];
+          if (facets.isNotEmpty) addToken(facets.first);
+          final line = (it['line'] ?? it['hint'] ?? '').toString();
+          if (line.isNotEmpty && tokens.length < 2) addToken(line);
+        }
+      }
+    }
+
+    if (tokens.isEmpty) return null;
+    final t1 = tokens[0];
+    final t2 = tokens.length >= 2 ? tokens[1] : null;
+
+    final body = t2 == null
+        ? 'Ich erinnere mich an **$t1**.'
+        : 'Ich erinnere mich an **$t1** und **$t2**.';
+    return '$body Falls das heute noch mitschwingt – magst du dort anknüpfen?';
+  }
+
   void _attachSttEngine() {
-    // Desktop/Web: Simulation EIN → sofort nutzbar ohne Native-Bridge.
-    // iOS/Android: Simulation AUS → erwartet Native (fällt stabil zurück, kein Crash).
     final bool simulate = kIsWeb || _isDesktop;
     _speech.attachWhisper(WhisperService(simulate: simulate));
 
-    // Fehler aus der Engine dezent anzeigen (kein Crash, kein UI-Blocker)
     _speechErrorSub = _speech.error$.listen((msg) {
       if (!mounted) return;
       if ((msg).trim().isEmpty) return;
@@ -175,12 +230,13 @@ class _ReflectionScreenState extends State<ReflectionScreen>
   void initState() {
     super.initState();
 
-    // AnimationController früh anlegen (verhindert Crash bei dispose)
     _fadeSlideCtrl =
         AnimationController(vsync: this, duration: _animShort)..value = 1.0;
 
-    // STT-Engine andocken (siehe _attachSttEngine)
     _attachSttEngine();
+
+    // Memory-Recall vorab laden (nur für Worker-Kontext; UI zeigt nichts an)
+    unawaited(_prefetchRecall());
 
     // Live-Transkript → Eingabe
     _finalSub = _speech.transcript$.listen((t) {
@@ -199,10 +255,8 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       });
     });
 
-    // Tippen-Listener: Starterchips ausblenden, sobald der User selbst schreibt
     _controller.addListener(_maybeHideStarterChipsOnTyping);
 
-    // Optionaler Auto-Start
     final seed = (widget.initialUserText ?? '').trim();
     if (seed.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -229,7 +283,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     _inputFocus.dispose();
     _pageFocus.dispose();
     _listCtrl.dispose();
-    _fadeSlideCtrl.dispose(); // sicher, da in initState erzeugt
+    _fadeSlideCtrl.dispose();
     super.dispose();
   }
 
@@ -237,7 +291,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
   KeyEventResult _handleKey(KeyEvent e) {
     if (e is! KeyDownEvent) return KeyEventResult.ignored;
 
-    // ESC → Mic stoppen
     if (e.logicalKey == LogicalKeyboardKey.escape && _speech.isRecording) {
       _toggleRecording();
       return KeyEventResult.handled;
@@ -250,13 +303,11 @@ class _ReflectionScreenState extends State<ReflectionScreen>
             HardwareKeyboard.instance.isMetaPressed;
     final bool withShift = HardwareKeyboard.instance.isShiftPressed;
 
-    // Cmd/Ctrl+Enter: immer senden
     if (withCtrlOrCmd && isEnter && !loading) {
       _send();
       return KeyEventResult.handled;
     }
 
-    // Enter = Senden, Shift+Enter = Zeilenumbruch
     if (isEnter && !withShift && !loading) {
       _send();
       return KeyEventResult.handled;
@@ -270,12 +321,11 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     try {
       if (_speech.isRecording) {
         await _speech.stop();
-        if (!context.mounted) return;
+        if (!mounted) return;
         _focusInput();
       } else {
         HapticFeedback.selectionClick();
         FocusScope.of(context).unfocus();
-        // Sprache explizit auf Deutsch setzen
         await _speech.start(locale: 'de-DE');
       }
       if (mounted) setState(() {});
@@ -290,13 +340,11 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     var text = _controller.text.trim();
     if (text.isEmpty) return;
 
-    // Hard-Limit.
     if (text.length > kInputHardLimit) {
       text = text.substring(0, kInputHardLimit);
       _toast('Dein Text wurde auf $kInputHardLimit Zeichen gekürzt.');
     }
 
-    // Startet neue Runde oder beantwortet die letzte Frage (Multi-Turn)
     if (_current == null) {
       await _startNewReflection(
         userText: text,
@@ -315,7 +363,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       _focusInput();
       HapticFeedback.lightImpact();
 
-      // → nächste Spiegelung + genau 1 Leitfrage vom Worker
       unawaited(
         _continueReflectionFromWorker(round: _current!, userAnswer: text),
       );
@@ -382,7 +429,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     setState(() {
       loading = true;
       _chipMode = _ChipMode.none;
-      // [GUARD] neue Runde → Guards zurücksetzen
       _didPromptMood = false;
       _isMoodOpen = false;
     });
@@ -433,7 +479,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
         return;
       }
 
-      // Flags aus Turn
       final bool flagMoodPrompt =
           _safeBool(turn, ['mood', 'prompt']) ||
           _safeBool(turn, ['flow', 'mood_prompt']);
@@ -456,7 +501,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       _scrollToBottom();
       _focusInput();
 
-      // → Mood-Picker nur via Guard
       if (flagMoodPrompt) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted) return;
@@ -465,7 +509,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
         });
       }
 
-      // Abschluss?
       if (flagRecommendEnd) {
         unawaited(_requestClosureFromWorker(round: round, userAnswer: ''));
       }
@@ -586,7 +629,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
   }
 
   void _handleTurnError(ReflectionRound round) {
-    // Ruhig bleiben, Mini-Mirror ohne Frage, keine Chips
     const fallbackMirror = 'Ich höre dich. Ich bleibe bei dir.';
     final step = _PandaStep(
       mirror: _capChars(fallbackMirror, kMirrorMaxChars),
@@ -618,8 +660,12 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     final level = _safeString(t, ['risk_level']).toLowerCase();
     final risk = _safeBool(t, ['risk']) || level == 'high' || level == 'mild';
 
-    final helpers =
-        isClosure ? <String>[] : _coerceAnswerHelpers(t).take(3).toList();
+    final fromSvc = _safeStringList(t, ['answer_helpers']).take(3).toList();
+    final helpers = isClosure
+        ? <String>[]
+        : (fromSvc.isNotEmpty
+            ? fromSvc
+            : _coerceAnswerHelpers(t).take(3).toList());
 
     final talk = _safeStringList(t, ['talk']).take(2).toList();
 
@@ -643,8 +689,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
 
   // ---------------- SAVE→MOOD: deterministischer Flow ------------------------
 
-  /// Öffnet (falls nötig) den Mood-Picker und speichert danach sofort.
-  /// WICHTIG: Keine Navigation (kein pop/go) – nur Persist + Bestätigung + Dankesstep.
   Future<void> _onPressSaveRound(ReflectionRound r) async {
     if (r.entryId != null) {
       _toast('Bereits gespeichert.');
@@ -655,17 +699,16 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       return;
     }
 
-    // Mood fehlt → Picker öffnen (einmalig, mit Guard)
     if (!r.hasMood) {
-      if (_isMoodOpen) return; // [GUARD]
-      _isMoodOpen = true; // [GUARD]
+      if (_isMoodOpen) return;
+      _isMoodOpen = true;
       final chosen = await showPandaMoodPicker(
         context,
         title: 'Wie fühlst du dich gerade?',
       );
-      _isMoodOpen = false; // [GUARD]
-      if (chosen == null) return; // User abgebrochen
-      _didPromptMood = true; // [GUARD] – Mood wurde entschieden
+      _isMoodOpen = false;
+      if (chosen == null) return;
+      _didPromptMood = true;
 
       final score = _scoreForMoodLocal(chosen);
       final label = chosen.labelDe;
@@ -674,7 +717,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
         r.moodLabel = label;
       });
 
-      // optional best-effort an Worker melden (ohne UI-Abhängigkeit)
       try {
         await ApiService.instance.mood(
           entryId: r.id,
@@ -687,10 +729,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     await _saveRoundCore(r);
   }
 
-  /// Core-Persist + ruhige, milchige Bestätigungsleiste + Panda-Danke-Step.
-  /// KEINE Navigation.
   Future<void> _saveRoundCore(ReflectionRound r) async {
-    // Build Entry
     final String lastAns = r.steps
         .map((e) => (e.answer ?? '').trim())
         .where((s) => s.isNotEmpty)
@@ -727,7 +766,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
 
     final entry = jm.JournalEntry.fromMap(entryMap);
 
-    // Persist via Provider
     final prov = context.read<JournalEntriesProvider>();
     final List<jm.JournalEntry> existing =
         List<jm.JournalEntry>.from(prov.entries);
@@ -743,12 +781,10 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       aiQuestion: r.steps.isNotEmpty ? r.steps.first.question : null,
     );
 
-    // Ruhige Bestätigung (milchige Glas-Leiste)
     _showCalmConfirm(
       'Gespeichert. Deine Reflexion und Stimmung sind im Gedankenbuch.',
     );
 
-    // Panda bedankt sich und fragt freundlich nach Fortsetzung.
     _appendThankYouAfterSave(r);
   }
 
@@ -757,7 +793,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     setState(() {
       _rounds.removeWhere((x) => x.id == r.id);
     });
-    // Falls nun keine Runden mehr → zurück zu Starterchips
     setState(() {
       _chipMode = _rounds.isEmpty ? _ChipMode.starter : _ChipMode.none;
     });
@@ -803,7 +838,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
 
     setState(() => loading = false);
 
-    // Wenn kein Text vom Worker: direkt in die Mood-Phase wechseln
     if (closure.isEmpty) {
       setState(() {
         round.allowClosure = true;
@@ -816,11 +850,9 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       return;
     }
 
-    // → Intro-Bubble befüllen, keine zusätzliche Panda-Karte
     setState(() {
       round.moodIntro = _capChars(closure, kMirrorMaxChars);
       round.allowClosure = true;
-      // Safety-Flag: falls Worker hier Risiko meldet, in letzter Step-Card mitschwingen lassen
       if (round.steps.isNotEmpty) {
         final last = round.steps.last;
         if (risk && !last.risk) {
@@ -918,7 +950,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
   }
 
   String _coerceHelperSuggestion(dynamic t) {
-    // tolerant: top-level und innerhalb von primary/flow prüfen
     String pick(dynamic obj) {
       final s1 = _safeString(obj, ['helper_suggestion']).trim();
       if (s1.isNotEmpty) return s1;
@@ -944,7 +975,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     return '';
   }
 
-  // Answer-Helpers (keine Fragen!)
   List<String> _coerceAnswerHelpers(dynamic t) {
     List<String> acc = [];
     void addAll(dynamic obj) {
@@ -1058,7 +1088,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
 
   void _focusInput() => FocusScope.of(context).requestFocus(_inputFocus);
 
-  // Ruhiger „Retry“-BottomSheet
   void _showRetryError(String msg, VoidCallback onRetry) {
     if (!mounted) return;
     showModalBottomSheet(
@@ -1075,7 +1104,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(Icons.cloud_off_rounded,
-                  color: Colors.black.withOpacity(.65)),
+                  color: Colors.black.withValues(alpha: .65)),
               const SizedBox(height: 10),
               Text(
                 (msg.isNotEmpty ? msg : 'Verbindung gerade schwierig.'),
@@ -1107,13 +1136,11 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     );
   }
 
-  // Silent "Toast" – dezentes Haptic + Log
   void _toast(String msg) {
     debugPrint('[Reflection] $msg');
     HapticFeedback.selectionClick();
   }
 
-  // Ruhige, milchige Bestätigungsleiste
   void _showCalmConfirm(String text) async {
     setState(() {
       _confirmText = text;
@@ -1125,7 +1152,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
   }
 
   Future<void> _showPostSheet() async {
-    // Nur auf explizite Aktion; KEIN Auto-Open von Mood/Save.
     if (!mounted) return;
     await showModalBottomSheet(
       context: context,
@@ -1146,7 +1172,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                   height: 4,
                   margin: const EdgeInsets.only(bottom: 12),
                   decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(.12),
+                    color: Colors.black.withValues(alpha: .12),
                     borderRadius: BorderRadius.circular(99),
                   ),
                 ),
@@ -1163,7 +1189,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                     if (widget.onGoHome != null) {
                       widget.onGoHome!();
                     } else {
-                      // Achtung: KEIN auto-pop irgendwo sonst — nur hier auf expliziten Tap.
                       Navigator.of(context).maybePop();
                     }
                   },
@@ -1203,7 +1228,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
 
     final r = _current;
 
-    // Abschluss aktiv? (Mood-Phase)
     final bool closureActive =
         r != null && r.allowClosure && !(r.hasPendingQuestion) && !(r.hasMood);
 
@@ -1216,21 +1240,22 @@ class _ReflectionScreenState extends State<ReflectionScreen>
 
     final bool showStarter = _rounds.isEmpty && _chipMode == _ChipMode.starter;
 
-    // Nur Worker-Chips (keine Client-Heuristiken)
     final bool showAnswerChips = !closureActive &&
         (r != null && r.steps.isNotEmpty && r.steps.last.followups.isNotEmpty) &&
         _chipMode == _ChipMode.answer;
 
-    // --- Chip-Quellen
-    final List<String> _rawTemplates = showAnswerChips
-        ? r!.steps.last.followups
+    final List<String> rawTemplates = showAnswerChips
+        ? r.steps.last.followups
         : (showStarter ? _starterChips() : const <String>[]);
 
-    // Sanfter, modell-freundlicher Filter (kein Erfinden)
     final lastQ = r?.steps.isNotEmpty == true ? r!.steps.last.question : '';
     final lastA = r?.steps.isNotEmpty == true ? (r!.steps.last.answer ?? '') : '';
+    final List<String> answerTemplatesRefined =
+        _refineChips(rawTemplates, question: lastQ, lastAnswer: lastA);
+
+    // --- NEU: Mindestens 2 Chips (sanfter Fallback)
     final List<String> answerTemplates =
-        _refineChips(_rawTemplates, question: lastQ, lastAnswer: lastA);
+        _ensureMinTwoChips(answerTemplatesRefined, lastQ, lastA);
 
     final bool canPermanentSave =
         r != null && r.answered && (r.entryId == null);
@@ -1294,18 +1319,17 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                               ),
                               const SizedBox(height: 10),
 
-                              // Intro
-                              if (_rounds.isEmpty)
-                                Padding(
-                                  padding: const EdgeInsets.only(bottom: 6),
-                                  child: Center(
-                                    child: ConstrainedBox(
-                                      constraints:
-                                          BoxConstraints(maxWidth: cardMaxW),
-                                      child: const _IntroBubble(),
-                                    ),
+                              // Intro (pinned) – bleibt als Anker sichtbar
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 6),
+                                child: Center(
+                                  child: ConstrainedBox(
+                                    constraints:
+                                        BoxConstraints(maxWidth: cardMaxW),
+                                    child: const _IntroBubble(),
                                   ),
                                 ),
+                              ),
 
                               // Verlauf (mit CH-Risk-Actions unter der Runde)
                               for (int index = 0;
@@ -1327,7 +1351,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                                         round: _rounds[index],
                                         isLast: isLast,
                                         isTyping: isTyping,
-                                        // Rundeninterner Save (weiterhin erlaubt)
                                         onSave: _rounds[index].answered
                                             ? () => _onPressSaveRound(
                                                 _rounds[index])
@@ -1337,11 +1360,10 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                                                 _deleteRound(_rounds[index])
                                             : null,
                                         onSelectMood: (score, label) async {
-                                          // Explizites Mood-Setzen aus Rundencard → KEINE Navigation.
                                           setState(() {
                                             _rounds[index].moodScore = score;
                                             _rounds[index].moodLabel = label;
-                                            _didPromptMood = true; // [GUARD]
+                                            _didPromptMood = true;
                                           });
                                           await _saveRoundCore(_rounds[index]);
                                         },
@@ -1350,7 +1372,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                                             : null,
                                       );
 
-                                      // Darunter (falls Risiko) CH-Call-Card einblenden
                                       final threadWithRisk = Column(
                                         crossAxisAlignment:
                                             CrossAxisAlignment.stretch,
@@ -1373,7 +1394,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                                         return threadWithRisk;
                                       }
 
-                                      // Sanftes Appear nur für letzte Runde
                                       return FadeTransition(
                                         opacity: _fadeSlideCtrl
                                             .drive(Tween(begin: 0.0, end: 1.0)),
@@ -1391,6 +1411,8 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                                   ),
                                 ),
 
+                              // ------------------ (Bridge bewusst entfernt) ------------------
+
                               // Hinweis – nur wenn Frage offen & kein Abschluss
                               AnimatedSize(
                                 duration: _animShort,
@@ -1407,6 +1429,51 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                                               constraints: BoxConstraints(
                                                   maxWidth: cardMaxW),
                                               child: const _ReflectionHint(),
+                                            ),
+                                          ),
+                                        )
+                                      : const SizedBox.shrink(),
+                                ),
+                              ),
+
+                              // NEU: Save-Hinweis, sobald Speichern möglich
+                              AnimatedSize(
+                                duration: _animShort,
+                                curve: Curves.easeOut,
+                                child: AnimatedOpacity(
+                                  duration: _animShort,
+                                  opacity: canPermanentSave ? 1 : 0,
+                                  child: canPermanentSave
+                                      ? Padding(
+                                          padding: const EdgeInsets.only(
+                                              top: 0, bottom: 8),
+                                          child: Center(
+                                            child: ConstrainedBox(
+                                              constraints: BoxConstraints(
+                                                  maxWidth: cardMaxW),
+                                              child: const Row(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.center,
+                                                children: [
+                                                  ExcludeSemantics(
+                                                    child: Icon(
+                                                      Icons.info_outline_rounded,
+                                                      size: 16,
+                                                      color: Colors.black54,
+                                                    ),
+                                                  ),
+                                                  SizedBox(width: 6),
+                                                  Expanded(
+                                                    child: Text(
+                                                      'Speichere bitte deine Session, damit du sie später nochmal lesen kannst '
+                                                      'oder damit der Panda sich an dich erinnert.',
+                                                      style: TextStyle(
+                                                        color: Colors.black54,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
                                             ),
                                           ),
                                         )
@@ -1480,7 +1547,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                                             ?.copyWith(
                                               height: 1.25,
                                               color: Colors.black
-                                                  .withOpacity(0.72),
+                                                  .withValues(alpha: 0.72),
                                             ),
                                       ),
                                     ),
@@ -1578,7 +1645,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
         'Etwas beschäftigt mich seit Tagen … ',
       ];
 
-  // --- Chip Refinement (sanft, modell-freundlich; keine Erfindungen) ---------
   final _kBannedStarters = <RegExp>[
     RegExp(r'^\s*mir ist wichtig\b', caseSensitive: false),
     RegExp(r'^\s*im kern geht es\b', caseSensitive: false),
@@ -1633,6 +1699,23 @@ class _ReflectionScreenState extends State<ReflectionScreen>
         : chips.map(_ensureEllipsisSuffix).take(3).toList();
   }
 
+  // NEU: sorge für mind. 2 Chips – generischer Zusatz bei nur 1
+  List<String> _ensureMinTwoChips(List<String> chips, String q, String a) {
+    if (chips.length >= 2) return chips;
+    final List<String> out = List<String>.from(chips);
+    // Sanfter, universeller Satzstarter
+    const fallback = 'Noch etwas dazu … ';
+    // Falls Frage Kontext gibt, baue einen neutralen Starter daraus
+    String fromQ(String qq) {
+      final s = qq.trim();
+      if (s.isEmpty) return fallback;
+      // sehr neutraler Ableitungs-Text:
+      return 'Wichtig ist mir außerdem … ';
+    }
+    out.add(_ensureEllipsisSuffix(fromQ(q)));
+    return out;
+  }
+
   void _onTapChip(String text, {required bool isAnswerTemplate}) {
     final original = text;
     final endsWithEllipsisSpace = RegExp(r'…\s$').hasMatch(original);
@@ -1662,7 +1745,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
   }
 
   String _emergencyHint(BuildContext context) {
-    // Straff: nur 144 & 112 im Text (Details in SwissHotlineCard darunter).
     return 'Wenn es sich akut belastend anfühlt: In Notfällen rufe sofort 144 (Rettungsdienst) oder 112.';
   }
 
@@ -1721,14 +1803,12 @@ class _ReflectionScreenState extends State<ReflectionScreen>
 
   // ---------------- Mood Picker Integration ----------------------------------
 
-  /// Mappt valence [-1..+1] linear auf Score 0..4.
   int _scoreForMoodLocal(PandaMood m) {
     final v = m.valence.clamp(-1.0, 1.0);
     final double mapped = ((v + 1.0) / 2.0) * 4.0;
     return mapped.round().clamp(0, 4);
   }
 
-  /// Fragt ggf. die Stimmung ab (Worker-Hinweis) — OHNE Navigation.
   Future<void> _maybeAskMood(
     BuildContext context, {
     required ReflectionRound round,
@@ -1737,10 +1817,10 @@ class _ReflectionScreenState extends State<ReflectionScreen>
   }) async {
     if (!moodPrompt) return;
     if (!mounted) return;
-    if (round.hasMood) return; // Mood schon gesetzt → nichts tun
-    if (_didPromptMood || _isMoodOpen) return; // [GUARD]
+    if (round.hasMood) return;
+    if (_didPromptMood || _isMoodOpen) return;
 
-    _isMoodOpen = true; // [GUARD]
+    _isMoodOpen = true;
     final title =
         afterClosure ? 'Wie fühlst du dich jetzt?' : 'Wie fühlst du dich gerade?';
 
@@ -1748,7 +1828,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       context,
       title: title,
     );
-    _isMoodOpen = false; // [GUARD]
+    _isMoodOpen = false;
     if (chosen == null) return;
 
     final score = _scoreForMoodLocal(chosen);
@@ -1758,20 +1838,18 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     setState(() {
       round.moodScore = score;
       round.moodLabel = label;
-      _didPromptMood = true; // [GUARD]
+      _didPromptMood = true;
     });
 
-    // Best-effort Speichern (kein Snackbar, keine Navigation)
     try {
       await ApiService.instance.mood(
         entryId: round.id,
-        icon: score, // nutzt den Score 0..4
+        icon: score,
         note: null,
       );
     } catch (_) {/* ignore */}
   }
 
-  // ---------------- Panda-Danke-Step nach Save --------------------------------
   void _appendThankYouAfterSave(ReflectionRound r) {
     if (!mounted) return;
     const thankYou =
@@ -1782,7 +1860,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       question: '',
       talkLines: const <String>[],
       risk: r.steps.isNotEmpty ? r.steps.last.risk : false,
-      // sanfte Antwort-Chips als Satzstarter
       followups: const <String>[
         'Ja, ich möchte weiterreden … ',
         'Für heute reicht es mir, danke … ',
@@ -1811,14 +1888,14 @@ class _CalmGlassBanner extends StatelessWidget {
       margin: const EdgeInsets.symmetric(horizontal: 16),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(.20),
+        color: Colors.white.withValues(alpha: .20),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withOpacity(.22)),
+        border: Border.all(color: Colors.white.withValues(alpha: .22)),
         boxShadow: [
           BoxShadow(
             blurRadius: 20,
             offset: const Offset(0, 8),
-            color: Colors.black.withOpacity(.10),
+            color: Colors.black.withValues(alpha: .10),
           ),
         ],
       ),

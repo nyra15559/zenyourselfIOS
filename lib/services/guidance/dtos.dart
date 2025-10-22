@@ -4,14 +4,16 @@
 // - Keine externen Abhängigkeiten
 // - Defensive Defaults (tolerante fromMaybe-Factories)
 // - Snake_case-Shims für UI-/API-Kompatibilität
-// - v12.2-Alignment: bevorzugte Felder für answer_helpers, talk[], flow.mood_prompt
+// - v12.5-Alignment: bevorzugte Felder für answer_helpers, talk[],
+//   flow.mood_prompt; optional helper_suggestion (tolerant gelesen & serialisiert)
 //
 // Mini-Checkliste (Pflichtenheft A/5):
 // [x] ReflectionTurn.answerHelpers vorhanden (Default [])
 // [x] ReflectionFlow.moodPrompt / recommendEnd enthalten
-// [x] Tolerantes snake_case/legacy-Parsing (incl. Aliasse)
+// [x] Tolerantes snake_case/legacy-Parsing (inkl. Aliasse & verschachtelte Felder)
 // [x] Helpers: geordnete Deduplizierung, max 3, keine Fragen („?“)
 // [x] Session passthrough robust (id/turn/max_turns Aliasse)
+// [x] helper_suggestion als optionales Feld vorhanden (DTO ↔ JSON)
 
 /// ───────────────────────────────────────────────────────────────────────────
 /// AnalyzeResult
@@ -49,10 +51,12 @@ class ReflectionTurn {
   final String? mirror;             // Empathische Spiegelung (optional)
   final List<String> context;       // Hinweise/Aspekte
   final List<String> followups;     // kleine Nachfragen (KEINE Chips)
-  final List<String> answerHelpers; // v12.2: Echte Worker-Chips (Satzstarter)
+  final List<String> answerHelpers; // v12.2+: Echte Worker-Chips (Satzstarter)
+  /// Optional: sanfter 0–1-Satz direkt unter der Leitfrage (Worker-Feld)
+  final String? helperSuggestion;
   final ReflectionFlow? flow;       // Flow-Metadaten/Flags
   final ReflectionSession session;  // Session-Metadaten (immer vorhanden)
-  final List<String> tags;          // Schulen/Tags
+  final List<String> tags;          // Themen/Tags
   final String riskFlag;            // 'none' | 'support' | 'crisis'
   final List<String> questions;     // gelieferte Fragen (roh)
   final List<String> talk;          // talk-Zeilen
@@ -63,6 +67,7 @@ class ReflectionTurn {
     required this.context,
     required this.followups,
     required this.answerHelpers,
+    this.helperSuggestion,
     required this.flow,
     required this.session,
     required this.tags,
@@ -106,6 +111,8 @@ class ReflectionTurn {
       if (context.isNotEmpty) 'context': context,
       if (followups.isNotEmpty) 'followups': followups,
       if (answerHelpers.isNotEmpty) 'answer_helpers': answerHelpers,
+      if ((helperSuggestion ?? '').trim().isNotEmpty)
+        'helper_suggestion': helperSuggestion!.trim(),
       'flow': flow?.toJson() ??
           const ReflectionFlow(recommendEnd: false, suggestBreak: false).toJson(),
       'session': session.toJson(),
@@ -122,7 +129,7 @@ class ReflectionTurn {
     if (v is! Map) return null;
     final m = Map<String, dynamic>.from(v);
 
-    // kleine lokale Helper
+    // lokale Helper
     List<String> asStringList(dynamic x) {
       if (x == null) return const <String>[];
       if (x is List) {
@@ -137,7 +144,7 @@ class ReflectionTurn {
         if (s.isEmpty) return const <String>[];
         // tolerant splitten (Zeilen, Bulletpoints, Semikolons, Gedankenstriche)
         final parts = s
-            .split(RegExp(r'\n+|[•\-–—]\s+|;\s+'))
+            .split(RegExp(r'\r?\n+|[•\-–—]\s+|;\s+'))
             .map((e) => e.trim())
             .where((e) => e.isNotEmpty)
             .toList();
@@ -146,74 +153,130 @@ class ReflectionTurn {
       return const <String>[];
     }
 
+    Map<String, dynamic>? asMap(dynamic x) =>
+        (x is Map<String, dynamic>) ? x : (x is Map ? Map<String, dynamic>.from(x) : null);
+
+    String? pickString(Map<String, dynamic>? mm, List<String> keys) {
+      if (mm == null) return null;
+      for (final k in keys) {
+        final v = mm[k];
+        if (v == null) continue;
+        final s = v.toString().trim();
+        if (s.isNotEmpty) return s;
+      }
+      return null;
+    }
+
+    // evtl. verschachtelte Teilbäume
+    final primary = asMap(m['primary']);
+    final flowMap = asMap(m['flow']);
+
     // output / question(s)
     final outputText = (m['output_text'] ??
             m['outputText'] ??
             m['question'] ??
             m['primary_question'] ??
+            pickString(primary, const ['output_text', 'text', 'question']) ??
+            pickString(flowMap, const ['output_text', 'text', 'question']) ??
             '')
         .toString()
         .trim();
 
-    // Fragen: mehrere mögliche Keys tolerieren
+    // Fragen: mehrere mögliche Keys + verschachtelt
     final questions = <String>[
       ...asStringList(m['questions']),
       ...asStringList(m['qs']),
       ...asStringList(m['multi_questions']),
+      ...asStringList(primary?['questions']),
+      ...asStringList(flowMap?['questions']),
     ];
 
     // simple lists
     final context = asStringList(m['context']);
     final followups = asStringList(m['followups']);
-    final talk = asStringList(m['talk']);
-    final tags = asStringList(m['tags']);
+    final talk = [
+      ...asStringList(m['talk']),
+      ...asStringList(primary?['talk']),
+      ...asStringList(flowMap?['talk']),
+    ];
+    final tags = [
+      ...asStringList(m['tags']),
+      ...asStringList(primary?['tags']),
+      ...asStringList(flowMap?['tags']),
+    ];
 
-    // *** Chips aus verschiedenen Feldern tolerant einsammeln (geordnet deduplizieren, max 3)
-    final _helpersRaw = <String>[
+    // Chips aus verschiedenen Feldern tolerant einsammeln (geordnet deduplizieren, max 3)
+    final helpersRaw = <String>[
       ...asStringList(m['answer_helpers']),
       ...asStringList(m['answer_scaffolds']),
       ...asStringList(m['answer_templates']),
       ...asStringList(m['helpers']),
       ...asStringList(m['chips']),
       ...asStringList(m['answers']),
-      // gelegentlich verschachtelt in flow/ui
-      ...asStringList((m['flow'] as Map?)?['answer_helpers']),
-      ...asStringList((m['flow'] as Map?)?['helpers']),
-      ...asStringList((m['ui'] as Map?)?['answer_helpers']),
-      ...asStringList((m['ui'] as Map?)?['chips']),
+      // gelegentlich verschachtelt in flow/ui/primary
+      ...asStringList(flowMap?['answer_helpers']),
+      ...asStringList(flowMap?['helpers']),
+      ...asStringList(asMap(m['ui'])?['answer_helpers']),
+      ...asStringList(asMap(m['ui'])?['chips']),
+      ...asStringList(primary?['answer_helpers']),
+      ...asStringList(primary?['helpers']),
     ]
         // echte Fragen rausfiltern
         .where((s) => s.isNotEmpty && !s.endsWith('?'))
         // sanfte Normalisierung: Doppelpunkte/Abschluss-Punkte weg
-        .map((s) => s.replaceAll(RegExp(r'\s*[:：]\s*$'), '').replaceAll(RegExp(r'[.。]+$'), '').trim())
+        .map((s) => s
+            .replaceAll(RegExp(r'\s*[:：]\s*$'), '')
+            .replaceAll(RegExp(r'[.。]+$'), '')
+            .trim())
         .where((s) => s.isNotEmpty)
         .toList();
 
     final seen = <String>{};
     final orderedDeduped = <String>[];
-    for (final h in _helpersRaw) {
+    for (final h in helpersRaw) {
       final k = h.toLowerCase();
       if (seen.add(k)) orderedDeduped.add(h);
       if (orderedDeduped.length >= 3) break;
     }
     final answerHelpers = orderedDeduped;
 
-    // risk
-    final rl = (m['risk_level'] ?? m['risk'] ?? 'none').toString().toLowerCase().trim();
-    final riskFlag = (rl == 'high' || rl == 'crisis')
-        ? 'crisis'
-        : (rl == 'mild' || rl == 'support')
-            ? 'support'
-            : 'none';
+    // helper_suggestion (tolerant; auch verschachtelt lesen)
+    String? helperSuggestion() {
+      final top = (m['helper_suggestion'] ?? m['helperSuggestion'])?.toString().trim();
+      if (top != null && top.isNotEmpty) return top;
+      final fromPrimary = pickString(primary, const ['helper_suggestion', 'helperSuggestion']);
+      if (fromPrimary != null && fromPrimary.trim().isNotEmpty) return fromPrimary.trim();
+      final fromFlow = pickString(flowMap, const ['helper_suggestion', 'helperSuggestion']);
+      if (fromFlow != null && fromFlow.trim().isNotEmpty) return fromFlow.trim();
+      return null;
+    }
+
+    // risk: erlaubt bool 'risk' (→ support) ODER level-Strings
+    String riskFlagFrom(dynamic levelDyn, dynamic riskDyn) {
+      // bool risk=true → 'support'
+      if (riskDyn == true) return 'support';
+      final rl = (levelDyn ?? riskDyn ?? 'none').toString().toLowerCase().trim();
+      if (rl == 'high' || rl == 'crisis') return 'crisis';
+      if (rl == 'mild' || rl == 'support') return 'support';
+      return 'none';
+    }
+
+    final riskFlag = riskFlagFrom(m['risk_level'], m['risk']);
 
     return ReflectionTurn(
       outputText: outputText.isEmpty ? kErrorHintFallback : outputText,
-      mirror: (m['mirror']?.toString().trim().isEmpty ?? true) ? null : m['mirror'].toString(),
+      mirror: (m['mirror']?.toString().trim().isNotEmpty ?? false)
+          ? m['mirror'].toString()
+          : pickString(primary, const ['mirror']) ??
+              pickString(flowMap, const ['mirror']),
       context: context,
       followups: followups,
-      answerHelpers: answerHelpers, // <- jetzt Teil des DTOs
-      flow: ReflectionFlow.fromMaybe(m['flow']),
+      answerHelpers: answerHelpers,
+      helperSuggestion: helperSuggestion(),
+      flow: ReflectionFlow.fromMaybe(m['flow']) ??
+          ReflectionFlow.fromMaybe(primary?['flow']),
       session: ReflectionSession.fromMaybe(m['session']) ??
+          ReflectionSession.fromMaybe(primary?['session']) ??
           const ReflectionSession(threadId: '', turnIndex: 0, maxTurns: 3),
       tags: tags,
       riskFlag: riskFlag,
@@ -266,7 +329,8 @@ class ReflectionFlow {
       recommendEnd: m['recommend_end'] == true || m['end'] == true,
       suggestBreak: m['suggest_break'] == true || m['break'] == true,
       riskNotice: m['risk_notice']?.toString(),
-      sessionTurn: (m['session_turn'] is num) ? (m['session_turn'] as num).toInt() : null,
+      sessionTurn:
+          (m['session_turn'] is num) ? (m['session_turn'] as num).toInt() : null,
       talkOnly: m['talk_only'] == true,
       allowReflect: m['allow_reflect'] != false,
       moodPrompt: m['mood_prompt'] == true || m['moodPrompt'] == true,
@@ -296,6 +360,7 @@ class ReflectionSession {
       );
 
   Map<String, dynamic> toJson() => {
+        // Wichtig: 'id' + 'turn' für Kompatibilität (reflection_screen / guidance_service)
         'id': threadId,
         'turn': turnIndex,
         'max_turns': maxTurns,
@@ -358,10 +423,16 @@ class StructuredThoughtResult {
     final bulletsDyn = (json['bullets'] as List?) ?? const [];
     final nsDyn = (json['next_steps'] as List?) ?? const [];
     return StructuredThoughtResult(
-      bullets: bulletsDyn.map((e) => e.toString()).where((e) => e.trim().isNotEmpty).toList(),
+      bullets: bulletsDyn
+          .map((e) => e.toString())
+          .where((e) => e.trim().isNotEmpty)
+          .toList(),
       coreIdea: (json['core_idea'] ?? '').toString(),
       moodHint: json['mood_hint']?.toString(),
-      nextSteps: nsDyn.map((e) => e.toString()).where((e) => e.trim().isNotEmpty).toList(),
+      nextSteps: nsDyn
+          .map((e) => e.toString())
+          .where((e) => e.trim().isNotEmpty)
+          .toList(),
       source: (json['source'] ?? 'server').toString(),
     );
   }

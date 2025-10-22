@@ -224,8 +224,8 @@ class TtsService {
 /// Damit alter Code wie `import '.../ts_service.dart' as tts;` und
 /// `tts.TsService.instance.speak(...)` keinen Compile-Fehler wirft,
 /// spiegeln wir die API hier auf TtsService.
-/// (Wenn du willst, kannst du zusätzlich eine Datei ts_service.dart anlegen,
-/// die einfach `export 'tts_service.dart';` enthält.)
+/// (Optional zusätzlich eine Datei ts_service.dart anlegen, die
+///  einfach `export 'tts_service.dart';` enthält.)
 
 class TsService {
   TsService._();
@@ -254,7 +254,7 @@ class TsService {
       volume: volume,
       queue: queue,
     );
-    }
+  }
 
   Future<void> stop() => TtsService.instance.stop();
   Future<void> pause() => TtsService.instance.pause();

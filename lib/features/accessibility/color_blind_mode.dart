@@ -5,8 +5,9 @@
 // • Zwei Paletten: normal & farbenblindenfreundlich (deuter-/protan-sicher)
 // • Persistenz via SharedPreferences
 // • Hoher Kontrast & automatische „onColor“-Berechnung
-// • Semantiken/Haptik im Switcher
-// • Hilfs-Widgets für farbcodierte Statuschips, die NICHT nur Farbe nutzen
+// • Semantik/Haptik im Switcher
+// • Chips nutzen Icon + Farbe (nicht nur Farbe)
+// • Flutter ≥3.12: withValues(alpha: …), TextScaler bleibt systemgesteuert
 
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
@@ -41,7 +42,7 @@ class AccessibilityPalette {
     accent: Color(0xFF3777B6), // Blau
     good: Color(0xFF3BA54A),   // Grün
     warning: Color(0xFFE6A700),// Gelb/Amber
-    bad: Color(0xFFB71C1C),    // Rot (dunkel für Kontrast)
+    bad: Color(0xFFB71C1C),    // Dunkles Rot für Kontrast
   );
 
   /// Ermittelt die aktive Palette aus dem Context (Provider)
@@ -52,12 +53,10 @@ class AccessibilityPalette {
   }
 
   /// Lesefarbe (schwarz/weiß) mit solidem Kontrast
-  static Color onColor(Color bg) => _relativeLuminance(bg) > 0.58
-      ? Colors.black
-      : Colors.white;
+  static Color onColor(Color bg) =>
+      _relativeLuminance(bg) > 0.58 ? Colors.black : Colors.white;
 
-  /// Relative Luminanz (WCAG) – aktualisiert auf neues Color-API:
-  /// Achtung: `Color.r/g/b` liefern 0..1 Floats (nicht 0..255).
+  /// Relative Luminanz (WCAG) – Projekt nutzt Color.r/g/b (0..1)
   static double _relativeLuminance(Color c) {
     double gamma(double s) =>
         s <= 0.03928 ? s / 12.92 : math.pow((s + 0.055) / 1.055, 2.4).toDouble();
@@ -113,9 +112,17 @@ class ColorBlindModeSwitcher extends StatelessWidget {
     final provider = context.watch<ColorBlindModeProvider>();
     final palette = AccessibilityPalette.of(context);
 
-    // Material 3: activeColor ist deprecated → Thumb/Track separat setzen.
-    final activeThumb = palette.accent;
-    final activeTrack = palette.accent.withValues(alpha: 0.45);
+    // M3: direkte Farbangabe für Switch via MaterialStateProperty
+    final thumbColor = MaterialStateProperty.resolveWith<Color?>((states) {
+      if (states.contains(MaterialState.selected)) return palette.accent;
+      return null; // Theme-Default
+    });
+    final trackColor = MaterialStateProperty.resolveWith<Color?>((states) {
+      if (states.contains(MaterialState.selected)) {
+        return palette.accent.withValues(alpha: .45);
+      }
+      return null;
+    });
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -137,9 +144,8 @@ class ColorBlindModeSwitcher extends StatelessWidget {
                   "Farbenblinden-Modus ${provider.enabled ? 'aktiv' : 'inaktiv'}",
               child: Switch.adaptive(
                 value: provider.enabled,
-                // ersetzt deprecated activeColor:
-                activeThumbColor: activeThumb,
-                activeTrackColor: activeTrack,
+                thumbColor: thumbColor,
+                trackColor: trackColor,
                 onChanged: (v) {
                   HapticFeedback.selectionClick();
                   provider.enabled = v;
@@ -159,7 +165,7 @@ class ColorBlindModeSwitcher extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 10),
-        // Kleine Legende, die Form + Farbe kombiniert (nicht nur Farbe!)
+        // Kleine Legende: Farbe + Icon (nicht nur Farbe!)
         const Wrap(
           spacing: 8,
           runSpacing: 8,
@@ -193,7 +199,6 @@ class _SignalChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = AccessibilityPalette.of(context);
 
-    // komplette, aber erreichbare Fallunterscheidung (kein unreachable default)
     Color bg;
     switch (kind) {
       case _SignalKind.good:

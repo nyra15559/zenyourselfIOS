@@ -1,19 +1,14 @@
 // lib/features/journal/journal_day_screen.dart
 //
-// JournalDayScreen — Oxford-Zen v6.30 (SenStyleDart, ruhig & konsistent)
-// Update: 2025-09-13
+// JournalDayScreen — Oxford–Zen v6.40 (A11y-first · large-text-safe · CB-friendly)
+// Update: 2025-10-22
 // --------------------------------------------------------------------
-// • Tages-Detailansicht mit PandaHeader und Glas-Karte für Kennzahlen.
-// • 7-Tage-Sparkline (Provider.moodSparkline) und kompakte Stat-Badges.
-// • Filter-Chips: Alle / Notizen / Reflexionen / Kurzgeschichten.
-// • Einträge als Mini-Story-Karten (JournalEntryCard) inkl. Aktionen.
-// • Teilen: Tageszusammenfassung in Zwischenablage.
-// • A11y: semantische Labels, ruhige Kontraste.
-// • Fixes:
-//   - RefreshIndicator ruft nun provider.restore() (sanftes Pull-to-refresh).
-//   - Einheitlicher Provider-API-Call: removeById(...) statt remove(...).
-//   - Null-sicher bei moodLabel in BottomSheet.
-//   - CustomPaint: kein Size.infinite (nimmt Eltern-Constraints → vermeidet Layout-Issues).
+// • Tages-Detailansicht mit PandaHeader & Glas-Karte (Kennzahlen).
+// • 7-Tage Sparkline mit Semantics (Trend/Min/Max) – kein „nur Farbe“.
+// • Filter-Chips mit Icon + Label + Semantics (nicht nur Farbe).
+// • Dismissible Delete mit Confirm-Dialog & klaren Labels.
+// • TextScaler lokal geklemmt (Overflow-sicher), min Touch-Targets.
+// • Keine neuen Provider-APIs; nur bestehende Reads verwendet.
 
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
@@ -65,130 +60,139 @@ class _JournalDayScreenState extends State<JournalDayScreen>
     final metrics = _DayMetrics.fromEntries(entries);
     final canPop = Navigator.of(context).canPop();
 
-    final isMobile = MediaQuery.of(context).size.width < 470;
+    final media = MediaQuery.of(context);
+    final clamped = media.textScaler.clamp(maxScaleFactor: 1.20, minScaleFactor: 0.90);
+
+    final isMobile = media.size.width < 470;
     final pandaSize = isMobile ? 88.0 : 112.0;
 
-    return Scaffold(
-      extendBodyBehindAppBar: true,
-      backgroundColor: Colors.transparent,
-      appBar: zw.ZenAppBar(
-        title: null,
-        showBack: canPop,
-        actions: [
-          IconButton(
-            tooltip: 'Teilen (Kopie in Zwischenablage)',
-            icon: const Icon(Icons.ios_share_rounded),
-            onPressed: () async {
-              final text = _shareTextForDay(widget.dayLocal, entries, metrics);
-              await Clipboard.setData(ClipboardData(text: text));
-              if (!mounted) return;
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Tageszusammenfassung kopiert')),
-              );
-            },
-          ),
-        ],
-      ),
-      body: Stack(
-        children: [
-          const Positioned.fill(
-            child: zw.ZenBackdrop(
-              asset: 'assets/schoen.png',
-              alignment: Alignment.center,
-              glow: .34,
-              vignette: .12,
-              enableHaze: true,
-              hazeStrength: .14,
-              saturation: .94,
-              wash: .10,
+    return MediaQuery(
+      data: media.copyWith(textScaler: clamped),
+      child: Scaffold(
+        extendBodyBehindAppBar: true,
+        backgroundColor: Colors.transparent,
+        appBar: zw.ZenAppBar(
+          title: null,
+          showBack: canPop,
+          actions: [
+            IconButton(
+              tooltip: 'Teilen (Kopie in Zwischenablage)',
+              icon: const Icon(Icons.ios_share_rounded),
+              onPressed: () async {
+                final text = _shareTextForDay(widget.dayLocal, entries, metrics);
+                await Clipboard.setData(ClipboardData(text: text));
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Tageszusammenfassung kopiert')),
+                );
+              },
             ),
-          ),
-          RefreshIndicator.adaptive(
-            color: ZenColors.deepSage,
-            onRefresh: () async {
-              await context.read<jp.JournalEntriesProvider>().restore(); // sanft
-              HapticFeedback.selectionClick();
-            },
-            child: CustomScrollView(
-              physics: const BouncingScrollPhysics(
-                parent: AlwaysScrollableScrollPhysics(),
+          ],
+        ),
+        body: Stack(
+          children: [
+            const Positioned.fill(
+              child: zw.ZenBackdrop(
+                asset: 'assets/schoen.png',
+                alignment: Alignment.center,
+                glow: .34,
+                vignette: .12,
+                enableHaze: true,
+                hazeStrength: .14,
+                saturation: .94,
+                wash: .10,
               ),
-              slivers: [
-                // PandaHeader
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 70, 16, 10),
-                    child: zw.PandaHeader(
-                      title: 'Dein Tag',
-                      caption: _formatDay(widget.dayLocal, DateTime.now()),
-                      pandaSize: pandaSize,
-                      strongTitleGreen: true,
+            ),
+            RefreshIndicator.adaptive(
+              color: ZenColors.deepSage,
+              onRefresh: () async {
+                await context.read<jp.JournalEntriesProvider>().restore(); // sanft
+                HapticFeedback.selectionClick();
+              },
+              child: CustomScrollView(
+                physics: const BouncingScrollPhysics(
+                  parent: AlwaysScrollableScrollPhysics(),
+                ),
+                slivers: [
+                  // PandaHeader
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 70, 16, 10),
+                      child: zw.PandaHeader(
+                        title: 'Dein Tag',
+                        caption: _formatDay(widget.dayLocal, DateTime.now()),
+                        pandaSize: pandaSize,
+                        strongTitleGreen: true,
+                      ),
                     ),
                   ),
-                ),
 
-                // Header-Kennzahlen + Sparkline
-                SliverToBoxAdapter(
-                  child: _HeaderCard(day: widget.dayLocal, metrics: metrics),
-                ),
-
-                // Filter
-                SliverToBoxAdapter(
-                  child: _FilterChips(
-                    filter: _filter,
-                    onChanged: (f) {
-                      HapticFeedback.selectionClick();
-                      setState(() => _filter = f);
-                    },
+                  // Header-Kennzahlen + Sparkline
+                  SliverToBoxAdapter(
+                    child: _HeaderCard(day: widget.dayLocal, metrics: metrics),
                   ),
-                ),
 
-                // Einträge (als Karten)
-                if (filtered.isEmpty)
-                  const SliverFillRemaining(
-                    hasScrollBody: false,
-                    child: _EmptyDay(),
-                  )
-                else
-                  SliverList.separated(
-                    itemCount: filtered.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 8),
-                    itemBuilder: (ctx, i) {
-                      final e = filtered[i];
-                      return Dismissible(
-                        key: ValueKey(e.id),
-                        direction: DismissDirection.endToStart,
-                        background: _deleteBg(),
-                        confirmDismiss: (_) => _confirmDeleteDialog(ctx),
-                        onDismissed: (_) =>
-                            ctx.read<jp.JournalEntriesProvider>().removeById(e.id),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          child: JournalEntryCard(
-                            entry: e,
-                            onTap: () => _showEntrySheet(ctx, e),
-                            onContinue: e.kind == jm.EntryKind.reflection
-                                ? () => _continueReflection(ctx, e)
-                                : null,
-                            onEdit: null,
-                            onHide: null,
-                            onDelete: () async {
-                              final ok =
-                                  await _confirmDeleteDialog(ctx) ?? false;
-                              if (!ok) return;
-                              // ignore: use_build_context_synchronously
-                              ctx.read<jp.JournalEntriesProvider>().removeById(e.id);
-                            },
+                  // Filter
+                  SliverToBoxAdapter(
+                    child: _FilterChips(
+                      filter: _filter,
+                      onChanged: (f) {
+                        HapticFeedback.selectionClick();
+                        setState(() => _filter = f);
+                      },
+                    ),
+                  ),
+
+                  // Einträge (als Karten)
+                  if (filtered.isEmpty)
+                    const SliverFillRemaining(
+                      hasScrollBody: false,
+                      child: _EmptyDay(),
+                    )
+                  else
+                    SliverList.separated(
+                      itemCount: filtered.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      itemBuilder: (ctx, i) {
+                        final e = filtered[i];
+                        return Dismissible(
+                          key: ValueKey(e.id),
+                          direction: DismissDirection.endToStart,
+                          background: _deleteBg(),
+                          confirmDismiss: (_) => _confirmDeleteDialog(ctx),
+                          onDismissed: (_) =>
+                              ctx.read<jp.JournalEntriesProvider>().removeById(e.id),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            child: Semantics(
+                              label: 'Eintrag ${i + 1} von ${filtered.length}',
+                              child: JournalEntryCard(
+                                entry: e,
+                                onTap: () => _showEntrySheet(ctx, e),
+                                onContinue: e.kind == jm.EntryKind.reflection
+                                    ? () => _continueReflection(ctx, e)
+                                    : null,
+                                onEdit: null,
+                                onHide: null,
+                                onDelete: () async {
+                                  final ok =
+                                      await _confirmDeleteDialog(ctx) ?? false;
+                                  if (!ok) return;
+                                  // ignore: use_build_context_synchronously
+                                  ctx.read<jp.JournalEntriesProvider>().removeById(e.id);
+                                },
+                              ),
+                            ),
                           ),
-                        ),
-                      );
-                    },
-                  ),
-                const SliverPadding(padding: EdgeInsets.only(bottom: 24)),
-              ],
+                        );
+                      },
+                    ),
+                  const SliverPadding(padding: EdgeInsets.only(bottom: 24)),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -338,11 +342,13 @@ class _HeaderCard extends StatelessWidget {
     final mm = day.month.toString().padLeft(2, '0');
     final dateStr = '$dd.$mm.${day.year}';
 
+    final trend = _trend(spark);
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
       child: Semantics(
         label:
-            'Tagesübersicht $dateStr. ${metrics.count} Einträge. Ø-Mood ${metrics.avgMood.toStringAsFixed(2)}.',
+            'Tagesübersicht $dateStr. ${metrics.count} Einträge. Ø-Mood ${metrics.avgMood.toStringAsFixed(2)}. ${trend.label}',
         child: zw.ZenGlassCard(
           padding: const EdgeInsets.all(ZenSpacing.padBubble),
           borderRadius: const BorderRadius.all(ZenRadii.xl),
@@ -372,26 +378,60 @@ class _HeaderCard extends StatelessWidget {
                     value: metrics.reflections.toString(),
                   ),
                   _StatBadge(
-                    icon: Icons.sentiment_satisfied_alt_outlined,
+                    icon: _moodIconFromScore(metrics.avgMood),
                     label: 'Ø-Mood',
                     value: metrics.avgMood.toStringAsFixed(2),
                     color: _moodColorFromScore(metrics.avgMood),
                   ),
+                  if (spark.isNotEmpty)
+                    _StatBadge(
+                      icon: trend.icon,
+                      label: 'Trend',
+                      value: trend.text,
+                      color: trend.color,
+                    ),
                 ],
               ),
               const SizedBox(height: 12),
               if (spark.isNotEmpty) ...[
-                Text('Mood — 7 Tage',
-                    style:
-                        ZenTextStyles.caption.copyWith(color: ZenColors.ink)),
+                Text(
+                  'Mood — 7 Tage',
+                  style: ZenTextStyles.caption.copyWith(color: ZenColors.ink),
+                ),
                 const SizedBox(height: 8),
-                SizedBox(height: 64, child: _Sparkline(values: spark)),
+                Semantics(
+                  label: 'Mood Verlauf der letzten 7 Tage. ${trend.label}',
+                  child: SizedBox(height: 64, child: _Sparkline(values: spark)),
+                ),
               ],
             ],
           ),
         ),
       ),
     );
+  }
+
+  ({String text, String label, IconData icon, Color color}) _trend(List<double> v) {
+    if (v.isEmpty) {
+      return (text: '–', label: 'Kein Trend', icon: Icons.more_horiz, color: ZenColors.ink);
+    }
+    final first = v.first, last = v.last;
+    final delta = last - first;
+    if (delta > 0.25) {
+      return (text: '↑', label: 'steigend', icon: Icons.trending_up, color: ZenColors.jade);
+    }
+    if (delta < -0.25) {
+      return (text: '↓', label: 'fallend', icon: Icons.trending_down, color: ZenColors.cherry);
+    }
+    return (text: '→', label: 'stabil', icon: Icons.trending_flat, color: ZenColors.jadeMid);
+    }
+
+  IconData _moodIconFromScore(double s) {
+    if (s <= -1.0) return Icons.sentiment_very_dissatisfied;
+    if (s < 0) return Icons.sentiment_dissatisfied;
+    if (s < 1.0) return Icons.sentiment_neutral;
+    if (s < 2.0) return Icons.sentiment_satisfied;
+    return Icons.sentiment_very_satisfied;
   }
 
   Color _moodColorFromScore(double s) {
@@ -453,28 +493,38 @@ class _FilterChips extends StatelessWidget {
   Widget build(BuildContext context) {
     Widget chip(_EntryFilter f, String text, IconData icon) {
       final selected = f == filter;
-      return ChoiceChip(
-        label: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon,
-                size: 16,
-                color: selected ? ZenColors.jade : ZenColors.jadeMid),
-            const SizedBox(width: 6),
-            Text(text),
-          ],
-        ),
+      return Semantics(
         selected: selected,
-        onSelected: (_) => onChanged(f),
-        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        visualDensity: VisualDensity.compact,
-        selectedColor: ZenColors.jade.withValues(alpha: .10),
-        side: BorderSide(
-          color: selected
-              ? ZenColors.jade.withValues(alpha: .55)
-              : ZenColors.outline,
+        button: true,
+        label: 'Filter: $text',
+        child: Tooltip(
+          message: text,
+          waitDuration: const Duration(milliseconds: 600),
+          child: ChoiceChip(
+            label: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon,
+                    size: 16,
+                    color: selected ? ZenColors.jade : ZenColors.jadeMid),
+                const SizedBox(width: 6),
+                Text(text, overflow: TextOverflow.ellipsis),
+              ],
+            ),
+            selected: selected,
+            onSelected: (_) => onChanged(f),
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            visualDensity: VisualDensity.compact,
+            selectedColor: ZenColors.jade.withValues(alpha: .10),
+            side: BorderSide(
+              color: selected
+                  ? ZenColors.jade.withValues(alpha: .55)
+                  : ZenColors.outline,
+            ),
+            shape: const StadiumBorder(),
+            labelPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          ),
         ),
-        shape: const StadiumBorder(),
       );
     }
 
@@ -514,12 +564,16 @@ class _EmptyDay extends StatelessWidget {
               style:
                   ZenTextStyles.subtitle.copyWith(color: ZenColors.inkStrong),
               textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
             ),
             const SizedBox(height: 8),
             Text(
               'Schreibe eine kurze Notiz oder halte eine Reflexion fest.',
               style: ZenTextStyles.caption.copyWith(color: ZenColors.ink),
               textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
             ),
           ],
         ),
@@ -658,6 +712,9 @@ class _EntryBottomSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final media = MediaQuery.of(context);
+    final clamped = media.textScaler.clamp(maxScaleFactor: 1.20, minScaleFactor: 0.90);
+
     final local = entry.createdAt.toLocal();
     final kindLabel = entry.kind == jm.EntryKind.reflection
         ? 'Reflexion'
@@ -690,83 +747,92 @@ class _EntryBottomSheet extends StatelessWidget {
         ? (entry.aiQuestion ?? '').trim()
         : '';
 
-    return Container(
-      margin: const EdgeInsets.all(14),
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: .96),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: ZenColors.border),
-        boxShadow: ZenShadows.card,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+    return MediaQuery(
+      data: media.copyWith(textScaler: clamped),
+      child: Container(
+        margin: const EdgeInsets.all(14),
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: .96),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: ZenColors.border),
+          boxShadow: ZenShadows.card,
+        ),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(icon,
-                  color: entry.kind == jm.EntryKind.reflection
-                      ? ZenColors.jadeMid
-                      : (entry.kind == jm.EntryKind.story
-                          ? ZenColors.cta
-                          : ZenColors.deepSage)),
-              const SizedBox(width: 8),
-              Text(
-                kindLabel,
-                style:
-                    ZenTextStyles.subtitle.copyWith(fontWeight: FontWeight.w700),
+              Row(
+                children: [
+                  Icon(icon,
+                      color: entry.kind == jm.EntryKind.reflection
+                          ? ZenColors.jadeMid
+                          : (entry.kind == jm.EntryKind.story
+                              ? ZenColors.cta
+                              : ZenColors.deepSage)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      kindLabel,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: ZenTextStyles.subtitle.copyWith(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    _formatTime(local),
+                    style: ZenTextStyles.caption.copyWith(color: ZenColors.jadeMid),
+                  ),
+                ],
               ),
-              const Spacer(),
+              const SizedBox(height: 10),
               Text(
-                _formatTime(local),
-                style: ZenTextStyles.caption.copyWith(color: ZenColors.jadeMid),
+                mainText,
+                style: ZenTextStyles.body.copyWith(fontSize: 16.5, height: 1.38),
               ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Text(
-            mainText,
-            style: ZenTextStyles.body.copyWith(fontSize: 16.5, height: 1.38),
-          ),
-          if (auxQuestion.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 10),
-              child: Text(
-                'Frage: $auxQuestion',
-                style: ZenTextStyles.caption.copyWith(
-                  fontStyle: FontStyle.italic,
-                  color: ZenColors.jadeMid,
+              if (auxQuestion.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: Text(
+                    'Frage: $auxQuestion',
+                    style: ZenTextStyles.caption.copyWith(
+                      fontStyle: FontStyle.italic,
+                      color: ZenColors.jadeMid,
+                    ),
+                  ),
                 ),
-              ),
-            ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Text(
-                (entry.moodLabel ?? '').isNotEmpty ? (entry.moodLabel ?? '') : '—',
-                style: ZenTextStyles.caption.copyWith(color: ZenColors.ink),
-              ),
-              const Spacer(),
-              TextButton.icon(
-                icon: const Icon(Icons.delete_outline),
-                label: const Text('Löschen'),
-                style:
-                    TextButton.styleFrom(foregroundColor: Colors.redAccent),
-                onPressed: () async {
-                  final ok =
-                      await _JournalDayScreenState._confirmDeleteDialog(context) ??
-                          false;
-                  if (!ok) return;
-                  // ignore: use_build_context_synchronously
-                  context.read<jp.JournalEntriesProvider>().removeById(entry.id);
-                  // ignore: use_build_context_synchronously
-                  Navigator.of(context).pop();
-                },
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Text(
+                    (entry.moodLabel ?? '').isNotEmpty ? (entry.moodLabel ?? '') : '—',
+                    style: ZenTextStyles.caption.copyWith(color: ZenColors.ink),
+                  ),
+                  const Spacer(),
+                  TextButton.icon(
+                    icon: const Icon(Icons.delete_outline),
+                    label: const Text('Löschen'),
+                    style:
+                        TextButton.styleFrom(foregroundColor: Colors.redAccent),
+                    onPressed: () async {
+                      final ok =
+                          await _JournalDayScreenState._confirmDeleteDialog(context) ??
+                              false;
+                      if (!ok) return;
+                      // ignore: use_build_context_synchronously
+                      context.read<jp.JournalEntriesProvider>().removeById(entry.id);
+                      // ignore: use_build_context_synchronously
+                      Navigator.of(context).pop();
+                    },
+                  ),
+                ],
               ),
             ],
           ),
-        ],
+        ),
       ),
     );
   }

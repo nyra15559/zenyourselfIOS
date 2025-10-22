@@ -1,20 +1,23 @@
 // lib/features/calendar/mood_heatmap.dart
 //
-// MoodHeatmap — ZenYourself (Oxford Edition)
-// -----------------------------------------
-// • Wochen-Heatmap (Mo–So) mit ruhiger Ästhetik
-// • A11y: Semantics-Labels, klare Kontraste
-// • „Heute“-Ring, sanfte Tooltip-Animation
-// • Optionaler Lottie-Glow im Hintergrund
+// MoodHeatmap — ZenYourself (Oxford Edition, ZenColors, Scale 0–4)
+// -----------------------------------------------------------------
+// • Wochen-Heatmap (Mo–So), ruhige Ästhetik, Theme-basiert
+// • Farben aus ZenColors (Jade-Hue, steigende Deckkraft je Score 0–4)
+// • A11y: Semantics-Labels inkl. „Heute“-Hinweis
+// • „Heute“-Ring, sanfter Tooltip, optionaler Lottie-Glow im Hintergrund
+// • Null-safety: keine ?. + ! Mischfehler
+//
+// Hinweise:
+// – Keine hartcodierten Marken-Fonts; nutze Theme.
+// – Color.withValues(alpha: …) gemäß Projektstandard.
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lottie/lottie.dart';
-import '../../data/mood_entry.dart';
 
-const zenGreen = Color(0xFF0B3D2E);
-const sandBeige = Color(0xFFFDF8EC);
-const zenGrey = Color(0xFFD8D8D8);
+import '../../shared/zen_style.dart' as zs; // ZenColors, Radii, Spacing
+import '../../data/mood_entry.dart';
 
 class MoodHeatmap extends StatelessWidget {
   final List<MoodEntry> moodEntries;
@@ -36,7 +39,8 @@ class MoodHeatmap extends StatelessWidget {
 
     // Wochenfenster (Mo–So) basierend auf heutigem Datum
     final monday = now.subtract(Duration(days: now.weekday - 1));
-    final weekDays = List<DateTime>.generate(7, (i) => monday.add(Duration(days: i)));
+    final weekDays =
+        List<DateTime>.generate(7, (i) => monday.add(Duration(days: i)));
 
     // Für jeden Wochentag: letzter Eintrag (oder null)
     final entries = weekDays
@@ -47,6 +51,13 @@ class MoodHeatmap extends StatelessWidget {
                   e.timestamp.day == date.day,
             ))
         .toList();
+
+    final cardBg = Theme.of(context).colorScheme.surfaceContainerHighest
+        .withValues(alpha: .96);
+    final borderColor =
+        Theme.of(context).colorScheme.outlineVariant.withValues(alpha: .18);
+    final shadowColor = zs.ZenColors.deepSage.withValues(alpha: .07);
+    final titleColor = zs.ZenColors.deepSage;
 
     return Stack(
       alignment: Alignment.center,
@@ -63,16 +74,16 @@ class MoodHeatmap extends StatelessWidget {
           ),
         Container(
           decoration: BoxDecoration(
-            color: sandBeige.withValues(alpha: 0.96),
-            borderRadius: BorderRadius.circular(23),
+            color: cardBg,
+            borderRadius: const BorderRadius.all(zs.ZenRadii.xl),
             boxShadow: [
               BoxShadow(
-                color: zenGreen.withValues(alpha: 0.07),
+                color: shadowColor,
                 blurRadius: 15,
                 offset: const Offset(0, 6),
               ),
             ],
-            border: Border.all(color: zenGreen.withValues(alpha: 0.065), width: 1.2),
+            border: Border.all(color: borderColor, width: 1.2),
           ),
           padding: EdgeInsets.symmetric(
             vertical: isMini ? 9 : 19,
@@ -82,14 +93,12 @@ class MoodHeatmap extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                isMini ? "Zen-Woche" : "Deine Woche im Zen-Flow",
-                style: const TextStyle(
-                  fontSize: 17.5,
-                  fontWeight: FontWeight.bold,
-                  color: zenGreen,
-                  fontFamily: "ZenKalligrafie",
-                  letterSpacing: 0.14,
-                ),
+                isMini ? 'Zen-Woche' : 'Deine Woche im Zen-Flow',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: titleColor,
+                      letterSpacing: .14,
+                    ),
               ),
               SizedBox(height: isMini ? 10 : 18),
               Row(
@@ -99,9 +108,13 @@ class MoodHeatmap extends StatelessWidget {
                   final entry = entries[i];
                   final isEmpty = entry == null || (entry.moodScore ?? -1) < 0;
                   final score = entry?.moodScore ?? -1;
-                  final moodColor =
-                      isEmpty ? zenGrey.withValues(alpha: 0.22) : _zenMoodColor(score).withValues(alpha: 0.93);
-                  final emoji = isEmpty ? "…" : _emojiForScore(score);
+                  final moodColor = isEmpty
+                      ? Theme.of(context)
+                          .colorScheme
+                          .outlineVariant
+                          .withValues(alpha: .22)
+                      : _scoreColor(score).withValues(alpha: .95);
+                  final emoji = isEmpty ? '…' : _emojiForScore(score);
                   final isToday = _isSameDay(date, now);
 
                   return _ZenDayMoodBubble(
@@ -118,19 +131,17 @@ class MoodHeatmap extends StatelessWidget {
                 }),
               ),
               if (!isMini)
-                const Padding(
-                  padding: EdgeInsets.only(top: 13.0),
+                Padding(
+                  padding: const EdgeInsets.only(top: 13.0),
                   child: Opacity(
-                    opacity: 0.88,
+                    opacity: .88,
                     child: Text(
-                      "*Tippe für Details, lang halten für Zitat*",
-                      style: TextStyle(
-                        color: zenGreen,
-                        fontSize: 12.7,
-                        fontStyle: FontStyle.italic,
-                        fontFamily: "SFProText",
-                        letterSpacing: 0.03,
-                      ),
+                      'Tippe für Details · lange halten für Zitat',
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                            color:
+                                zs.ZenColors.deepSage.withValues(alpha: .88),
+                            fontStyle: FontStyle.italic,
+                          ),
                     ),
                   ),
                 ),
@@ -144,64 +155,66 @@ class MoodHeatmap extends StatelessWidget {
   static bool _isSameDay(DateTime a, DateTime b) =>
       a.year == b.year && a.month == b.month && a.day == b.day;
 
-  static Color _zenMoodColor(int score) {
+  /// Farbskala 0–4 auf Basis **ZenColors.jade** (gleicher Hue, wachsende Deckkraft).
+  static Color _scoreColor(int score) {
+    final jade = zs.ZenColors.jade;
     switch (score) {
       case 0:
-        return const Color(0xFFD0DFE2); // Nebelgrau
+        return jade.withValues(alpha: .16);
       case 1:
-        return const Color(0xFFE9E4CC); // Pastell-Sand
+        return jade.withValues(alpha: .28);
       case 2:
-        return const Color(0xFFF7EDD6); // Sanftbeige
+        return jade.withValues(alpha: .42);
       case 3:
-        return const Color(0xFFDFF2E6); // Hellgrün
+        return jade.withValues(alpha: .62);
       case 4:
-        return const Color(0xFFC2E5CF); // Zen-Grün
+        return jade.withValues(alpha: .82);
       default:
-        return sandBeige;
+        return jade.withValues(alpha: .10);
     }
   }
 
   static String _emojiForScore(int score) {
     switch (score) {
       case 0:
-        return "🌫️";
+        return '🌫️';
       case 1:
-        return "🌦️";
+        return '🌦️';
       case 2:
-        return "⛅";
+        return '⛅';
       case 3:
-        return "🌤️";
+        return '🌤️';
       case 4:
-        return "🌞";
+        return '🌞';
       default:
-        return "…";
+        return '…';
     }
   }
 
   static String _labelForScore(int? score) {
     switch (score) {
       case 0:
-        return "Tief";
+        return 'Tief';
       case 1:
-        return "Niedrig";
+        return 'Niedrig';
       case 2:
-        return "Neutral";
+        return 'Neutral';
       case 3:
-        return "Klar";
+        return 'Klar';
       case 4:
-        return "Erfüllt";
+        return 'Erfüllt';
       default:
-        return "Keine Angabe";
+        return 'Keine Angabe';
     }
   }
 
   static String _weekdayLabel(int i) {
-    const labels = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
+    const labels = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
     return labels[i];
   }
 }
 
-// --- Einzelner Wochentag: Zen-MoodBubble, interaktiv, animiert, A11y ---
+// --- Einzelner Wochentag: Zen-MoodBubble, interaktiv, animiert, A11y --------
 class _ZenDayMoodBubble extends StatefulWidget {
   final String emoji;
   final int? score;
@@ -241,7 +254,11 @@ class _ZenDayMoodBubbleState extends State<_ZenDayMoodBubble> {
       date: widget.date,
       score: widget.score,
       label: widget.label,
+      isToday: widget.isToday,
     );
+
+    final ringColor =
+        zs.ZenColors.deepSage.withValues(alpha: .22); // „Heute“-Ring
 
     return Semantics(
       button: widget.entry != null,
@@ -258,22 +275,29 @@ class _ZenDayMoodBubbleState extends State<_ZenDayMoodBubble> {
                   });
                 }
               },
-        onLongPress: (widget.entry?.aiSummary == null || widget.entry!.aiSummary!.trim().isEmpty)
-            ? null
-            : () {
-                HapticFeedback.lightImpact();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      '"${widget.entry!.aiSummary}"',
-                      style: const TextStyle(fontSize: 15, fontStyle: FontStyle.italic),
+        onLongPress: () {
+          final summary = widget.entry?.aiSummary;
+          final hasSummary =
+              summary != null && summary.trim().isNotEmpty;
+          if (!hasSummary) return;
+
+          HapticFeedback.lightImpact();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                '„${summary.trim()}“',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      fontStyle: FontStyle.italic,
+                      color: zs.ZenColors.white,
                     ),
-                    backgroundColor: zenGreen.withValues(alpha: 0.90),
-                    behavior: SnackBarBehavior.floating,
-                    duration: const Duration(seconds: 3),
-                  ),
-                );
-              },
+              ),
+              backgroundColor:
+                  zs.ZenColors.deepSage.withValues(alpha: .92),
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        },
         child: Column(
           children: [
             Stack(
@@ -288,7 +312,7 @@ class _ZenDayMoodBubbleState extends State<_ZenDayMoodBubble> {
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       border: Border.all(
-                        color: zenGreen.withValues(alpha: 0.22),
+                        color: ringColor,
                         width: 2.0,
                       ),
                     ),
@@ -303,13 +327,15 @@ class _ZenDayMoodBubbleState extends State<_ZenDayMoodBubble> {
                     boxShadow: [
                       if (widget.highlight)
                         BoxShadow(
-                          color: zenGreen.withValues(alpha: 0.15),
+                          color: zs.ZenColors.deepSage.withValues(alpha: .15),
                           blurRadius: 12,
                           offset: const Offset(0, 2),
                         ),
                     ],
                     border: Border.all(
-                      color: widget.highlight ? zenGreen : Colors.transparent,
+                      color: widget.highlight
+                          ? zs.ZenColors.deepSage
+                          : Colors.transparent,
                       width: widget.highlight ? 2.2 : 1.1,
                     ),
                   ),
@@ -328,24 +354,25 @@ class _ZenDayMoodBubbleState extends State<_ZenDayMoodBubble> {
                     child: Material(
                       color: Colors.transparent,
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 6),
                         decoration: BoxDecoration(
-                          color: zenGreen.withValues(alpha: 0.93),
-                          borderRadius: BorderRadius.circular(9),
+                          color:
+                              zs.ZenColors.deepSage.withValues(alpha: .96),
+                          borderRadius: const BorderRadius.all(zs.ZenRadii.s),
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.11),
+                              color: Colors.black.withValues(alpha: .11),
                               blurRadius: 7,
                             ),
                           ],
                         ),
                         child: Text(
                           _tooltipText(widget.entry!),
-                          style: const TextStyle(
-                            color: sandBeige,
-                            fontSize: 12.6,
-                            fontFamily: "SFProText",
-                          ),
+                          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                color: zs.ZenColors.white,
+                                fontSize: 12.6,
+                              ),
                         ),
                       ),
                     ),
@@ -355,21 +382,19 @@ class _ZenDayMoodBubbleState extends State<_ZenDayMoodBubble> {
             if (!widget.mini) ...[
               const SizedBox(height: 7),
               Text(
-                widget.score?.toString() ?? "",
-                style: const TextStyle(
-                  color: zenGreen,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 14,
-                ),
+                widget.score?.toString() ?? '',
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: zs.ZenColors.deepSage,
+                      fontWeight: FontWeight.w600,
+                    ),
               ),
               const SizedBox(height: 2),
               Text(
                 widget.label,
-                style: const TextStyle(
-                  color: zenGreen,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w400,
-                ),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: zs.ZenColors.deepSage,
+                      fontWeight: FontWeight.w400,
+                    ),
               ),
             ],
           ],
@@ -384,19 +409,22 @@ class _ZenDayMoodBubbleState extends State<_ZenDayMoodBubble> {
     final label = MoodHeatmap._labelForScore(entry.moodScore);
     final extra = entry.aiSummary;
     if (extra == null || extra.trim().isEmpty) {
-      return "Am $day.$month. – Stimmung: $label";
+      return 'Am $day.$month. – Stimmung: $label';
     }
-    return "Am $day.$month. – $label · ${extra.trim()}";
+    return 'Am $day.$month. – $label · ${extra.trim()}';
   }
 
   String _semanticsForDay({
     required DateTime date,
     required int? score,
     required String label,
+    required bool isToday,
   }) {
-    final d = "${date.day.toString().padLeft(2, '0')}.${date.month.toString().padLeft(2, '0')}.";
+    final d =
+        '${date.day.toString().padLeft(2, '0')}.${date.month.toString().padLeft(2, '0')}.';
     final moodLabel = MoodHeatmap._labelForScore(score);
-    return "$label, $d – Stimmung: $moodLabel";
+    final today = isToday ? ' (Heute)' : '';
+    return '$label, $d – Stimmung: $moodLabel$today';
   }
 }
 

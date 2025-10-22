@@ -1,7 +1,7 @@
 // lib/shared/ui/zen_shadows.dart
 //
 // Oxford–Zen Shadows & Elevation Utilities
-// v6.1 — 2025-09-03
+// v6.2 — 2025-10-22
 // -----------------------------------------------------------------------------
 // • Presets: card/popover/modal/floating/tooltip
 // • Glow: soft/golden/jade (ruhig, ohne grelle Kanten)
@@ -9,10 +9,15 @@
 // • Ringe: FocusRing / ErrorRing (BoxDecoration)
 // • Wrap-Widgets: ZenShadowWrap / ZenGlowWrap
 //
+// Hinweise:
+// • Import-Pfad korrigiert (../zen_style.dart).
+// • Keine Token-Duplikate: Diese Datei nutzt die Tokens aus zen_style.dart
+//   (z. B. ZenRadii, ZenColors) und liefert ergänzende Shadow/Glow-Tools.
+//
 // Abhängigkeiten: nur Flutter + eure Tokens (zen_style.dart)
 
 import 'package:flutter/material.dart';
-import '../../shared/zen_style.dart' as zs;
+import '../zen_style.dart' as zs;
 
 /// Einfache, lesbare Stufen – genug für App-UI ohne Overkill.
 enum ZenElevationLevel { none, xs, s, m, l, xl }

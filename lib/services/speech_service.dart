@@ -1,7 +1,7 @@
 // lib/services/speech_service.dart
 //
-// SpeechService — Oxford Safety Edition v2.5 (no auto-sim, prod-safe)
-// Aktualisiert: 2025-10-19
+// SpeechService — Oxford Safety Edition v2.6 (auto-sim on web/desktop)
+// Aktualisiert: 2025-10-22
 // -----------------------------------------------------------------------
 // Drop-in-Kompatibilität zur v2.3/2.4-API:
 //   - Klasse: SpeechService (ChangeNotifier)
@@ -9,18 +9,16 @@
 //                 level$, elapsed$, elapsedSeconds$, totalSeconds
 //   - Methoden: start/stop/pause/resume/toggle/reset/dispose
 //   - attachTranscriber(...) & attachWhisper(...)
-// Änderungen ggü. v2.4:
-//   • WICHTIG: KEINE automatische Simulation mehr im Debug/ohne Engine.
-//     _simulate = simulate ?? false;
-//     → Simulation nur, wenn explizit angefordert.
-//   • Wenn keine Engine vorhanden oder Start fehlschlägt (und nicht simuliert
-//     werden soll), wechselt der Service in einen ruhigen Error-State.
-//   • Kommentare/Logs geschärft.
+// Änderungen ggü. v2.5:
+//   • WICHTIG (gemäß Projektvorgaben): Auf Web & Desktop wird der
+//     Simulationspfad automatisch aktiviert, wenn keine Engine angebunden ist
+//     oder Engine-Start fehlschlägt. (Mobile bleibt unverändert.)
+//   • simulate-Parameter überschreibt das Verhalten (true erzwingt, false verbietet).
 //
 // Hinweis:
 //   Für echte Erkennung musst du eine Engine andocken:
 //     _speech.attachWhisper(WhisperService(simulate: false));
-//   und beim Start (z. B. im UI) optional: _speech.start(simulate: false, locale: 'de-DE').
+//   und beim Start (z. B. im UI) optional: _speech.start(locale: 'de-DE').
 //
 import 'dart:async';
 import 'package:flutter/foundation.dart';
@@ -89,12 +87,12 @@ class SpeechService with ChangeNotifier {
   String? _lastFinalText;
   DateTime? _lastFinalAt;
 
-  // Simulation (nur wenn explizit gewünscht)
+  // Simulation
   bool _simulate = false;
   Timer? _simuTimer;
 
   // ---------------- Transcriber-Engine (Whisper etc.) ----------------
-  stt.SpeechTranscriber? _engine; // optional – ohne Engine keine Erkennung
+  stt.SpeechTranscriber? _engine; // optional – ohne Engine Simulation/Web/Desktop
   StreamSubscription<String>? _engPartialSub;
   StreamSubscription<String>? _engFinalSub;
   StreamSubscription<double>? _engLevelSub;
@@ -115,6 +113,12 @@ class SpeechService with ChangeNotifier {
     _engine = null;
   }
 
+  bool get _isDesktop =>
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.linux ||
+       defaultTargetPlatform == TargetPlatform.macOS ||
+       defaultTargetPlatform == TargetPlatform.windows);
+
   // ---------------- Public Helpers ----------------
 
   /// Idempotenter Toggle: Startet (falls idle) oder stoppt (falls aktiv).
@@ -130,7 +134,10 @@ class SpeechService with ChangeNotifier {
   // ---------------- API: Start / Stop / Pause / Resume ----------------
 
   /// Startet Aufnahme & (falls Engine vorhanden) die Transkription.
-  /// simulate: null → **false** (keine Auto-Simulation).
+  /// simulate:
+  ///   - true  → Simulation erzwingen (überall)
+  ///   - false → Simulation unterbinden (auch Web/Desktop)
+  ///   - null  → Standard: Web/Desktop auto-sim, Mobile kein auto-sim
   Future<void> start({bool? simulate, Duration? maxDuration, String? locale}) async {
     if (_disposed) return;
     if (_state == SpeechState.stopping) return; // mitten im Stop → ignoriere
@@ -143,7 +150,10 @@ class SpeechService with ChangeNotifier {
       return;
     }
 
-    _simulate = simulate ?? false; // <<< WICHTIG: keine Auto-Simulation mehr
+    // Plattformfreundliche Default-Strategie
+    final bool autoSim = kIsWeb || _isDesktop;
+    _simulate = simulate ?? autoSim;
+
     _setState(SpeechState.recording);
     _recordingSince = DateTime.now();
 
@@ -164,7 +174,7 @@ class SpeechService with ChangeNotifier {
     _lastFinalAt = null;
 
     // Engine konfigurieren
-    if (_engine != null) {
+    if (_engine != null && !_simulate) {
       await _cancelEngineSubs();
       _engPartialSub = _engine!.partial$.listen(
         pushPartial,
@@ -180,25 +190,26 @@ class SpeechService with ChangeNotifier {
       );
       try {
         await _engine!.start(locale: locale);
+        return; // echte Engine läuft → fertig
       } catch (e) {
-        // Keine Auto-Simulation mehr – klarer Fehlerpfad
         if (_simulate) {
-          // Nur wenn EXPLIZIT simuliert werden soll
           if (!_errorCtrl.isClosed) {
             _errorCtrl.add('Transcriber-Start fehlgeschlagen – wechsle in Simulation');
           }
           _startSimulation();
+          return;
         } else {
           _fail('Transcriber-Start fehlgeschlagen', error: e);
+          return;
         }
       }
+    }
+
+    // Keine Engine oder Simulation erzwungen → Simulation
+    if (_simulate) {
+      _startSimulation();
     } else {
-      // Keine Engine angebunden
-      if (_simulate) {
-        _startSimulation();
-      } else {
-        _fail('Keine Transcriber-Engine angebunden');
-      }
+      _fail('Keine Transcriber-Engine angebunden');
     }
   }
 
@@ -215,7 +226,7 @@ class SpeechService with ChangeNotifier {
     _limitTimer = null;
 
     String? path;
-    if (_engine != null) {
+    if (_engine != null && !_simulate) {
       try {
         path = await _engine!.stop();
       } catch (e) {
@@ -236,7 +247,7 @@ class SpeechService with ChangeNotifier {
     _setState(SpeechState.paused);
     _sw.stop();
     _cancelTickerOnly();
-    if (_engine != null) {
+    if (_engine != null && !_simulate) {
       try {
         await _engine!.pause();
       } catch (e) {
@@ -251,7 +262,7 @@ class SpeechService with ChangeNotifier {
     if (!isPaused) return;
     _setState(SpeechState.recording);
     _startElapsedTicker(reset: false);
-    if (_engine != null) {
+    if (_engine != null && !_simulate) {
       try {
         await _engine!.resume();
       } catch (e) {
@@ -374,7 +385,7 @@ class SpeechService with ChangeNotifier {
     _tick = null;
   }
 
-  // ---------------- Simulation (nur wenn explizit aktiviert) ----------------
+  // ---------------- Simulation (Web/Desktop & wenn explizit gewünscht) ------
 
   void _startSimulation() {
     _simuTimer?.cancel();

@@ -1,6 +1,6 @@
 // lib/services/whisper_service.dart
 //
-// WhisperService — Streaming STT Bridge v1.3 (no fake levels by default)
+// WhisperService — Streaming STT Bridge v1.4 (calm-by-default)
 // -----------------------------------------------------------------------------
 // Zweck
 // • Einheitliche Streaming-Schnittstelle für Live-Spracherkennung (STT).
@@ -8,14 +8,11 @@
 // • Streams: partial$ (laufende Hypothesen), final$ (finale Segmente),
 //            level$ (0.0..1.0 VU-Meter).
 //
-// Änderungen ggü. v1.2:
-// • KEIN generierter Level-Jitter mehr im Normalbetrieb.
-//   Der Level-Ticker wird nur im Simulationsmodus gestartet.
-// • Startet keinen künstlichen Ticker, wenn Native-Events fehlen.
-//   → Wenn deine Native-Bridge keine "level"-Events sendet, bleibt der
-//     UI-Pegel ruhig (0), statt "so zu tun als ob".
+// Änderungen ggü. v1.3:
+// • Unverändert ruhiges Verhalten: Kein künstlicher Level-Jitter im Normalbetrieb.
+// • Simulation liefert ruhige Pegel + kurze Beispielhypothesen (nur wenn simulate:true).
 //
-// Eigenschaften (wie zuvor)
+// Eigenschaften
 // • Idempotentes start/stop/pause/resume; Schutz gegen Reentrancy.
 // • Simulationsmodus via Konstruktor-Flag (simulate: true).
 // • Optionale Native-Bridge via MethodChannel (default: 'zen.whisper')

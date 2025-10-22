@@ -1,18 +1,27 @@
 // lib/services/local_storage.dart
 //
-// LocalStorageService — Oxford-Zen v3.4 (Prefs + Secure, Namespace, JSON)
+// LocalStorageService — Oxford-Zen v3.8 (Prefs + Secure, Namespace, JSON)
 // ----------------------------------------------------------------------
 // • Gemeinsamer Namespace: alle Keys werden mit "zen:" geprefixt
 // • Settings-API: saveSetting/loadSetting/remove
 // • Secure-API: saveSecure/loadSecure/removeSecure
-// • Journal-API: saveJournalEntries/loadJournalEntries<T>(fromMap)
+// • Journal-API:
+//     - saveJournalEntries(List<dynamic>)  → Backwards-Compat (roh oder Maps)
+//     - saveJournalEntriesV6(List<JournalEntry>) → Wrapper (schema/version)
+//     - loadJournalEntries<T>(fromMap)     → erkennt Wrapper ODER rohe Liste
 // • Backup/Restore: exportNamespace/importNamespace/clearNamespace
 // • Robust gegen fehlerhafte Daten (try/catch + defensive returns)
+// • Neu 3.8: Wrapper-Erkennung mit Fallback, stabile Sortierung bei JournalEntry
+//
+// Lizenz: ZenYourself (v6zenyourself) — Oxford–Zen Style
 
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
+import '../models/journal_entry.dart' as jm;
+import 'persistence_serializer.dart' as ps;
 
 typedef FromMap<T> = T Function(Map<String, dynamic> json);
 
@@ -107,23 +116,37 @@ class LocalStorageService {
 
   static const String _journalKey = 'journal:entries';
 
-  /// Speichert JournalEntries als JSON-Array (List<Map>).
+  /// Bevorzugt die V6-Wrapper-Speicherung, wenn alle Items JournalEntry sind.
+  /// Andernfalls wird — aus Kompatibilitätsgründen — ein reines JSON-Array gespeichert.
   Future<bool> saveJournalEntries(List<dynamic> entries) async {
     final prefs = await _ensurePrefs();
     final k = _nsKey(_journalKey);
 
     try {
+      if (entries.isEmpty) {
+        return prefs.setString(k, '[]');
+      }
+
+      // Wenn alle Items JournalEntry sind → Wrapper via PersistenceSerializer
+      final allAreEntries = entries.every((e) => e is jm.JournalEntry);
+      if (allAreEntries) {
+        final jsonStr =
+            ps.PersistenceSerializer.encode(entries.cast<jm.JournalEntry>());
+        return prefs.setString(k, jsonStr);
+      }
+
+      // Fallback: als Liste von Maps speichern (Backwards-Compat)
       final list = <Map<String, dynamic>>[];
       for (final e in entries) {
         if (e == null) continue;
         if (e is Map<String, dynamic>) {
           list.add(e);
+        } else if (e is jm.JournalEntry) {
+          list.add(e.toMap());
         } else {
           // dynamischer toMap()-Call
-          final dynamic maybe = (e as dynamic);
-          if (maybe is Map<String, dynamic>) {
-            list.add(maybe);
-          } else {
+          try {
+            final dynamic maybe = (e as dynamic);
             final map = maybe.toMap?.call();
             if (map is Map<String, dynamic>) {
               list.add(map);
@@ -137,6 +160,8 @@ class LocalStorageService {
                 }
               }
             }
+          } catch (_) {
+            // still und tolerant
           }
         }
       }
@@ -148,7 +173,23 @@ class LocalStorageService {
     }
   }
 
+  /// Moderne, eindeutige API: speichert stets als V6-Wrapper.
+  Future<bool> saveJournalEntriesV6(List<jm.JournalEntry> entries,
+      {bool pretty = false}) async {
+    final prefs = await _ensurePrefs();
+    final k = _nsKey(_journalKey);
+    try {
+      final jsonStr = ps.PersistenceSerializer.encode(entries, pretty: pretty);
+      return prefs.setString(k, jsonStr);
+    } catch (e, st) {
+      debugPrint('[LocalStorage] saveJournalEntriesV6 failed: $e\n$st');
+      return false;
+    }
+  }
+
   /// Lädt JournalEntries und wandelt sie mit [fromMap] in T um.
+  /// Erkennt automatisch Wrapper {journal:[...]} ODER rohe Listen.
+  /// Sortiert stabil DESC (nur wenn T == JournalEntry).
   Future<List<T>> loadJournalEntries<T>(FromMap<T> fromMap) async {
     final prefs = await _ensurePrefs();
     final k = _nsKey(_journalKey);
@@ -159,13 +200,46 @@ class LocalStorageService {
         return List<T>.empty(growable: false);
       }
 
+      // 1) Versuch: volle V6-Deserialisierung
+      try {
+        final decodedEntries = ps.PersistenceSerializer.decode(jsonStr);
+        if (decodedEntries.isNotEmpty) {
+          if (T == jm.JournalEntry) {
+            // Direkte Rückgabe (stabil sortiert)
+            return decodedEntries as List<T>;
+          }
+          // Für andere Typen: via fromMap() mappen
+          final mapped = decodedEntries
+              .map((e) => fromMap(e.toMap()))
+              .toList(growable: false);
+          return mapped;
+        }
+      } catch (_) {
+        // fällt auf Backwards-Compat-Zweig
+      }
+
+      // 2) Backwards-Compat: roh oder Wrapper manuell extrahieren
       final raw = jsonDecode(jsonStr);
-      if (raw is! List) {
-        return List<T>.empty(growable: false);
+
+      List listToMap;
+      if (raw is List) {
+        listToMap = raw;
+      } else if (raw is Map) {
+        // Wrapper oder exotischer Export
+        if (raw['journal'] is List) {
+          listToMap = raw['journal'] as List;
+        } else {
+          // erste Liste im Objekt nehmen (sehr alte Exporte)
+          final firstList = raw.values
+              .firstWhere((v) => v is List, orElse: () => const <dynamic>[]);
+          listToMap = (firstList is List) ? firstList : const <dynamic>[];
+        }
+      } else {
+        listToMap = const <dynamic>[];
       }
 
       final out = <T>[];
-      for (final item in raw) {
+      for (final item in listToMap) {
         try {
           if (item is Map<String, dynamic>) {
             out.add(fromMap(item));
@@ -180,9 +254,24 @@ class LocalStorageService {
             }
           }
         } catch (_) {
-          // einzelnes Item überspringen
+          // einzelnes Item tolerant überspringen
         }
       }
+
+      // Falls JournalEntry: stabil sortieren (DESC createdAt, dann ID)
+      if (T == jm.JournalEntry && out.isNotEmpty) {
+        try {
+          final entries = out.cast<jm.JournalEntry>().toList();
+          entries.sort((a, b) {
+            final c = b.createdAt.compareTo(a.createdAt);
+            return c != 0 ? c : b.id.compareTo(a.id);
+          });
+          return entries as List<T>;
+        } catch (_) {
+          // falls Mapping nicht passt, Originalreihenfolge behalten
+        }
+      }
+
       return out;
     } catch (e, st) {
       debugPrint('[LocalStorage] loadJournalEntries failed: $e\n$st');

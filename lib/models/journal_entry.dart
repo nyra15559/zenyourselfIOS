@@ -518,7 +518,7 @@ class JournalEntry {
   }
 
   static String _genIdFallback(DateTime createdUtc) =>
-      'je_${createdUtc.microsecondsSinceEpoch}';
+    'je_${createdUtc.microsecondsSinceEpoch}';
 
   static bool _nonEmpty(String? s) => s != null && s.trim().isNotEmpty;
 

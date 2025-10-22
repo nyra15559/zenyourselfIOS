@@ -5,7 +5,7 @@
 // • Eigene Palette/Provider (keine Kollision mit Color-Blind-Palette)
 // • WCAG-Kontrast-Helpers, dynamische On-Color, Reduced-Motion-Hinweis
 // • Semantik-Werkzeuge (Announce), fokusfreundliche Text-Komponente
-// • Auf Flutter ≥3.12+ aktualisiert (TextScaler, Color.r/g/b, withValues)
+// • Flutter ≥3.12+: TextScaler, Color.withValues(alpha: …)
 
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
@@ -32,7 +32,7 @@ class ZenA11yPalette {
     this.reduceMotion = false,
   });
 
-  // Zen Brand (konservativ, beruhigende Töne)
+  // Ruhige Hausfarben (konservativ)
   static const _zenJade = Color(0xFF0B3D2E);
   static const _zenJadeLight = Color(0xFF386F5B);
   static const _zenWhite = Color(0xFFFDFCF6);
@@ -71,7 +71,7 @@ class ZenA11yPalette {
       contrastRatio(fg, bg) >= min;
 
   /// Relative Luminanz nach WCAG – aktualisiert auf neues Color-API.
-  /// Achtung: `Color.r/g/b` sind **0..1**-Floats (nicht 0..255).
+  /// Achtung: Projekt nutzt Color.r/g/b (0..1), nicht red/green/blue (0..255).
   static double _relativeLuminance(Color c) {
     double gamma(double s) =>
         s <= 0.03928 ? s / 12.92 : math.pow((s + 0.055) / 1.055, 2.4).toDouble();
@@ -196,8 +196,7 @@ class A11yText extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Neu: TextScaler statt textScaleFactorOf (deprecatet).
-    // Wir kappen sanft auf 1.0–2.2, um extreme Skalen zu entschärfen.
+    // Neu: TextScaler statt textScaleFactorOf.
     final scaler = MediaQuery.textScalerOf(context);
     final base = fontSize ?? 17.0;
     final scaled = scaler.scale(base);
@@ -205,8 +204,8 @@ class A11yText extends StatelessWidget {
 
     final palette = ZenA11yPalette.of(context);
 
-    final baseStyle = TextStyle(
-      fontFamily: "SFProText",
+    final ts = Theme.of(context).textTheme.bodyMedium ?? const TextStyle();
+    final baseStyle = ts.copyWith(
       fontSize: clamped, // bereits skaliert & gekappt
       color: color ?? palette.primary,
       fontWeight: fontWeight ?? (bold ? FontWeight.w600 : FontWeight.normal),
@@ -259,7 +258,6 @@ class A11yText extends StatelessWidget {
 /// ===================
 /// A11yAnnounce – Screenreader-Label Wrapper
 /// ===================
-/// Nutzt Semantik-Label, ohne Sichtbarkeit zu verändern.
 class A11yAnnounce extends StatelessWidget {
   final String label;
   final Widget child;
@@ -274,7 +272,6 @@ class A11yAnnounce extends StatelessWidget {
 /// ===================
 /// A11yLiveAnnouncer – optionales Live-Announcement
 /// ===================
-/// Ruft nach dem Frame SemanticsService.announce() auf.
 /// **Wichtig:** sehr sparsam einsetzen (kann sonst aufdringlich sein).
 class A11yLiveAnnouncer extends StatefulWidget {
   final String message;
@@ -302,8 +299,6 @@ class _A11yLiveAnnouncerState extends State<A11yLiveAnnouncer> {
     super.didChangeDependencies();
     if (!_announced || !widget.announceOnce) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        // Hinweis: Einige Lints markieren announce() als "deprecated_member_use".
-        // In Flutter ist announce weiterhin de facto-API. Bei Änderung: zentral hier anpassen.
         // ignore: deprecated_member_use_from_same_package
         SemanticsService.announce(widget.message, widget.textDirection);
       });

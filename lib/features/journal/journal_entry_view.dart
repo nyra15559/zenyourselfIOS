@@ -208,11 +208,7 @@ class JournalEntryView extends StatelessWidget {
 
     return Semantics(
       container: true,
-      label: switch (kind) {
-        EntryKind.journal => 'Tagebuch',
-        EntryKind.reflection => 'Reflexion',
-        EntryKind.story => 'Kurzgeschichte',
-      },
+      label: typeLabel,
       child: zw.ZenGlassCard(
         padding: const EdgeInsets.fromLTRB(22, 18, 22, 20),
         borderRadius: const BorderRadius.all(zs.ZenRadii.xl),
@@ -239,24 +235,12 @@ class JournalEntryView extends StatelessWidget {
                   children: [
                     Icon(typeIcon, color: zs.ZenColors.jadeMid, size: 18),
                     const SizedBox(width: 6),
-                    const Text(
-                      'Reflexion', // wird direkt darunter überschrieben, behält aber Layout
-                      style: TextStyle(
+                    Text(
+                      typeLabel,
+                      style: const TextStyle(
                         fontWeight: FontWeight.w700,
                         fontSize: 14.5,
                         color: zs.ZenColors.jade,
-                      ),
-                    ),
-                    // Dynamisches Label (ersetzt sichtbar die harte Zeichenkette)
-                    Transform.translate(
-                      offset: const Offset(-9999, -9999), // off-screen, a11y behält Struktur
-                      child: Text(
-                        typeLabel,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 14.5,
-                          color: zs.ZenColors.jade,
-                        ),
                       ),
                     ),
                   ],

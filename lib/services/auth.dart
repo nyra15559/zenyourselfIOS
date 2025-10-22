@@ -1,11 +1,12 @@
 // lib/services/auth.dart
 //
-// Oxford Safety Edition — robust, privacy-aware, retry-ready.
-// - Keine PII im Log (Tokens werden maskiert)
-// - Einheitliche HTTP-Hilfen (GET/POST) ohne Abhängigkeit zu ApiService
-// - Token-Refresh mit einmaligem Retry bei 401
-// - Sichere, defensive JSON-Parsing-Strategie
-// - Abwärtskompatibel: Signaturen von login/register/logout/isLoggedIn/fetchProfile bleiben
+// Oxford Safety Edition — robust, privacy-aware, retry-ready (v2)
+// ------------------------------------------------------------------
+// • Keine PII im Log (Tokens maskiert)
+// • Token-Refresh mit einmaligem Retry bei 401
+// • Sichere JSON-Parsing-Strategie
+// • Light Contact-Tints & Samfring-Flag an Login/Register/Refresh
+// • Abwärtskompatible Public-API (login/register/logout/isLoggedIn/fetchProfile)
 
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
@@ -14,18 +15,15 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class AuthService {
   // ---------- Konfiguration ----------
-  /// Basis-URL (per --dart-define=API_BASE_URL=... überschreibbar)
   static String baseUrl = const String.fromEnvironment(
     'API_BASE_URL',
     defaultValue: 'https://api.zenyourself.app/',
   );
 
-  /// Optional zur Laufzeit ändern (z. B. Staging).
   static void configure({required String newBaseUrl}) {
     baseUrl = newBaseUrl.endsWith('/') ? newBaseUrl : '$newBaseUrl/';
   }
 
-  // Netzwerk: Default-Timeouts
   static const Duration _defaultTimeout = Duration(seconds: 15);
 
   // ---------- Storage Keys ----------
@@ -34,14 +32,22 @@ class AuthService {
   static const _accessExpKey = 'auth_token_exp';
   static const _refreshExpKey = 'refresh_token_exp';
 
-  // ---------- Öffentliche API (kompatibel) ----------
+  // ---------- Öffentliche API ----------
 
-  /// Login per E-Mail & Passwort. Token wird lokal gespeichert.
   static Future<bool> login(String email, String password) async {
     try {
       final res = await _post(
         'auth/login',
-        body: {'email': email, 'password': password},
+        body: {
+          'email': email,
+          'password': password,
+          // Light Contact-Tints (+ Samfring)
+          'contact_tins': {
+            'brand': 'ZenYourself',
+            'channel': 'app',
+            'samfring': 'optional',
+          },
+        },
         withAuth: false,
       );
       if (_isOk(res.statusCode)) {
@@ -57,12 +63,19 @@ class AuthService {
     }
   }
 
-  /// Registrierung (E-Mail & Passwort)
   static Future<bool> register(String email, String password) async {
     try {
       final res = await _post(
         'auth/register',
-        body: {'email': email, 'password': password},
+        body: {
+          'email': email,
+          'password': password,
+          'contact_tins': {
+            'brand': 'ZenYourself',
+            'channel': 'app',
+            'samfring': 'optional',
+          },
+        },
         withAuth: false,
       );
       if (_isOk(res.statusCode) || res.statusCode == 201) {
@@ -78,7 +91,6 @@ class AuthService {
     }
   }
 
-  /// Logout – löscht Tokens lokal
   static Future<void> logout() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_tokenKey);
@@ -87,8 +99,6 @@ class AuthService {
     await prefs.remove(_refreshExpKey);
   }
 
-  /// Schnell prüfen: Ist User eingeloggt?
-  /// Versucht bei abgelaufenem Access Token einmalig ein Refresh.
   static Future<bool> isLoggedIn() async {
     final token = await getAuthToken();
     if (token == null || token.isEmpty) return false;
@@ -100,8 +110,6 @@ class AuthService {
     return true;
   }
 
-  /// Hole Profil/Account-Info (sofern API bereitstellt).
-  /// Bei 401 wird einmalig ein Refresh versucht und der Call wiederholt.
   static Future<Map<String, dynamic>?> fetchProfile() async {
     try {
       var res = await _get('auth/profile');
@@ -119,25 +127,29 @@ class AuthService {
     }
   }
 
-  /// Hole gespeicherten Bearer-Token
   static Future<String?> getAuthToken() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString(_tokenKey);
   }
 
-  /// Access-Token automatisch erneuern (mit Refresh Token)
   static Future<bool> refreshToken() async {
     final prefs = await SharedPreferences.getInstance();
     final refreshToken = prefs.getString(_refreshTokenKey);
     if (refreshToken == null || refreshToken.isEmpty) return false;
 
-    // Wenn Refresh-Token abgelaufen → sofort false
     if (await _isRefreshExpired()) return false;
 
     try {
       final res = await _post(
         'auth/refresh',
-        body: {'refresh_token': refreshToken},
+        body: {
+          'refresh_token': refreshToken,
+          'contact_tins': {
+            'brand': 'ZenYourself',
+            'channel': 'app',
+            'samfring': 'optional',
+          },
+        },
         withAuth: false,
       );
       if (_isOk(res.statusCode)) {
@@ -166,6 +178,10 @@ class AuthService {
     final h = <String, String>{
       'Content-Type': 'application/json',
       'Accept': 'application/json',
+      // Light Contact-Tints + Samfring in Headern
+      'X-App-Brand': 'ZenYourself',
+      'X-App-Channel': 'app',
+      'X-Samfring': 'optional',
     };
     if (token != null && token.isNotEmpty) {
       h['Authorization'] = 'Bearer $token';
@@ -173,7 +189,6 @@ class AuthService {
     return h;
   }
 
-  /// GET mit optionalem Auth und automatischer Header-Setzung.
   static Future<http.Response> _get(
     String path, {
     Map<String, String>? query,
@@ -185,7 +200,6 @@ class AuthService {
     return res;
   }
 
-  /// POST mit optionalem Auth und JSON-Body.
   static Future<http.Response> _post(
     String path, {
     Map<String, dynamic>? body,
@@ -207,7 +221,6 @@ class AuthService {
   //                        Token Handling
   // ===================================================================
 
-  /// Speichert Tokens (unterstützt verschiedene Key-Namen der API).
   static Future<void> _storeTokensFromMap(Map<String, dynamic> data) async {
     // Verschiedene Feldnamen tolerieren
     final access = (data['access_token'] ??

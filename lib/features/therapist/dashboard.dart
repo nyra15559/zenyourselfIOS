@@ -1,18 +1,19 @@
-// lib/features/therapist/therapist_dashboard.dart
+// lib/features/therapist/dashboard.dart
 //
-// TherapistDashboard — Oxford Calm Edition (v2)
-// ---------------------------------------------
-// • Responsives, barrierearmes Layout (Semantics, große Ziele)
-// • Klinisch-clean: keine Freitexte/PII im Verlauf
-// • Zeitfenster: 7-Tage-Betrachtung inkl. HEUTE
-// • Konsistente ZenYourself-Farben & Typo
-// • Heatmap-Legende auf Zen-Palette abgestimmt
+// TherapistDashboard — Oxford Calm Edition (v2.2 · 2025-10-22)
+// -----------------------------------------------------------------
+// • Responsives, barrierearmes Layout (Semantics, große Ziele).
+// • Keine PII im Verlauf (nur Labels/Scores/Datum).
+// • 7-Tage-Heatmap + Legende (Zen-Palette).
+// • Neu: Top-Facet (aus Tags/Facets) & kurzer CH-Disclaimer.
+// • Export-Kachel nutzt AnonExportWidget (asynchron, redacted-metrics).
 
 import 'package:flutter/material.dart';
 import '../../shared/zen_style.dart';
 import '../../data/mood_entry.dart';
 import 'anon_export.dart';
 import '../calendar/mood_heatmap.dart';
+import '../../core/privacy/privacy_texts.dart';
 
 class TherapistDashboard extends StatelessWidget {
   final List<MoodEntry> allEntries;
@@ -40,6 +41,9 @@ class TherapistDashboard extends StatelessWidget {
     // Letzte 5 (DESC)
     final lastFive = [...allEntries]..sort((a, b) => b.timestamp.compareTo(a.timestamp));
     final recentFive = lastFive.take(5).toList(growable: false);
+
+    // Top-Facet (nur aus MoodEntry.tags, falls vorhanden; robust defensiv)
+    final topFacet = _computeTopFacetFromEntries(allEntries);
 
     return Semantics(
       label: 'Therapeutisches Reflexions-Dashboard',
@@ -72,6 +76,12 @@ class TherapistDashboard extends StatelessWidget {
                   icon: Icons.insights_rounded,
                   color: latest?.moodColor ?? ZenColors.jadeMid,
                 ),
+                _StatItem(
+                  label: 'Top-Facette',
+                  value: topFacet ?? '—',
+                  icon: Icons.local_florist_rounded,
+                  color: ZenColors.deepSage,
+                ),
               ],
             ),
 
@@ -96,9 +106,6 @@ class TherapistDashboard extends StatelessWidget {
                         children: [
                           _SectionTitle('Mood Heatmap (7 Tage)'),
                           SizedBox(height: 14),
-                          // Hinweis: MoodHeatmap nutzt die gefilterten last7Days
-                          // und mappt intern Scores → Farben.
-                          // Wir geben nur die Daten hinein (siehe Aufrufer unten).
                         ],
                       ),
               ),
@@ -114,7 +121,7 @@ class TherapistDashboard extends StatelessWidget {
 
             const SizedBox(height: 28),
 
-            // --- Export (anonym) ---
+            // --- Export (anonym, asynchron, redacted-metrics) ---
             Card(
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
               elevation: 2,
@@ -126,8 +133,6 @@ class TherapistDashboard extends StatelessWidget {
                   children: [
                     _SectionTitle('Mood-Journal exportieren'),
                     SizedBox(height: 8),
-                    // AnonExportWidget: liefert PII-armen Export (Client-kontrolliert)
-                    // → UI-Hinweis darunter.
                   ],
                 ),
               ),
@@ -138,8 +143,10 @@ class TherapistDashboard extends StatelessWidget {
               padding: const EdgeInsets.only(top: 0, left: 20, right: 20),
               child: AnonExportWidget(moodEntries: allEntries),
             ),
-            const _TherapistHint(
-              'Export ist anonym. Die Kontrolle bleibt stets bei der/dem Klient*in.',
+            const SizedBox(height: 8),
+            Text(
+              PrivacyTexts.chDisclaimerShort,
+              style: ZenTextStyles.caption.copyWith(color: ZenColors.inkSubtle),
             ),
 
             const SizedBox(height: 28),
@@ -162,6 +169,28 @@ class TherapistDashboard extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  String? _computeTopFacetFromEntries(List<MoodEntry> entries) {
+    final Map<String, int> counts = {};
+    for (final e in entries) {
+      final t = e.tags; // falls vorhanden; sonst null
+      if (t == null) continue;
+      for (final x in t) {
+        final s = x.trim();
+        if (s.isEmpty) continue;
+        counts[s] = (counts[s] ?? 0) + 1;
+      }
+    }
+    String? label;
+    int max = 0;
+    counts.forEach((k, v) {
+      if (v > max) {
+        max = v;
+        label = k;
+      }
+    });
+    return label;
   }
 }
 

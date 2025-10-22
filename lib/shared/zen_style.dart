@@ -21,7 +21,7 @@ extension ZenColorCompat on Color {
   /// Setzt nur den Alpha-Kanal (0.0–1.0). RGB bleiben unverändert.
   Color withValues({double? alpha}) {
     if (alpha == null) return this;
-    final a01 = alpha.clamp(0.0, 1.0) as double;
+    final a01 = alpha.clamp(0.0, 1.0);
     // Robust gegenüber älteren/neuen Flutter-Versionen:
     // nutze die stabilen Komponenten red/green/blue (0..255).
     return Color.fromARGB(

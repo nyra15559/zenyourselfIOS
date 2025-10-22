@@ -1,15 +1,18 @@
 // lib/features/pro/pro_screen.dart
 //
-// ProScreen — Oxford Journey Board (v4.3 · 2025-10-19)
+// ProScreen — Oxford Journey Board (v4.4 · 2025-10-22)
 // ------------------------------------------------------------------
-// Neu:
-// • Mobile Clean View: Insights auf Phones ausgeblendet.
-// • Export-Karte enthält Datenschutz-Hinweise.
-// • Bunter Mood-Graph (mehrfarbiger Gradient, Glows, farbige Dots).
-// • Heat-Band: zarte horizontale Zonen für −2…+2.
-// • Wellen-Emojis an Peaks (🌊) und Dips (💧) – dezent, begrenzt auf wenige.
-// • Fix: fl_chart-Tooltip ohne tooltipBgColor (kompatibel mit v1.0.0).
-// ------------------------------------------------------------------
+// Änderungen:
+// • Insights-Block komplett entfernt (gehört ins Tagebuch).
+// • Mood-Chart: klare Oxford-Zen-Linien (ohne Verlauf, ohne Emojis).
+//   – Primär: Tageswerte (−2..+2) in DeepSage, glattgezogen.
+//   – Sekundär: 7-Tage-Moving-Average in Jade (dezenter).
+//   – Keine Dots, keine Flächen, subtile Referenzlinien (−1/0/+1).
+// • PDF-Button öffnet den Export-Dialog (kein defekter Call).
+// • Sorgfältiges Responsive-Layout für kleine Phones.
+//
+// Abhängigkeiten: fl_chart, provider, eigene Zen-UI.
+//
 
 import 'dart:ui';
 import 'package:flutter/material.dart';
@@ -28,7 +31,6 @@ import '../../data/reflection_entry.dart';
 
 // Journal (kanonisches Modell)
 import '../../providers/journal_entries_provider.dart';
-import '../../models/journal_entry.dart' as jm;
 
 // Export (AnonExportWidget)
 import '../therapist/anon_export.dart';
@@ -83,11 +85,11 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
 
     // Serie & Kennzahlen aus Provider (−2 … +2); Fallbacks auf Legacy.
     final series = hasProv
-        ? _seriesFromProvider(prov!, days: _range.days)
+        ? _seriesFromProvider(prov, days: _range.days)
         : _fallbackSeriesFromMoodEntries(widget.moodEntries).takeLast(_range.days);
 
     final avgMood = hasProv
-        ? _averageMoodFromProvider(prov!, window: Duration(days: _range.days))
+        ? _averageMoodFromProvider(prov, window: Duration(days: _range.days))
         : _fallbackAvgMoodFromMoodEntries(widget.moodEntries);
 
     final reflectionsCount =
@@ -100,9 +102,6 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
     final streak = hasProv
         ? _streakFromProvider(prov!)
         : _streakFromLegacy(widget.moodEntries);
-
-    final lastInsights =
-        hasProv ? prov!.reflections.take(5).toList() : const <jm.JournalEntry>[];
 
     final last7MoodLegacy = widget.moodEntries.takeLast(7);
     final last7FromSeries = series.takeLast(7);
@@ -198,7 +197,7 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
 
                         const SizedBox(height: 12),
 
-                        // Mood-Trend — Glas-Bubble (bunt + Heat-Band + Emojis)
+                        // Mood-Trend — Glas-Bubble (clean Oxford-Zen Linien)
                         ClipRRect(
                           borderRadius: const BorderRadius.all(zs.ZenRadii.l),
                           child: BackdropFilter(
@@ -334,24 +333,34 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
                                   Row(
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
+                                      // PDF-Button → öffnet Export-Dialog (kein defekter Call)
                                       _ProExportCircleButton(
                                         icon: Icons.picture_as_pdf_rounded,
                                         label: 'PDF',
                                         semanticsLabel:
-                                            'Monatsdaten als PDF exportieren',
+                                            'Monatsdaten exportieren',
                                         onTap: () {
                                           try {
-                                            AnonExportWidget.exportAsPDF(
-                                              context,
-                                              widget.moodEntries,
-                                              widget.reflectionEntries,
+                                            showDialog(
+                                              context: context,
+                                              builder: (ctx) => Dialog(
+                                                shape: RoundedRectangleBorder(
+                                                    borderRadius:
+                                                        BorderRadius.circular(18)),
+                                                child: AnonExportWidget(
+                                                  moodEntries:
+                                                      widget.moodEntries,
+                                                  reflectionEntries:
+                                                      widget.reflectionEntries,
+                                                ),
+                                              ),
                                             );
                                           } catch (_) {
                                             ScaffoldMessenger.of(context)
                                                 .showSnackBar(
                                               const SnackBar(
                                                 content: Text(
-                                                  'PDF-Export nicht möglich. Bitte später erneut versuchen.',
+                                                  'Export nicht möglich. Bitte später erneut versuchen.',
                                                 ),
                                                 behavior:
                                                     SnackBarBehavior.floating,
@@ -389,7 +398,7 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
                                     ],
                                   ),
                                   const SizedBox(height: 12),
-                                  // Datenschutz-/Feature-Hinweise — jetzt hier integriert
+                                  // Datenschutz-/Feature-Hinweise — ruhig & knapp
                                   Opacity(
                                     opacity: .85,
                                     child: Column(
@@ -409,49 +418,6 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
                         ),
 
                         const SizedBox(height: 18),
-
-                        // Letzte Einsichten — MOBILE: bewusst ausgeblendet
-                        if (!isMobile &&
-                            ((hasProv && lastInsights.isNotEmpty) ||
-                                widget.reflectionEntries.isNotEmpty))
-                          ClipRRect(
-                            borderRadius: const BorderRadius.all(zs.ZenRadii.m),
-                            child: BackdropFilter(
-                              filter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),
-                              child: zw.ZenGlassCard(
-                                topOpacity: .20,
-                                bottomOpacity: .10,
-                                borderOpacity: .14,
-                                borderRadius:
-                                    const BorderRadius.all(zs.ZenRadii.m),
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 10,
-                                  horizontal: 12,
-                                ),
-                                margin: const EdgeInsets.only(bottom: 10),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      'Deine letzten Einsichten',
-                                      style: tt.titleMedium!.copyWith(
-                                        color: zs.ZenColors.sage,
-                                        fontSize: 15.5,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 7),
-                                    ..._buildInsightsList(
-                                      context: context,
-                                      tt: tt,
-                                      prov: prov,
-                                      lastInsights: lastInsights,
-                                      legacy: widget.reflectionEntries,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
 
                         // Affirmation
                         if (isPhoneTall) const SizedBox(height: 6),
@@ -489,96 +455,6 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
       ),
     );
   }
-
-  // ---- Insights-Listenaufbau (Provider-first, Legacy-Fallback) ----
-  List<Widget> _buildInsightsList({
-    required BuildContext context,
-    required TextTheme tt,
-    required JournalEntriesProvider? prov,
-    required List<jm.JournalEntry> lastInsights,
-    required List<ReflectionEntry> legacy,
-  }) {
-    if (prov != null && lastInsights.isNotEmpty) {
-      return lastInsights.map((e) {
-        return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 2.7),
-          child: ListTile(
-            dense: true,
-            contentPadding: EdgeInsets.zero,
-            leading: Icon(
-              Icons.bubble_chart_rounded,
-              color: zs.ZenColors.deepSage.withValues(alpha: 0.86),
-            ),
-            title: Text(
-              _bestReflectionTextJournal(e),
-              style: tt.bodyMedium!.copyWith(
-                fontWeight: FontWeight.w500,
-                fontSize: 14.2,
-              ),
-            ),
-            subtitle: Text(
-              _formatDate(e.createdAt.toLocal()),
-              style: tt.bodySmall!.copyWith(
-                fontSize: 11.5,
-                color: Colors.black54,
-              ),
-            ),
-          ),
-        );
-      }).toList();
-    }
-
-    // Legacy
-    return legacy.reversed.take(5).map((e) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 2.7),
-        child: ListTile(
-          dense: true,
-          contentPadding: EdgeInsets.zero,
-          leading: Icon(
-            Icons.bubble_chart_rounded,
-            color: zs.ZenColors.deepSage.withValues(alpha: 0.86),
-          ),
-          title: Text(
-            _bestReflectionTextLegacy(e),
-            style: tt.bodyMedium!.copyWith(
-              fontWeight: FontWeight.w500,
-              fontSize: 14.2,
-            ),
-          ),
-          subtitle: Text(
-            _formatDate(e.timestamp),
-            style: tt.bodySmall!.copyWith(
-              fontSize: 11.5,
-              color: Colors.black54,
-            ),
-          ),
-        ),
-      );
-    }).toList();
-  }
-
-  static String _bestReflectionTextLegacy(ReflectionEntry e) {
-    final raw = (e.aiSummary ?? e.preview(120)).trim();
-    return raw.isEmpty ? '—' : raw;
-  }
-
-  static String _bestReflectionTextJournal(jm.JournalEntry e) {
-    final raw = [
-      e.userAnswer,
-      e.thoughtText,
-      e.title,
-      e.aiQuestion,
-    ]
-        .whereType<String>()
-        .map((s) => s.trim())
-        .firstWhere((s) => s.isNotEmpty, orElse: () => '—');
-
-    return raw.length <= 120 ? raw : '${raw.substring(0, 120).trimRight()}…';
-  }
-
-  static String _formatDate(DateTime dt) =>
-      '${dt.day.toString().padLeft(2, '0')}.${dt.month.toString().padLeft(2, '0')}.${dt.year}';
 
   static String _randomMantra(int idx) {
     const lines = [
@@ -884,183 +760,113 @@ class _ZenMoodBarSeries extends StatelessWidget {
   }
 }
 
-// Heat-Band Hintergrund (horizontale Zonen −2…+2)
-class _HeatBand extends StatelessWidget {
-  const _HeatBand();
-
-  @override
-  Widget build(BuildContext context) {
-    // 4 Bänder: −2..−1, −1..0, 0..1, 1..2
-    final colors = [
-      const Color(0xFF7C3AED).withValues(alpha: .06), // violett
-      const Color(0xFF06B6D4).withValues(alpha: .06), // türkis
-      zs.ZenColors.sage.withValues(alpha: .06),       // jade
-      const Color(0xFFF59E0B).withValues(alpha: .06), // honig
-    ];
-    return IgnorePointer(
-      child: Column(
-        children: List.generate(4, (i) => Expanded(child: Container(color: colors[i]))),
-      ),
-    );
-  }
-}
-
-// MoodGraph (fl_chart) – Provider-Serie (−2 … +2) in Glas-Bubble, bunt/glow, Heat-Band + Emojis
+// MoodGraph (fl_chart) – Provider-Serie (−2 … +2) in Glas-Bubble, klare Linien
 class ZenMoodGraphSeries extends StatelessWidget {
   final List<double> series; // −2 … +2; ältestes → neuestes
   const ZenMoodGraphSeries({super.key, required this.series});
 
   @override
   Widget build(BuildContext context) {
-    final data = series.takeLast(90); // falls Range 90 gewählt wurde
-    if (data.isEmpty) {
-      return const SizedBox(height: 124);
-    }
+    final data = series.takeLast(90);
+    if (data.isEmpty) return const SizedBox(height: 124);
 
-    // Mehrfarbiger Gradient (links→rechts)
-    const lineGradient = LinearGradient(
-      colors: [
-        Color(0xFF7C3AED), // violett
-        Color(0xFF06B6D4), // türkis
-        zs.ZenColors.sage, // jade
-        Color(0xFFF59E0B), // honig
-      ],
-    );
-
-    // Kleine Hilfsfunktionen für Deko
-    List<int> findPeaks(List<double> d) {
-      final peaks = <int>[];
-      for (var i = 1; i < d.length - 1; i++) {
-        if (d[i] > d[i - 1] && d[i] > d[i + 1] && d[i] >= 0.8) {
-          peaks.add(i);
-        }
-      }
-      return peaks.take(4).toList(); // dezent halten
-    }
-
-    List<int> findDips(List<double> d) {
-      final dips = <int>[];
-      for (var i = 1; i < d.length - 1; i++) {
-        if (d[i] < d[i - 1] && d[i] < d[i + 1] && d[i] <= -0.8) {
-          dips.add(i);
-        }
-      }
-      return dips.take(3).toList();
-    }
-
-    final peaks = findPeaks(data);
-    final dips = findDips(data);
+    // Glatte Tageslinie (leicht geglättet) + 7-Tage-Average
+    final smoothed = _smooth(data, strength: 0.35);
+    final avg7 = _movingAverage(data, 7);
 
     return SizedBox(
       height: 124,
-      child: LayoutBuilder(
-        builder: (context, c) {
-          // Pixel-Mapping für Emojis (x: 0..n-1 → Breite, y: −2..2 → Höhe)
-          Offset pt(int i, double y) {
-            final n = data.length;
-            if (n <= 1) return Offset.zero;
-            final x = (i / (n - 1)) * c.maxWidth;
-            final py = ((2 - y) / 4.0) * c.maxHeight;
-            return Offset(x, py);
-          }
-
-          return Stack(
-            children: [
-              const Positioned.fill(child: _HeatBand()), // Zonen-Hintergrund
-              // Chart
-              Positioned.fill(
-                child: LineChart(
-                  LineChartData(
-                    minY: -2,
-                    maxY: 2,
-                    gridData: const FlGridData(show: false),
-                    borderData: FlBorderData(show: false),
-                    titlesData: const FlTitlesData(show: false),
-                    lineBarsData: [
-                      LineChartBarData(
-                        spots: List.generate(
-                          data.length,
-                          (i) => FlSpot(i.toDouble(), data[i]),
+      child: LineChart(
+        LineChartData(
+          minY: -2,
+          maxY: 2,
+          gridData: FlGridData(
+            show: true,
+            drawHorizontalLine: true,
+            drawVerticalLine: false,
+            horizontalInterval: 1,
+            getDrawingHorizontalLine: (value) {
+              // Referenzlinien −1 / 0 / +1 dezent, 0 etwas sichtbarer
+              final isZero = value.abs() < 0.001;
+              return FlLine(
+                color: isZero
+                    ? Colors.black.withValues(alpha: .12)
+                    : Colors.black.withValues(alpha: .07),
+                strokeWidth: isZero ? 1.2 : 0.9,
+              );
+            },
+          ),
+          borderData: FlBorderData(show: false),
+          titlesData: const FlTitlesData(show: false),
+          lineTouchData: LineTouchData(
+            handleBuiltInTouches: true,
+            touchTooltipData: LineTouchTooltipData(
+              getTooltipItems: (spots) => spots
+                  .map((t) => LineTooltipItem(
+                        'Stimmung: ${t.y.toStringAsFixed(2)}',
+                        const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
                         ),
-                        isCurved: true,
-                        gradient: lineGradient,
-                        barWidth: 4.8,
-                        dotData: FlDotData(
-                          show: true,
-                          getDotPainter: (s, _, __, ___) {
-                            final y = s.y;
-                            Color cDot;
-                            if (y <= -0.5) {
-                              cDot = const Color(0xFF7C3AED);
-                            } else if (y >= 0.8) {
-                              cDot = zs.ZenColors.deepSage;
-                            } else {
-                              cDot = const Color(0xFFF59E0B);
-                            }
-                            return FlDotCirclePainter(
-                              radius: 2.8,
-                              color: Colors.white,
-                              strokeWidth: 2.2,
-                              strokeColor: cDot,
-                            );
-                          },
-                        ),
-                        belowBarData: BarAreaData(
-                          show: true,
-                          gradient: LinearGradient(
-                            colors: [
-                              const Color(0xFF06B6D4).withValues(alpha: 0.20),
-                              zs.ZenColors.sage.withValues(alpha: 0.16),
-                              Colors.white.withValues(alpha: 0.08),
-                            ],
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                          ),
-                        ),
-                      ),
-                    ],
-                    lineTouchData: LineTouchData(
-                      touchTooltipData: LineTouchTooltipData(
-                        // Kein tooltipBgColor (API-Change), Standard verwenden:
-                        getTooltipItems: (spots) => spots
-                            .map(
-                              (t) => LineTooltipItem(
-                                'Stimmung: ${t.y.toStringAsFixed(2)}',
-                                const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            )
-                            .toList(),
-                      ),
-                      handleBuiltInTouches: true,
-                    ),
-                  ),
-                ),
-              ),
-              // Deko: Wellen-Emojis (oben) & Tropfen (unten)
-              ...peaks.map((i) {
-                final o = pt(i, data[i]);
-                return Positioned(
-                  left: (o.dx - 8).clamp(0, c.maxWidth - 16),
-                  top: (o.dy - 22).clamp(0, c.maxHeight - 22),
-                  child: const Text('🌊', style: TextStyle(fontSize: 16)),
-                );
-              }),
-              ...dips.map((i) {
-                final o = pt(i, data[i]);
-                return Positioned(
-                  left: (o.dx - 7).clamp(0, c.maxWidth - 14),
-                  top: (o.dy + 4).clamp(0, c.maxHeight - 18),
-                  child: const Text('💧', style: TextStyle(fontSize: 14)),
-                );
-              }),
-            ],
-          );
-        },
+                      ))
+                  .toList(),
+            ),
+          ),
+          lineBarsData: [
+            // Sekundär: 7-Tage-Durchschnitt (Jade)
+            LineChartBarData(
+              spots: List.generate(avg7.length, (i) => FlSpot(i.toDouble(), avg7[i])),
+              isCurved: true,
+              color: zs.ZenColors.sage,
+              barWidth: 3.4,
+              isStrokeCapRound: true,
+              dotData: const FlDotData(show: false),
+              belowBarData: BarAreaData(show: false),
+            ),
+            // Primär: geglättete Tageslinie (DeepSage)
+            LineChartBarData(
+              spots: List.generate(smoothed.length, (i) => FlSpot(i.toDouble(), smoothed[i])),
+              isCurved: true,
+              color: zs.ZenColors.deepSage,
+              barWidth: 3.8,
+              isStrokeCapRound: true,
+              dotData: const FlDotData(show: false),
+              belowBarData: BarAreaData(show: false),
+            ),
+          ],
+        ),
       ),
     );
+  }
+
+  // Leichte Glättung (Exponentiell geglättet, Stärke 0..1)
+  static List<double> _smooth(List<double> d, {double strength = 0.3}) {
+    if (d.isEmpty) return const [];
+    final s = <double>[];
+    double prev = d.first;
+    for (final v in d) {
+      prev = prev + (v - prev) * (0.2 + strength * 0.6);
+      s.add(prev.clamp(-2.0, 2.0));
+    }
+    return s;
+  }
+
+  // Einfache gleitende Mittelwerte
+  static List<double> _movingAverage(List<double> d, int window) {
+    if (d.isEmpty || window <= 1) return List<double>.from(d);
+    final out = <double>[];
+    double sum = 0;
+    int start = 0;
+    for (int i = 0; i < d.length; i++) {
+      sum += d[i];
+      if (i - start + 1 > window) {
+        sum -= d[start];
+        start++;
+      }
+      final len = (i - start + 1);
+      out.add((sum / len).clamp(-2.0, 2.0));
+    }
+    return out;
   }
 }
 

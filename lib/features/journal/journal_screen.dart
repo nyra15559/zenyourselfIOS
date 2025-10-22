@@ -8,6 +8,7 @@
 // • Aktionen ausschließlich im „…“-Menü der Card (keine Inline-CTAs)
 // • Nur Color.withValues(alpha: …); keine withOpacity(..)
 // • Keine Breaking Changes (Provider-/Model-APIs unverändert)
+// • Backdrop & Layout via ZenAppScaffold (stabil, asset-sicher)
 //
 // Hinweise:
 // • Kein IntrinsicHeight in der Timeline-Reihe (stabil, performant)
@@ -19,7 +20,7 @@ import 'package:provider/provider.dart';
 
 import '../../shared/zen_style.dart' as zs hide ZenBackdrop, ZenGlassCard, ZenAppBar;
 import '../../shared/ui/zen_widgets.dart' as zw
-    show ZenBackdrop, ZenGlassCard, ZenAppBar, PandaHeader, ZenToast;
+    show ZenBackdrop, ZenGlassCard, ZenAppBar, PandaHeader, ZenToast, ZenAppScaffold;
 
 import '../../models/journal_entry.dart' as jm;
 import '../../providers/journal_entries_provider.dart' as jp;
@@ -32,6 +33,7 @@ class JournalScreen extends StatefulWidget {
   const JournalScreen({super.key});
 
   static const double _maxContentWidth = 820;
+  static const String _backdropAsset = 'assets/schoen.png';
 
   @override
   State<JournalScreen> createState() => _JournalScreenState();
@@ -76,66 +78,70 @@ class _JournalScreenState extends State<JournalScreen> {
     final grouped = _groupByDay(entries); // lokale Tages-Gruppierung
     final isEmpty = entries.isEmpty;
 
-    return Scaffold(
-      extendBodyBehindAppBar: true,
-      backgroundColor: Colors.transparent,
+    return zw.ZenAppScaffold(
       appBar: const zw.ZenAppBar(
-        title: null,
+        title: null, // <— Oberer Titel entfernt, damit kein doppelter Titel erscheint
         showBack: true,
         actions: [],
       ),
-      floatingActionButton: FloatingActionButton(
-        heroTag: 'journal-add',
-        tooltip: 'Neuen Eintrag',
-        onPressed: () => _startNewEntry(context, provider),
-        backgroundColor: zs.ZenColors.deepSage,
-        foregroundColor: Colors.white,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.all(zs.ZenRadii.l),
-        ),
-        child: const Icon(Icons.add_rounded),
+      backdropAsset: JournalScreen._backdropAsset,
+      maxBodyWidth: JournalScreen._maxContentWidth,
+      bodyPadding: EdgeInsets.only(
+        top: isMobile ? 20 : 28,
+        left: 24,
+        right: 24,
+        bottom: 24,
       ),
+      backdropWash: .12,
+      backdropSaturation: .92,
+      backdropGlow: .40,
+      backdropVignette: .16,
+      backdropMilk: .10,
       body: Stack(
         children: [
-          const Positioned.fill(
-            child: zw.ZenBackdrop(
-              asset: 'assets/schoen.png',
-              alignment: Alignment.center,
-              glow: .40,
-              vignette: .16,
-              enableHaze: true,
-              hazeStrength: .16,
-              saturation: .92,
-              wash: .12,
-            ),
-          ),
+          // Inhalt
           Align(
             alignment: Alignment.topCenter,
-            child: Padding(
-              padding: EdgeInsets.only(top: isMobile ? 20 : 36, bottom: 12),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: JournalScreen._maxContentWidth),
-                child: isEmpty
-                    ? _wrapRefresh(
-                        context: context,
+            child: ConstrainedBox(
+              constraints:
+                  const BoxConstraints(maxWidth: JournalScreen._maxContentWidth),
+              child: isEmpty
+                  ? _wrapRefresh(
+                      context: context,
+                      provider: provider,
+                      child: _buildEmptyState(context, isMobile, provider),
+                    )
+                  : _wrapRefresh(
+                      context: context,
+                      provider: provider,
+                      child: _buildTimelineList(
+                        context,
                         provider: provider,
-                        child: _buildEmptyState(context, isMobile, provider),
-                      )
-                    : _wrapRefresh(
-                        context: context,
-                        provider: provider,
-                        child: _buildTimelineList(
-                          context,
-                          provider: provider,
-                          isMobile: isMobile,
-                          groups: grouped,
-                          allCount: allCount,
-                          journalCount: journalCount,
-                          reflectionCount: reflectionCount,
-                          storyCount: storyCount,
-                        ),
+                        isMobile: isMobile,
+                        groups: grouped,
+                        allCount: allCount,
+                        journalCount: journalCount,
+                        reflectionCount: reflectionCount,
+                        storyCount: storyCount,
                       ),
+                    ),
+            ),
+          ),
+
+          // FAB (oben definiertes Padding berücksichtigen)
+          Positioned(
+            right: 8,
+            bottom: 8,
+            child: FloatingActionButton(
+              heroTag: 'journal-add',
+              tooltip: 'Neuen Eintrag',
+              onPressed: () => _startNewEntry(context, provider),
+              backgroundColor: zs.ZenColors.deepSage,
+              foregroundColor: Colors.white,
+              shape: const RoundedRectangleBorder(
+                borderRadius: BorderRadius.all(zs.ZenRadii.l),
               ),
+              child: const Icon(Icons.add_rounded),
             ),
           ),
         ],
@@ -213,7 +219,9 @@ class _JournalScreenState extends State<JournalScreen> {
                 label: Text(_ctaLabelFor(activeFilter)),
                 onPressed: () {
                   // Falls Empty-State im falschen Filter, neutralisieren
-                  try { provider.setFilter(jp.JournalFilterKind.all); } catch (_) {}
+                  try {
+                    provider.setFilter(jp.JournalFilterKind.all);
+                  } catch (_) {}
                   _startNewEntry(context, provider);
                 },
               ),
@@ -345,9 +353,9 @@ class _JournalScreenState extends State<JournalScreen> {
   Future<void> _openViewer(BuildContext context, jm.JournalEntry e) async {
     // Korrekte Abbildung des Model-Enums auf den Viewer-Typ.
     final viewKind = switch (e.kind) {
-      jm.EntryKind.journal    => jv.EntryKind.journal,
+      jm.EntryKind.journal => jv.EntryKind.journal,
       jm.EntryKind.reflection => jv.EntryKind.reflection,
-      jm.EntryKind.story      => jv.EntryKind.story, // Story bleibt Story
+      jm.EntryKind.story => jv.EntryKind.story, // Story bleibt Story
     };
 
     await Navigator.of(context).push(
@@ -361,13 +369,13 @@ class _JournalScreenState extends State<JournalScreen> {
 
           // Reflexion
           userThought: viewKind == jv.EntryKind.reflection ? e.thoughtText : null,
-          aiQuestion:  viewKind == jv.EntryKind.reflection ? e.aiQuestion  : null,
-          userAnswer:  viewKind == jv.EntryKind.reflection ? e.userAnswer  : null,
+          aiQuestion: viewKind == jv.EntryKind.reflection ? e.aiQuestion : null,
+          userAnswer: viewKind == jv.EntryKind.reflection ? e.userAnswer : null,
 
           // Kurzgeschichte — vollständige Weitergabe an den Viewer
-          storyTitle:  viewKind == jv.EntryKind.story ? _storyTitleFor(e) : null,
-          storyTeaser: viewKind == jv.EntryKind.story ? e.storyTeaser   : null,
-          storyBody:   viewKind == jv.EntryKind.story ? e.storyBody     : null,
+          storyTitle: viewKind == jv.EntryKind.story ? _storyTitleFor(e) : null,
+          storyTeaser: viewKind == jv.EntryKind.story ? e.storyTeaser : null,
+          storyBody: viewKind == jv.EntryKind.story ? e.storyBody : null,
 
           // Stimmung (Panda-Chip)
           moodLabel: _moodLabelOf(e),
@@ -382,7 +390,7 @@ class _JournalScreenState extends State<JournalScreen> {
     if (t.isNotEmpty) return t;
     final fallback = (e.title ?? '').trim();
     return fallback.isEmpty ? null : fallback;
-  }
+    }
 
   Future<void> _continueIntoReflection(
     BuildContext context,
@@ -417,7 +425,9 @@ class _JournalScreenState extends State<JournalScreen> {
         return;
       case jp.JournalFilterKind.story:
         // Vor Story-Start Filter neutralisieren und Provider mitgeben
-        try { provider.setFilter(jp.JournalFilterKind.all); } catch (_) {}
+        try {
+          provider.setFilter(jp.JournalFilterKind.all);
+        } catch (_) {}
         _showStoryStartSheet(context, provider);
         return;
       case jp.JournalFilterKind.all:
@@ -539,7 +549,9 @@ class _JournalScreenState extends State<JournalScreen> {
               onTap: () {
                 Navigator.pop(ctx);
                 // Vor Story-Sheet Filter neutralisieren + Provider mitgeben
-                try { provider.setFilter(jp.JournalFilterKind.all); } catch (_) {}
+                try {
+                  provider.setFilter(jp.JournalFilterKind.all);
+                } catch (_) {}
                 _showStoryStartSheet(context, provider);
               },
             ),
@@ -549,7 +561,8 @@ class _JournalScreenState extends State<JournalScreen> {
     );
   }
 
-  void _showStoryStartSheet(BuildContext context, jp.JournalEntriesProvider provider) {
+  void _showStoryStartSheet(
+      BuildContext context, jp.JournalEntriesProvider provider) {
     showModalBottomSheet(
       context: context,
       showDragHandle: true,
@@ -581,9 +594,12 @@ class _JournalScreenState extends State<JournalScreen> {
                   onPressed: () {
                     Navigator.pop(ctx);
                     // Filter sicher auf „Alle“
-                    try { provider.setFilter(jp.JournalFilterKind.all); } catch (_) {}
+                    try {
+                      provider.setFilter(jp.JournalFilterKind.all);
+                    } catch (_) {}
                     Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const ReflectionScreen()),
+                      MaterialPageRoute(
+                          builder: (_) => const ReflectionScreen()),
                     );
                   },
                 ),

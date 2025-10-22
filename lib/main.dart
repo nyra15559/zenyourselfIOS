@@ -1,16 +1,18 @@
 // lib/main.dart
 //
-// ZenYourself — App Bootstrap (Oxford-Zen, Pro-Level)
-// v1.2 · 2025-09-14
+// ZenYourself — App Bootstrap (Oxford-Zen, Pro-Level, Material 3)
+// v1.4 · 2025-10-22
 // -----------------------------------------------------------------------------
 // • EINZIGE MaterialApp im Projekt (verhindert Routing-Konflikte).
 // • Alle benannten Routen (/, /reflection, /journey, …) hier registriert.
 // • Robustes Bootstrapping (runZonedGuarded, PlatformDispatcher.onError).
 // • Provider-Setup inkl. Journal-Persistenz (kanonisch).
-// • A11y, i18n, Themes, sanftes Scroll-Verhalten.
+// • A11y, i18n, Themes (Material 3), sanftes Scroll-Verhalten.
+// • MemoryService.init() beim Start (Kontext-Gedächtnis).
 // -----------------------------------------------------------------------------
 
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
@@ -57,10 +59,15 @@ import 'features/journey/journey_map.dart';
 // --- Env Defaults / Fallback ---
 import 'env_config.dart';
 
+// --- Memory Layer Bootstrap ---
+import 'core/memory/memory_service.dart';
+
 /// Compile-Time Konfiguration (per --dart-define)
-const String _kApiUrl    = String.fromEnvironment('ZEN_API_URL',    defaultValue: '');
-const bool   _kApiEnabled= bool.fromEnvironment('ZEN_API_ENABLED',  defaultValue: true);
-const String _kApiToken  = String.fromEnvironment('ZEN_APP_TOKEN',  defaultValue: '');
+const String _kApiUrl = String.fromEnvironment('ZEN_API_URL', defaultValue: '');
+const bool _kApiEnabled =
+    bool.fromEnvironment('ZEN_API_ENABLED', defaultValue: true);
+const String _kApiToken =
+    String.fromEnvironment('ZEN_APP_TOKEN', defaultValue: '');
 
 Future<void> main() async {
   runZonedGuarded(() async {
@@ -73,10 +80,20 @@ Future<void> main() async {
       debugPrint('[Init] LocalStorage error: $e\n$st');
     }
 
-    // Fehlerabfang
+    // MemoryService (Kontext-Gedächtnis) initialisieren
+    try {
+      await MemoryService.instance.init();
+      debugPrint('✅ MemoryService initialized (context memory ready).');
+    } catch (e, st) {
+      debugPrint(
+          '⚠️  MemoryService init failed (continuing without memory): $e\n$st');
+    }
+
+    // Fehlerabfang (Flutter/UI)
     FlutterError.onError = (details) {
       FlutterError.dumpErrorToConsole(details);
     };
+    // Fehlerabfang (Dart/Plattform)
     WidgetsBinding.instance.platformDispatcher.onError = (error, stack) {
       debugPrint('[Platform] Uncaught: $error\n$stack');
       return true;
@@ -97,8 +114,10 @@ void _setupZenApi() {
       _kApiUrl.isNotEmpty || _kApiToken.isNotEmpty || !_kApiEnabled;
 
   final bool enabled = definesUsed ? _kApiEnabled : ZenEnv.apiEnabled;
-  final String url   = definesUsed && _kApiUrl.isNotEmpty ? _kApiUrl : ZenEnv.apiUrl;
-  final String token = definesUsed && _kApiToken.isNotEmpty ? _kApiToken : ZenEnv.appToken;
+  final String url =
+      definesUsed && _kApiUrl.isNotEmpty ? _kApiUrl : ZenEnv.apiUrl;
+  final String token =
+      definesUsed && _kApiToken.isNotEmpty ? _kApiToken : ZenEnv.appToken;
 
   if (enabled && url.isNotEmpty) {
     try {
@@ -114,7 +133,8 @@ void _setupZenApi() {
       );
 
       if (token.isEmpty) {
-        debugPrint('⚠️  ZenYourself: Kein APP_TOKEN gesetzt – der Worker könnte 401/403 liefern.');
+        debugPrint(
+            '⚠️  ZenYourself: Kein APP_TOKEN gesetzt – der Worker könnte 401/403 liefern.');
       }
       debugPrint('✅ GuidanceService HTTP enabled → $url');
     } catch (e, st) {
@@ -154,8 +174,9 @@ class ZenYourselfApp extends StatelessWidget {
             final p = JournalEntriesProvider();
             // Restore & Persist (asynchron starten)
             p.attachPersistence(
-              load: () async => storage
-                  .loadJournalEntries<jm.JournalEntry>(jm.JournalEntry.fromMap),
+              load: () async => storage.loadJournalEntries<jm.JournalEntry>(
+                jm.JournalEntry.fromMap,
+              ),
               save: (entries) async => storage.saveJournalEntries(entries),
               loadNow: true,
             );
@@ -183,6 +204,17 @@ class _ZenYourselfMaterialApp extends StatelessWidget {
         child: MaterialApp(
           restorationScopeId: 'zenyourself-app',
           debugShowCheckedModeBanner: false,
+          // Material 3 explizit aktivieren, falls AppTheme es nicht bereits setzt
+          themeMode: isDark ? ThemeMode.dark : ThemeMode.light,
+          theme: AppTheme.light.copyWith(
+            useMaterial3: true,
+          ),
+          darkTheme: AppTheme.dark.copyWith(
+            useMaterial3: true,
+          ),
+          themeAnimationDuration: const Duration(milliseconds: 240),
+          themeAnimationCurve: Curves.easeInOutCubicEmphasized,
+          useInheritedMediaQuery: true,
 
           // Locale / i18n
           locale: settings.locale,
@@ -214,15 +246,10 @@ class _ZenYourselfMaterialApp extends StatelessWidget {
             return supported.first;
           },
 
-          // Themes
-          themeMode: isDark ? ThemeMode.dark : ThemeMode.light,
-          theme: AppTheme.light,
-          darkTheme: AppTheme.dark,
-
           // UX-Verhalten
           scrollBehavior: const _ZenScrollBehavior(),
 
-          // === WICHTIG: EINZIGE Routing-Quelle ===
+          // === EINZIGE Routing-Quelle ===
           initialRoute: AppRoutes.start,
           routes: {
             AppRoutes.start: (_) => const StartScreen(),

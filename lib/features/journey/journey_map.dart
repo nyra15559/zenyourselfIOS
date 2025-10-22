@@ -223,7 +223,7 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
                     child: CustomScrollView(
                       slivers: [
                         // ---------- Fix: Zurück-Button als SliverAppBar (nimmt Platz ein) ----------
-                        SliverAppBar(
+                        const SliverAppBar(
                           pinned: false,
                           floating: false,
                           snap: false,
@@ -234,7 +234,7 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
                           leadingWidth: 64,
                           leading: Padding(
                             padding: EdgeInsets.only(left: zs.ZenSpacing.m),
-                            child: const _BackButton(),
+                            child: _BackButton(),
                           ),
                         ),
 
@@ -274,7 +274,7 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
 
                         // Grid der Optionen (mit SliverFadeTransition!)
                         SliverPadding(
-                          padding: EdgeInsets.symmetric(horizontal: zs.ZenSpacing.m),
+                          padding: const EdgeInsets.symmetric(horizontal: zs.ZenSpacing.m),
                           sliver: SliverFadeTransition(
                             opacity: CurvedAnimation(parent: _tilesCtrl, curve: Curves.easeOutCubic),
                             sliver: SliverGrid(
@@ -303,12 +303,12 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
                         ),
 
                         // Abstand vor Footer
-                        SliverToBoxAdapter(child: SizedBox(height: zs.ZenSpacing.l)),
+                        const SliverToBoxAdapter(child: SizedBox(height: zs.ZenSpacing.l)),
 
                         // Footer (Zitat + Privacy)
                         SliverToBoxAdapter(
                           child: Padding(
-                            padding: EdgeInsets.symmetric(horizontal: zs.ZenSpacing.m),
+                            padding: const EdgeInsets.symmetric(horizontal: zs.ZenSpacing.m),
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
@@ -340,7 +340,7 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
                                     color: zs.ZenColors.deepSage.withValues(alpha: .82),
                                   ),
                                 ),
-                                SizedBox(height: zs.ZenSpacing.l),
+                                const SizedBox(height: zs.ZenSpacing.l),
                               ],
                             ),
                           ),

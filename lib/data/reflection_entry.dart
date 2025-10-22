@@ -4,7 +4,8 @@
 // ------------------------------------------------------------------
 // • Bestehende Felder bleiben erhalten (timestamp, content, moodScore, …)
 // • NEU (optional): analysis (Spiegelung/Frage, SORC, Risk), answer,
-//   challenge (Mini-Challenge), links (z. B. storyId), inputMeta.
+//   challenge (Mini-Challenge), links (z. B. storyId), inputMeta,
+//   helperSuggestion (sanfter 0–1-Satz unter Leitfrage).
 // • `toJsonV5()` exportiert direkt den v5-Union-Shape für JournalEntry:
 //   { type: "reflection", input, analysis, answer, challenge, mood, links, …, reflection }
 //
@@ -39,6 +40,8 @@ class ReflectionEntry {
   final MiniChallenge? challenge; // Micro-Challenge ≤ 2 Min
   final ReflectionLinks? links; // z. B. storyId
   final String? moodNote; // Freitext zum Mood (separat von score)
+  /// Sanfter 0–1-Satz direkt unter der Leitfrage (aus Worker/Turn)
+  final String? helperSuggestion;
 
   ReflectionEntry({
     String? id,
@@ -57,6 +60,7 @@ class ReflectionEntry {
     this.challenge,
     this.links,
     this.moodNote,
+    this.helperSuggestion,
   })  : id = id ?? _makeId(timestamp, content),
         content = _sanitizeContent(content),
         moodScore = _clampMood(moodScore),
@@ -92,6 +96,11 @@ class ReflectionEntry {
     final challenge = MiniChallenge.fromMaybe(json['challenge']);
     final links = ReflectionLinks.fromMaybe(json['links']);
 
+    // helperSuggestion tolerant einlesen (camelCase & snake_case)
+    final helperSuggestion = _asTrimmedOrNull(
+      json['helperSuggestion'] ?? json['helper_suggestion'],
+    );
+
     return ReflectionEntry(
       id: id,
       timestamp: ts,
@@ -110,6 +119,7 @@ class ReflectionEntry {
       links: links,
       moodNote:
           _asTrimmedOrNull(json['moodNote'] ?? json['mood_note'] ?? json['moodComment']),
+      helperSuggestion: helperSuggestion,
     );
   }
 
@@ -138,6 +148,8 @@ class ReflectionEntry {
       if (challenge != null) 'challenge': challenge!.toJson(),
       if (links != null) 'links': links!.toJson(),
       if (moodNote != null) 'moodNote': moodNote,
+      if ((helperSuggestion ?? '').trim().isNotEmpty)
+        'helperSuggestion': helperSuggestion!.trim(),
     };
     map.removeWhere((_, v) => v == null);
     return map;
@@ -173,7 +185,7 @@ class ReflectionEntry {
       if (links != null) 'links': links!.toJson(),
     };
 
-    // NEU: Reflection-Block (thought + 1 Legacy-Step + risk)
+    // NEU: Reflection-Block (thought + Step aus analysis/answer + risk + helper_suggestion)
     final refl = _toReflectionBlock();
     if (refl.isNotEmpty) {
       map['reflection'] = refl;
@@ -182,7 +194,7 @@ class ReflectionEntry {
     return map;
   }
 
-  /// Reflection-Block erzeugen (thought + Step aus analysis/answer + risk)
+  /// Reflection-Block erzeugen (thought + Step aus analysis/answer + risk + helper_suggestion)
   Map<String, dynamic> _toReflectionBlock() {
     final thought = content.trim().isEmpty ? null : content.trim();
 
@@ -210,6 +222,8 @@ class ReflectionEntry {
       if (thought != null) 'thought': thought,
       if (steps.isNotEmpty) 'steps': steps,
       if (risk != null) 'risk': risk,
+      if ((helperSuggestion ?? '').trim().isNotEmpty)
+        'helper_suggestion': helperSuggestion!.trim(),
     };
     return out;
   }
@@ -338,6 +352,7 @@ class ReflectionEntry {
     MiniChallenge? challenge,
     ReflectionLinks? links,
     String? moodNote,
+    String? helperSuggestion,
   }) {
     return ReflectionEntry(
       id: id ?? this.id,
@@ -356,6 +371,7 @@ class ReflectionEntry {
       challenge: challenge ?? this.challenge,
       links: links ?? this.links,
       moodNote: moodNote ?? this.moodNote,
+      helperSuggestion: helperSuggestion ?? this.helperSuggestion,
     );
   }
 
@@ -381,7 +397,8 @@ class ReflectionEntry {
           answer == other.answer &&
           challenge == other.challenge &&
           links == other.links &&
-          moodNote == other.moodNote;
+          moodNote == other.moodNote &&
+          helperSuggestion == other.helperSuggestion;
 
   @override
   int get hashCode => Object.hash(
@@ -401,6 +418,7 @@ class ReflectionEntry {
         challenge,
         links,
         moodNote,
+        helperSuggestion,
       );
 
   // ===== Intern: Normalisierung ==============================================
@@ -654,9 +672,9 @@ class Answer {
   const Answer({this.content, this.mode});
 
   Map<String, dynamic> toJson() => {
-        if (content != null) 'content': content,
-        if (mode != null) 'mode': mode,
-      };
+    if (content != null) 'content': content,
+    if (mode != null) 'mode': mode,
+  };
 
   static Answer? fromMaybe(dynamic v) {
     if (v == null) return null;

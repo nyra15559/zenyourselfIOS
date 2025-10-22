@@ -1,13 +1,18 @@
 // lib/features/reflection/reflection_models.dart
 // Part: Modelle/Typen/Utils (library: reflection_screen)
 // -----------------------------------------------------------------------------
-// v3.21 — Worker v15.3 Alignment (Oxford style)
-// - Frage optional (0–1): liest 'question' ODER 'output_text'.
-// - Answer-Chips: liest 'answer_helpers' (Fallback: 'followups').
-// - helperSuggestion: neues optionales Feld; liest 'helper_suggestion'.
-// - risk: mappt 'risk_level' (!= "none") → true; Fallback: 'risk' bool.
+// v3.24 — Worker v15.x Alignment (Oxford style)
+// - Frage optional (0–1): liest 'question' ODER 'output_text' (Fallback: first of
+//   'questions' | 'qs' | 'multi_questions').
+// - Answer-Chips: liest primär 'answer_helpers' (+ Aliase & verschachtelt in flow/ui);
+//   Fallback: 'followups'; toleriert auch String mit Aufzählungs-Trennzeichen.
+// - helperSuggestion: neues optionales Feld; liest 'helper_suggestion' (+ Aliase,
+//   auch verschachtelt in flow/ui).
+// - risk: wie im Screen → risk_level in {high, mild} → true; Fallback: bool 'risk'.
 // - toMap: schreibt zusätzlich 'answer_helpers' + 'helper_suggestion'.
 // - normalizeForCompare: whitespace-normalisiert (Deckungsgleich mit Screen).
+// - Robustere (De-)Serialisierung: 'talk' akzeptiert List oder String (und
+//   toleriert 'smalltalk_reply').
 // -----------------------------------------------------------------------------
 //
 // Lints / Analyzer:
@@ -47,7 +52,7 @@ class _PandaStep {
   /// Zusatzzeilen (ruhige Hinweise, max. 2)
   final List<String> talkLines;
 
-  /// Risiko-Flag (aus risk_level != 'none' oder bool 'risk')
+  /// Risiko-Flag (aus risk_level in {high,mild} oder bool 'risk')
   final bool risk;
 
   /// Optionaler sanfter Satz aus dem Worker (key: 'helper_suggestion')
@@ -137,30 +142,49 @@ class _PandaStep {
         'answer': hasAnswer ? answer!.trim() : null,
       };
 
-  /// Deserialisierung aus Worker/Store-Map.
+  /// Deserialisierung aus Worker/Store-Map (tolerant & aliasfreundlich).
   static _PandaStep fromMap(JsonMap m) {
-    final talk = (m['talk'] is List)
-        ? (m['talk'] as List).map((e) => e.toString()).toList()
-        : const <String>[];
-
-    // Worker liefert answer_helpers; ältere Pfade evtl. followups.
-    final fuSrc = (m['answer_helpers'] is List)
-        ? (m['answer_helpers'] as List)
-        : (m['followups'] is List ? (m['followups'] as List) : const <dynamic>[]);
-    final fu = fuSrc.map((e) => e.toString()).toList();
-
-    // Frage kann in 'question' oder 'output_text' stehen (optional).
-    final qRaw = _asString(m['question']).trim();
-    final q = qRaw.isNotEmpty ? qRaw : _asString(m['output_text']).trim();
-
-    // risk: akzeptiere bool oder risk_level-String.
-    final rl = _asString(m['risk_level']).toLowerCase();
-    final risk = (m['risk'] == true) || (rl.isNotEmpty && rl != 'none');
-
-    // Helper-Satz: 'helper_suggestion' (oder tolerant 'helperSuggestion')
-    final hs = _asNullableTrimmedString(
-      m.containsKey('helper_suggestion') ? m['helper_suggestion'] : m['helperSuggestion'],
+    // talk: akzeptiert List ODER String (+ optional smalltalk_reply als zusätzliche Zeile)
+    final talk = _mergeMax2(
+      _asStringList(m['talk']),
+      _asStringList(m['talk_lines']),
+      _asStringList(m['smalltalk_reply']),
     );
+
+    // Answer-Helper einsammeln (Top-Level, Aliase, verschachtelt in flow/ui)
+    final fu = (() {
+      final collected = _collectAnswerHelpers(m);
+      if (collected.isNotEmpty) return collected;
+      return _asStringList(m['followups']);
+    })();
+
+    // Frage: 'question' | 'output_text' | first of ['questions','qs','multi_questions']
+    final q = (() {
+      final q0 = _asString(m['question']).trim();
+      if (q0.isNotEmpty) return q0;
+      final q1 = _asString(m['output_text']).trim();
+      if (q1.isNotEmpty) return q1;
+      final qs = <String>[
+        ..._asStringList(m['questions']),
+        ..._asStringList(m['qs']),
+        ..._asStringList(m['multi_questions']),
+      ].where((e) => e.trim().isNotEmpty).toList();
+      return qs.isNotEmpty ? qs.first.trim() : '';
+    })();
+
+    // risk: wie im Screen — nur 'high' oder 'mild' setzen das UI-Risiko-Flag; sonst Fallback auf bool.
+    final rl = _asString(m['risk_level']).toLowerCase();
+    final risk = (rl == 'high' || rl == 'mild') || (m['risk'] == true);
+
+    // Helper-Satz: 'helper_suggestion' (oder Aliase), ggf. aus flow/ui verschachtelt.
+    final hs = _pickFirstNonEmptyString([
+      m['helper_suggestion'],
+      m['helperSuggestion'],
+      if (m['flow'] is Map) (m['flow'] as Map)['helper_suggestion'],
+      if (m['flow'] is Map) (m['flow'] as Map)['helperSuggestion'],
+      if (m['ui'] is Map) (m['ui'] as Map)['helper_suggestion'],
+      if (m['ui'] is Map) (m['ui'] as Map)['helperSuggestion'],
+    ]);
 
     return _PandaStep(
       mirror: _asString(m['mirror']),
@@ -208,6 +232,8 @@ class _PandaStep {
   }
 
   // ---- intern ---------------------------------------------------------------
+
+  /// Max. 2 Talk-Zeilen, dedupliziert und getrimmt.
   static List<String> _sanitizeTalk(List<String> input) {
     if (input.isEmpty) return const <String>[];
     final out = <String>[];
@@ -222,6 +248,7 @@ class _PandaStep {
     return out;
   }
 
+  /// Bis zu 3 Satzstarter, ohne Endzeichen (?!.) und mit Längenlimit.
   static List<String> _sanitizeFollowups(List<String> input) {
     if (input.isEmpty) return const <String>[];
     final out = <String>[];
@@ -250,6 +277,51 @@ class _PandaStep {
   static String? _trimOrNull(String? s) {
     final t = (s ?? '').trim();
     return t.isEmpty ? null : t;
+  }
+
+  /// Sammelt Answer-Helper aus diversen bekannten Feldern & Aliases (inkl. flow/ui).
+  static List<String> _collectAnswerHelpers(JsonMap m) {
+    List<String> asList(dynamic v) => _asStringList(v);
+
+    final top = <String>[
+      ...asList(m['answer_helpers']),
+      ...asList(m['answer_scaffolds']),
+      ...asList(m['answer_templates']),
+      ...asList(m['helpers']),
+      ...asList(m['chips']),
+      ...asList(m['answers']),
+      ...asList(m['options']),
+    ];
+
+    final flow = (m['flow'] is Map) ? Map<String, dynamic>.from(m['flow'] as Map) : const {};
+    final ui   = (m['ui']   is Map) ? Map<String, dynamic>.from(m['ui']   as Map) : const {};
+
+    final nested = <String>[
+      ...asList(flow['answer_helpers']),
+      ...asList(flow['helpers']),
+      ...asList(ui['answer_helpers']),
+      ...asList(ui['chips']),
+    ];
+
+    final raw = <String>[...top, ...nested]
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty && !e.endsWith('?'))
+        .toList();
+
+    // Sanfte Normalisierung: Doppelpunkte am Ende weg, dedupe, limit 3
+    final cleaned = raw
+        .map((s) => s.replaceAll(RegExp(r'\s*[:：]\s*$'), '').trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+
+    final seen = <String>{};
+    final out = <String>[];
+    for (final s in cleaned) {
+      final k = s.toLowerCase();
+      if (seen.add(k)) out.add(s);
+      if (out.length >= 3) break;
+    }
+    return out;
   }
 }
 
@@ -524,6 +596,31 @@ String _asString(dynamic v, {String fallback = ''}) {
   return v.toString();
 }
 
+/// Tolerante Umwandlung in String-Liste.
+/// - List -> String[]
+/// - String -> Auftrennen an \n, Bullet-/Strich-Listen („• - – — “) oder „; “
+/// - Sonst -> []
+List<String> _asStringList(dynamic v) {
+  if (v is List) {
+    return v
+        .map((e) => e?.toString() ?? '')
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+  }
+  if (v is String) {
+    final s = v.trim();
+    if (s.isEmpty) return const <String>[];
+    final parts = s
+        .split(RegExp(r'\n+|[•\-–—]\s+|;\s+'))
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
+    return parts.isEmpty ? <String>[s] : parts;
+  }
+  return const <String>[];
+}
+
 String? _asNullableTrimmedString(dynamic v) {
   if (v == null) return null;
   final s = v.toString().trim();
@@ -535,4 +632,32 @@ String _ellipsis(String s, int max) {
   if (t.length <= max) return t;
   if (max <= 1) return '…';
   return '${t.substring(0, max - 1)}…';
+}
+
+/// Nimmt mehrere Listen entgegen und liefert max. 2 Elemente (dedupliziert, getrimmt).
+List<String> _mergeMax2(List<String> a, [List<String>? b, List<String>? c]) {
+  final all = <String>[
+    ...a,
+    if (b != null) ...b,
+    if (c != null) ...c,
+  ].map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+
+  final out = <String>[];
+  final seen = <String>{};
+  for (final x in all) {
+    final key = x.toLowerCase();
+    if (seen.add(key)) out.add(x);
+    if (out.length >= 2) break;
+  }
+  return out;
+}
+
+/// Nimmt eine Liste potenzieller Strings entgegen und gibt den ersten
+/// nicht-leeren, getrimmten zurück (oder null).
+String? _pickFirstNonEmptyString(List<dynamic> candidates) {
+  for (final c in candidates) {
+    final s = _asNullableTrimmedString(c);
+    if (s != null && s.isNotEmpty) return s;
+  }
+  return null;
 }

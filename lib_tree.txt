@@ -6,8 +6,16 @@ lib
 ├── audio
 │   └── soundscape_manager.dart
 ├── core
-│   └── models
-│       └── reflect_request.dart
+│   ├── memory
+│   │   ├── memory_entry.dart
+│   │   ├── memory_mapper.dart
+│   │   ├── memory_service.dart
+│   │   └── memory_store.dart
+│   ├── models
+│   │   ├── insight_models.dart
+│   │   └── reflect_request.dart
+│   └── privacy
+│       └── privacy_texts.dart
 ├── data
 │   ├── mood_entry.dart
 │   └── reflection_entry.dart
@@ -32,7 +40,6 @@ lib
 │   │   ├── journal_entry_view.dart.bak
 │   │   ├── journal_screen.dart
 │   │   └── widgets
-│   │       └── journal_entry_card.dart
 │   ├── journey
 │   │   └── journey_map.dart
 │   ├── pro
@@ -87,6 +94,8 @@ lib
 │   ├── tts_service.dart
 │   └── whisper_service.dart
 ├── shared
+│   ├── analytics
+│   │   └── insight_tracker.dart
 │   ├── launching.dart
 │   ├── ui
 │   │   ├── safety_banner.dart
@@ -102,4 +111,4 @@ lib
     ├── panda_mood_chip.dart
     └── panda_mood_picker.dart
 
-27 directories, 76 files
+30 directories, 82 files

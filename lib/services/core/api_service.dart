@@ -1,7 +1,14 @@
 // lib/services/core/api_service.dart
 //
-// Kern: HTTP-Invoker, Worker-Calls, Parsing & Heuristiken
-// Nutzt nur dtos.dart + lokale/Projektmodelle.
+// ZenYourself — Core ApiService (server+offline, Samfring optional)
+// -----------------------------------------------------------------------------
+// - Einheitlicher HTTP/Retries/Fallbacks (_tryEndpoints / _postMaybe)
+// - Zentrale Payload-Builder (_buildSessionMap / _basePayload)
+// - Memory-Hooks & Byte-Kontext (best-effort, ohne await)
+// - Light Contact-Tints (Header + Payload), Samfring=optional
+// - Out-Soft-Gate: kleiner Start-Blocker; blockiert NIE Offline-Flows
+// - Parser & Offline-Heuristiken bleiben erhalten (kompatibel)
+// -----------------------------------------------------------------------------
 
 import 'dart:async';
 import 'dart:convert';
@@ -31,6 +38,9 @@ import '../../data/reflection_entry.dart' as re hide Analysis;
 
 import '../../models/question.dart';
 
+// **Memory-Layer (Backend-only)**
+import '../../core/memory/memory_service.dart';
+
 typedef HttpInvoker = Future<Map<String, dynamic>> Function(
   String path,
   Map<String, dynamic> body,
@@ -47,8 +57,14 @@ class ApiService {
   String? _baseUrl;
   Duration _timeout = const Duration(seconds: 25);
 
+  // Outbound Soft-Gate (startet geschlossen, öffnet sich nach kurzem Delay)
+  bool _outGateOpen = true; // standardmäßig offen – wird durch configure* kurz geschlossen
+  bool _outGatePrimed = false;
+
   // Branding
   static const String _brand = 'ZenYourself';
+  static const String _channel = 'app';
+  static const String _samfring = 'optional';
   static const String loadingHint = '$_brand zählt die Blümchen …';
 
   // **Fester Fehlertext (fix)**
@@ -62,6 +78,9 @@ class ApiService {
       _baseUrl = _normalizeBase(baseUrl);
     }
     if (timeout != null) _timeout = timeout;
+
+    _primeMemory();       // ohne await
+    _primeOutSoftGate();  // kleiner Start-Blocker (nicht-blockierend für Offline)
   }
 
   void configureForWorker({
@@ -72,22 +91,54 @@ class ApiService {
     _baseUrl = _normalizeBase(baseUrl);
     _timeout = timeout;
 
+    _primeMemory();       // ohne await
+    _primeOutSoftGate();  // kleiner Start-Blocker
+
+    // HttpInvoker-Adapter (light headers + Payload-Anreicherung)
     _http = (String path, Map<String, dynamic> body) async {
       final uri = _join(_baseUrl!, path);
       final headers = <String, String>{
         if (appToken != null && appToken.trim().isNotEmpty)
           'Authorization': 'Bearer $appToken',
         'Content-Type': 'application/json; charset=utf-8',
-        'Accept': 'application/json, application/problem+json;q=0.95, text/plain;q=0.9, */*;q=0.8',
+        'Accept':
+            'application/json, application/problem+json;q=0.95, text/plain;q=0.9, */*;q=0.8',
+        // Light Contact-Tints + Samfring
+        'X-App-Brand': _brand,
+        'X-App-Channel': _channel,
+        'X-Samfring': _samfring,
+        // Out-Soft-Gate Anzeige (nur informativ)
+        'X-Out-Gate': _outGateOpen ? 'open' : 'warmup',
       };
 
-      final res = await http.post(uri, headers: headers, body: jsonEncode(body)).timeout(_timeout);
+      // Payload sanft anreichern (falls Caller es nicht bereits gemacht hat)
+      final enriched = Map<String, dynamic>.from(body);
+      enriched.putIfAbsent('contact_tins', () => {
+            'brand': _brand,
+            'channel': _channel,
+            'samfring': _samfring,
+            'locale': (body['locale'] ?? 'de').toString(),
+            'tz': (body['tz'] ?? 'Europe/Zurich').toString(),
+          });
+
+      // Byte-Kontext best-effort (ohne await)
+      _appendByteContext(enriched);
+
+      // kleiner Start-Blocker, aber NUR für Outbound
+      if (!_outGateOpen && !_isHealthPath(path)) {
+        final jitter = 90 + _rand.nextInt(90);
+        await Future.delayed(Duration(milliseconds: jitter));
+      }
+
+      final res =
+          await http.post(uri, headers: headers, body: jsonEncode(enriched)).timeout(_timeout);
+
       if (res.statusCode >= 400) {
         throw Exception('Worker ${res.statusCode}: ${res.body}');
       }
 
       final ct = (res.headers['content-type'] ?? '').toLowerCase();
-      if (ct.contains('application/json')) {
+      if (ct.contains('json')) {
         try {
           final parsed = jsonDecode(res.body);
           if (parsed is Map<String, dynamic>) return parsed;
@@ -98,6 +149,49 @@ class ApiService {
       }
       return <String, dynamic>{'output_text': _decodeBody(res)};
     };
+  }
+
+  void _primeOutSoftGate() {
+    if (_outGatePrimed) return;
+    _outGatePrimed = true;
+    _outGateOpen = false;
+    unawaited(() async {
+      // sehr kurzer Warmup + Health-Ping (best-effort)
+      final ms = 120 + _rand.nextInt(80);
+      await Future.delayed(Duration(milliseconds: ms));
+      unawaited(healthCheck());
+      _outGateOpen = true;
+    }());
+  }
+
+  // Memory-Service sanft berühren (init ohne await; falls vorhanden)
+  void _primeMemory() {
+    try {
+      // Zugriff auf Singleton kann bereits initialisieren
+      final _ = MemoryService.instance;
+      // optional: vorhandene Warmup-Methoden nicht-blockierend aufrufen
+      // (alles dynamic + try/catch → niemals Build/Runtime blockieren)
+      // ignore: unused_local_variable
+      dynamic dyn = _;
+      unawaited(Future<void>(() async {
+        try {
+          // gängige Namen – falls nicht vorhanden → NoSuchMethod -> ignored
+          // ignore: avoid_dynamic_calls
+          await (dyn.warmup?.call());
+        } catch (_) {}
+        try {
+          // ignore: avoid_dynamic_calls
+          dyn.preload?.call();
+        } catch (_) {}
+      }));
+    } catch (_) {
+      // niemals blockieren
+    }
+  }
+
+  static bool _isHealthPath(String path) {
+    final p = path.trim().toLowerCase();
+    return p == '/health' || p.endsWith('/health');
   }
 
   static String _normalizeBase(String base) {
@@ -133,7 +227,8 @@ class ApiService {
       if (ct.contains('json')) {
         final json = jsonDecode(body);
         if (json is Map &&
-            (json['ok'] == true || json['status']?.toString().toLowerCase() == 'ok')) {
+            (json['ok'] == true ||
+                json['status']?.toString().toLowerCase() == 'ok')) {
           return true;
         }
       }
@@ -178,7 +273,11 @@ class ApiService {
     List<Map<String, String>>? history,
   }) async {
     final s = session ??
-        ReflectionSession(threadId: _uuid.v4(), turnIndex: 0, maxTurns: max(2, min(6, maxTurns)));
+        ReflectionSession(
+          threadId: _uuid.v4(),
+          turnIndex: 0,
+          maxTurns: max(2, min(6, maxTurns)),
+        );
     return _reflectFullStep(
       text: text.trim(),
       session: s,
@@ -217,42 +316,22 @@ class ApiService {
     if (_http == null) return _errorTurn(session);
     final next = session.copyWith(turnIndex: session.turnIndex + 1);
 
-    final payload = <String, dynamic>{
-      'text': text.trim(),
-      'messages': history ?? const [],
-      'locale': locale,
-      'tz': tz,
-      'session': {
-        'id': next.threadId,
-        'turn': next.turnIndex,
-        'max_turns': next.maxTurns,
-      },
-    };
+    final payload = _basePayload(
+      text: text.trim(),
+      locale: locale,
+      tz: tz,
+      session: next,
+      messages: history ?? const [],
+    );
 
-    const bases = [420, 900, 1800];
-    for (int i = 0; i < bases.length; i++) {
-      try {
-        try {
-          final json = await _http!('/next_turn_full', payload).timeout(_timeout);
-          return _turnFromReflectAny(json, next);
-        } catch (_) {
-          try {
-            final json = await _http!('/reflect_full', payload).timeout(_timeout);
-            return _turnFromReflectAny(json, next);
-          } catch (_) {
-            final json = await _http!('/reflect', payload).timeout(_timeout);
-            return _turnFromReflectAny(json, next);
-          }
-        }
-      } catch (_) {
-        if (i < bases.length - 1) {
-          final jitter = _rand.nextInt(180);
-          await Future.delayed(Duration(milliseconds: bases[i] + jitter));
-          continue;
-        }
-      }
-    }
-    return _errorTurn(next);
+    // Fallback-Reihenfolge beibehalten
+    final json = await _tryEndpoints(
+      endpoints: const ['/next_turn_full', '/reflect_full', '/reflect'],
+      payload: payload,
+    );
+
+    if (json == null) return _errorTurn(next);
+    return _turnFromReflectAny(json, next);
   }
 
   Future<ReflectionTurn> nextTurn({
@@ -262,7 +341,13 @@ class ApiService {
     String tz = 'Europe/Zurich',
     List<Map<String, String>>? history,
   }) =>
-      continueSession(session: session, text: text, locale: locale, tz: tz, history: history);
+      continueSession(
+        session: session,
+        text: text,
+        locale: locale,
+        tz: tz,
+        history: history,
+      );
 
   Future<ReflectionSession> endSession(ReflectionSession s) async => s;
 
@@ -274,24 +359,7 @@ class ApiService {
     String tz = 'Europe/Zurich',
   }) async {
     if (_http == null) {
-      return <String, dynamic>{
-        'closure': {
-          'mood_intro': {'text': ''},
-        },
-        'flow': {
-          'recommend_end': true,
-          'talk_only': false,
-          'allow_reflect': true,
-          'suggest_break': false,
-          'mood_prompt': true,
-        },
-        if (session != null)
-          'session': {
-            'id': session.threadId,
-            'turn': session.turnIndex,
-            'max_turns': session.maxTurns,
-          },
-      };
+      return _closureFallback(session);
     }
 
     final payload = <String, dynamic>{
@@ -299,39 +367,15 @@ class ApiService {
       'text': answer.trim(), // kompatibel zu Workern, die "text" erwarten
       'locale': locale,
       'tz': tz,
-      'session': session == null
-          ? null
-          : {
-              'id': session.threadId,
-              'turn': session.turnIndex,
-              'max_turns': session.maxTurns,
-            },
+      'session': session == null ? null : _buildSessionMap(session),
     };
+    _appendMemoryHints(payload);
+    _appendContactTints(payload, locale: locale, tz: tz);
+    _appendByteContext(payload);
 
-    try {
-      final json = await _http!('/closure_full', payload).timeout(_timeout);
-      return json;
-    } catch (_) {
-      // sanfter Fallback (Flow-Flags), keine Chips
-      return <String, dynamic>{
-        'closure': {
-          'mood_intro': {'text': ''},
-        },
-        'flow': {
-          'recommend_end': true,
-          'talk_only': false,
-          'allow_reflect': true,
-          'suggest_break': false,
-          'mood_prompt': true,
-        },
-        if (session != null)
-          'session': {
-            'id': session.threadId,
-            'turn': session.turnIndex,
-            'max_turns': session.maxTurns,
-          },
-      };
-    }
+    final json =
+        await _postMaybe('/closure_full', payload, saveSource: 'closure_full');
+    return json ?? _closureFallback(session);
   }
 
   Future<ReflectionTurn> _reflectStep({
@@ -342,33 +386,17 @@ class ApiService {
     required List<Map<String, String>> history,
   }) async {
     if (_http == null) return _errorTurn(session);
-
-    final payload = <String, dynamic>{
-      'text': text,
-      'messages': history,
-      'locale': locale,
-      'tz': tz,
-      'session': {
-        'id': session.threadId,
-        'turn': session.turnIndex,
-        'max_turns': session.maxTurns,
-      },
-    };
-
-    const bases = [420, 900, 1800];
-    for (int i = 0; i < bases.length; i++) {
-      try {
-        final json = await _http!('/reflect', payload).timeout(_timeout);
-        return _turnFromReflectAny(json, session);
-      } catch (_) {
-        if (i < bases.length - 1) {
-          final jitter = _rand.nextInt(180);
-          await Future.delayed(Duration(milliseconds: bases[i] + jitter));
-          continue;
-        }
-      }
-    }
-    return _errorTurn(session);
+    final payload = _basePayload(
+      text: text,
+      locale: locale,
+      tz: tz,
+      session: session,
+      messages: history,
+    );
+    final json =
+        await _tryEndpoints(endpoints: const ['/reflect'], payload: payload);
+    if (json == null) return _errorTurn(session);
+    return _turnFromReflectAny(json, session);
   }
 
   Future<ReflectionTurn> _reflectFullStep({
@@ -379,33 +407,19 @@ class ApiService {
     required List<Map<String, String>> history,
   }) async {
     if (_http == null) return _errorTurn(session);
-
-    final payload = <String, dynamic>{
-      'text': text,
-      'messages': history,
-      'locale': locale,
-      'tz': tz,
-      'session': {
-        'id': session.threadId,
-        'turn': session.turnIndex,
-        'max_turns': session.maxTurns,
-      },
-    };
-
-    const bases = [420, 900, 1800];
-    for (int i = 0; i < bases.length; i++) {
-      try {
-        final json = await _http!('/reflect_full', payload).timeout(_timeout);
-        return _turnFromReflectAny(json, session);
-      } catch (_) {
-        if (i < bases.length - 1) {
-          final jitter = _rand.nextInt(180);
-          await Future.delayed(Duration(milliseconds: bases[i] + jitter));
-          continue;
-        }
-      }
-    }
-    return _errorTurn(session);
+    final payload = _basePayload(
+      text: text,
+      locale: locale,
+      tz: tz,
+      session: session,
+      messages: history,
+    );
+    final json = await _tryEndpoints(
+      endpoints: const ['/reflect_full'],
+      payload: payload,
+    );
+    if (json == null) return _errorTurn(session);
+    return _turnFromReflectAny(json, session);
   }
 
   Future<ReflectionTurn> talk({
@@ -416,12 +430,14 @@ class ApiService {
     List<Map<String, String>>? history,
   }) async {
     if (_http == null) {
+      // Offline-Talk bleibt verfügbar (nicht blockieren)
       return ReflectionTurn(
         outputText: '',
         mirror: null,
         context: const [],
         followups: const [],
-        answerHelpers: const [], // <- wichtig: UI/Guidance kann darauf hören
+        answerHelpers: const [], // UI kann darauf hören
+        helperSuggestion: null,
         flow: const ReflectionFlow(
           recommendEnd: false,
           suggestBreak: false,
@@ -439,29 +455,28 @@ class ApiService {
       );
     }
 
-    final payload = <String, dynamic>{
-      'text': (userText ?? '').trim(),
-      'messages': history ?? const [],
-      'locale': locale,
-      'tz': tz,
-      'intent': 'talk',
-      'session': {
-        'id': session.threadId,
-        'turn': session.turnIndex,
-        'max_turns': session.maxTurns,
-      },
-    };
+    final payload = _basePayload(
+      text: (userText ?? '').trim(),
+      locale: locale,
+      tz: tz,
+      session: session,
+      intent: 'talk',
+      messages: history ?? const [],
+    );
 
     try {
-      final json = await _http!('/reflect', payload).timeout(_timeout);
+      final json = await _postMaybe('/reflect', payload, saveSource: 'reflect');
+      if (json == null) throw Exception('no json');
       return _turnFromReflectJson(json, session);
     } catch (_) {
+      // Sanfter Offline-Fallback (Out blockiert nie)
       return ReflectionTurn(
         outputText: '',
         mirror: null,
         context: const [],
         followups: const [],
         answerHelpers: const [],
+        helperSuggestion: null,
         flow: const ReflectionFlow(
           recommendEnd: false,
           suggestBreak: false,
@@ -483,6 +498,7 @@ class ApiService {
         context: const [],
         followups: const [],
         answerHelpers: const [],
+        helperSuggestion: null,
         flow: const ReflectionFlow(recommendEnd: false, suggestBreak: false),
         session: session,
         tags: const [],
@@ -525,11 +541,17 @@ class ApiService {
       if (streak != null) 'streak': streak,
       'mode': mode,
     };
+    _appendMemoryHints(payload);
+    _appendContactTints(payload, locale: 'de', tz: 'Europe/Zurich');
+    _appendByteContext(payload);
 
     try {
-      final json = await _http!('/reflect_full', payload).timeout(_timeout);
+      final json =
+          await _postMaybe('/reflect_full', payload, saveSource: 'reflect_full');
+      if (json == null) throw Exception('no json');
 
-      final qsList = _parseStringList(json['questions'] ?? json['qs'] ?? json['multi_questions']);
+      final qsList = _parseStringList(
+          json['questions'] ?? json['qs'] ?? json['multi_questions']);
       final joined = _normalizeQuestions(qsList);
 
       final rawPrimary = _extractPrimary(json).trim();
@@ -578,16 +600,19 @@ class ApiService {
 
     // Robust extrahieren: letzte User-Nachricht oder sonst letzte Nachricht
     String userText = '';
-    final lastUser = messages.lastWhereOrNull((m) => (m['role'] ?? '') == 'user');
+    final lastUser =
+        messages.lastWhereOrNull((m) => (m['role'] ?? '') == 'user');
     if (lastUser != null && (lastUser['content'] ?? '').trim().isNotEmpty) {
       userText = lastUser['content']!.trim();
-    } else if (messages.isNotEmpty && (messages.last['content'] ?? '').trim().isNotEmpty) {
+    } else if (messages.isNotEmpty &&
+        (messages.last['content'] ?? '').trim().isNotEmpty) {
       userText = messages.last['content']!.trim();
     }
 
     final turn = await _reflectStep(
       text: userText,
-      session: ReflectionSession(threadId: _uuid.v4(), turnIndex: 0, maxTurns: 3),
+      session:
+          ReflectionSession(threadId: _uuid.v4(), turnIndex: 0, maxTurns: 3),
       locale: 'de',
       tz: 'Europe/Zurich',
       history: messages,
@@ -615,13 +640,16 @@ class ApiService {
   }) async {
     if (useServerIfAvailable && _http != null) {
       try {
-        await _http!('/mood', {
+        final payload = {
           'entry_id': entryId,
           'mood': {
             'icon': icon,
-            if (note != null && note.trim().isNotEmpty) 'note': note
+            if (note != null && note.trim().isNotEmpty) 'note': note,
           },
-        });
+        };
+        _appendContactTints(payload, locale: 'de', tz: 'Europe/Zurich');
+        _appendByteContext(payload);
+        await _postMaybe('/mood', payload);
       } catch (_) {/* ignore */}
     }
     return const MoodResponse(saved: true);
@@ -636,7 +664,8 @@ class ApiService {
       const bases = [500, 1500, 3000];
       for (int i = 0; i < bases.length; i++) {
         try {
-          final nowDate = DateTime.now().toUtc().toIso8601String().split('T').first;
+          final nowDate =
+              DateTime.now().toUtc().toIso8601String().split('T').first;
           final mergedText = (topics != null && topics.isNotEmpty)
               ? topics.join(' · ')
               : (entryIds.isNotEmpty
@@ -645,13 +674,23 @@ class ApiService {
 
           final payload = <String, dynamic>{
             'entries': [
-              {'date': nowDate, 'text': mergedText, 'mood': null, 'tags': const <String>[]}
+              {
+                'date': nowDate,
+                'text': mergedText,
+                'mood': null,
+                'tags': const <String>[]
+              }
             ],
             'locale': 'de',
             'tz': 'Europe/Zurich',
           };
+          _appendContactTints(payload, locale: 'de', tz: 'Europe/Zurich');
+          _appendByteContext(payload);
 
-          final json = await _http!('/story', payload).timeout(_timeout);
+          final json = await _postMaybe('/story', payload, saveSource: 'story')
+              .timeout(_timeout);
+          if (json == null) throw Exception('no json');
+
           final title = (json['title'] ?? 'Kurzgeschichte').toString();
           final body = (json['story'] ?? '').toString();
           if (body.trim().isEmpty) throw Exception('Leere Story erhalten');
@@ -691,13 +730,23 @@ class ApiService {
               .map((e) {
                 final red = _redactPII(e.text);
                 final int end = red.length > 800 ? 800 : red.length;
-                return {'date': e.dateIso, 'mood': e.moodLabel ?? '', 'text': red.substring(0, end)};
+                return {
+                  'date': e.dateIso,
+                  'mood': e.moodLabel ?? '',
+                  'text': red.substring(0, end)
+                };
               })
               .toList(growable: false),
           'horizon': horizon,
         };
+        _appendContactTints(payload, locale: 'de', tz: 'Europe/Zurich');
+        _appendByteContext(payload);
 
-        final json = await _http!('/journey', payload).timeout(_timeout);
+        final json =
+            await _postMaybe('/journey', payload, saveSource: 'journey')
+                .timeout(_timeout);
+        if (json == null) throw Exception('no json');
+
         final insightsDyn = (json['insights'] as List?) ?? const [];
         final question = (json['question'] ?? '').toString();
 
@@ -712,7 +761,9 @@ class ApiService {
 
         return JourneyInsights(
           insights: insights.isEmpty ? <String>[question] : insights,
-          question: question.isNotEmpty ? question : (insights.isNotEmpty ? insights.first : loadingHint),
+          question: question.isNotEmpty
+              ? question
+              : (insights.isNotEmpty ? insights.first : loadingHint),
         );
       } catch (_) {/* fallback unten */}
     }
@@ -726,7 +777,8 @@ class ApiService {
   // =======================================================================
   //  Lokal-Heuristiken / Utils
   // =======================================================================
-  Future<StructuredThoughtResult> structureThoughts(String input, {bool useServerIfAvailable = true}) async {
+  Future<StructuredThoughtResult> structureThoughts(String input,
+      {bool useServerIfAvailable = true}) async {
     final raw = input.trim();
     await _delay(minMs: 220, maxMs: 360);
     final sanitized = _redactPII(raw);
@@ -750,28 +802,36 @@ class ApiService {
     );
   }
 
-  Future<Question> fetchGuidingQuestion({String? contextText, bool followUp = false}) async {
+  Future<Question> fetchGuidingQuestion(
+      {String? contextText, bool followUp = false}) async {
     final ctx = (contextText ?? '').trim();
 
     if (_http != null) {
       try {
-        final json = await _http!('/reflect_full', {
+        final payload = {
           'text': ctx.isEmpty ? 'kurze Reflexion' : ctx,
           'locale': 'de',
           'tz': 'Europe/Zurich',
           'session': {'id': _uuid.v4(), 'turn': 0, 'max_turns': 1},
-        }).timeout(_timeout);
+        };
+        _appendContactTints(payload, locale: 'de', tz: 'Europe/Zurich');
+        _appendByteContext(payload);
 
-        final primary = _extractPrimary(json).trim();
-        if (primary.isNotEmpty) {
-          final now = DateTime.now().toUtc();
-          final qText = primary.endsWith('?') ? primary : '$primary?';
-          return Question(
-            id: 'q_${now.millisecondsSinceEpoch}_${qText.hashCode}',
-            text: qText,
-            isFollowUp: followUp,
-            createdAt: now,
-          );
+        final json = await _postMaybe('/reflect_full', payload, saveSource: 'reflect_full')
+            .timeout(_timeout);
+
+        if (json != null) {
+          final primary = _extractPrimary(json).trim();
+          if (primary.isNotEmpty) {
+            final now = DateTime.now().toUtc();
+            final qText = primary.endsWith('?') ? primary : '$primary?';
+            return Question(
+              id: 'q_${now.millisecondsSinceEpoch}_${qText.hashCode}',
+              text: qText,
+              isFollowUp: followUp,
+              createdAt: now,
+            );
+          }
         }
       } catch (_) {/* offline fallback */}
     }
@@ -855,10 +915,16 @@ class ApiService {
   String? detectEmotionSync(String text) {
     final t = text.toLowerCase();
     if (_any(t, ['wut', 'zorn', 'ärger', 'sauer', 'genervt'])) return 'wütend';
-    if (_any(t, ['traurig', 'trauer', 'leer', 'niedergeschlagen', 'weinen'])) return 'traurig';
-    if (_any(t, ['stress', 'gestresst', 'nervös', 'überforder', 'panik'])) return 'gestresst';
+    if (_any(t, ['traurig', 'trauer', 'leer', 'niedergeschlagen', 'weinen'])) {
+      return 'traurig';
+    }
+    if (_any(t, ['stress', 'gestresst', 'nervös', 'überforder', 'panik'])) {
+      return 'gestresst';
+    }
     if (_any(t, ['ruhig', 'entspannt', 'gelassen', 'friedlich'])) return 'ruhig';
-    if (_any(t, ['glücklich', 'freu', 'dankbar', 'zufrieden', 'stolz'])) return 'glücklich';
+    if (_any(t, ['glücklich', 'freu', 'dankbar', 'zufrieden', 'stolz'])) {
+      return 'glücklich';
+    }
     return null;
   }
 
@@ -871,7 +937,9 @@ class ApiService {
     if (_any(t, ['angst', 'sorge', 'panik'])) score -= 1;
 
     if (_any(t, ['ruhig', 'entspannt', 'gelassen'])) score += 1;
-    if (_any(t, ['glücklich', 'freu', 'dankbar', 'zufrieden', 'stolz'])) score += 2;
+    if (_any(t, ['glücklich', 'freu', 'dankbar', 'zufrieden', 'stolz'])) {
+      score += 2;
+    }
 
     return score.clamp(0, 4);
   }
@@ -892,7 +960,8 @@ class ApiService {
   String _personalize(String q, String? ctx) {
     final raw = (ctx ?? '').trim();
     if (raw.isEmpty) return q;
-    final firstLine = raw.split('\n').firstWhereOrNull((e) => e.trim().isNotEmpty) ?? raw;
+    final firstLine =
+        raw.split('\n').firstWhereOrNull((e) => e.trim().isNotEmpty) ?? raw;
     final sanitized = _redactPII(firstLine.trim());
     if (sanitized.isEmpty) return q;
     final hint = _neatEllipsis(sanitized, 90);
@@ -902,7 +971,8 @@ class ApiService {
 
   String _redactPII(String input) {
     var s = input;
-    final email = RegExp(r'[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}', caseSensitive: false);
+    final email = RegExp(r'[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}',
+        caseSensitive: false);
     s = s.replaceAll(email, '[E-Mail]');
     final phone = RegExp(r'(\+?\d[\d\s\-\(\)]{6,}\d)');
     s = s.replaceAll(phone, '[Telefon]');
@@ -943,10 +1013,18 @@ class ApiService {
   String _pickLever(String text) {
     final t = text.toLowerCase();
     if (_any(t, const ['gedanke', 'glaubens', 'sollte', 'muss'])) return 'Gedanken';
-    if (_any(t, const ['gefüh', 'angst', 'wut', 'traur', 'überforder'])) return 'Gefühle';
-    if (_any(t, const ['körper', 'schlaf', 'angespannt', 'atem', 'müde'])) return 'Körper';
-    if (_any(t, const ['aufschieb', 'scroll', 'reaktion', 'streit', 'vermeid'])) return 'Verhalten';
-    if (_any(t, const ['arbeit', 'chef', 'famil', 'uni', 'termin', 'druck'])) return 'Kontext';
+    if (_any(t, const ['gefüh', 'angst', 'wut', 'traur', 'überforder'])) {
+      return 'Gefühle';
+    }
+    if (_any(t, const ['körper', 'schlaf', 'angespannt', 'atem', 'müde'])) {
+      return 'Körper';
+    }
+    if (_any(t, const ['aufschieb', 'scroll', 'reaktion', 'streit', 'vermeid'])) {
+      return 'Verhalten';
+    }
+    if (_any(t, const ['arbeit', 'chef', 'famil', 'uni', 'termin', 'druck'])) {
+      return 'Kontext';
+    }
     return 'Gedanken';
   }
 
@@ -980,11 +1058,26 @@ class ApiService {
       if (s.contains('?')) score += 2;
       if (s.contains('!')) score += 1;
       final t = s.toLowerCase();
-      if (lever == 'Gedanken' && _any(t, const ['sollte', 'muss', 'immer', 'nie'])) score += 2;
-      if (lever == 'Gefühle' && _any(t, const ['fühl', 'angst', 'wut', 'traur'])) score += 2;
-      if (lever == 'Körper' && _any(t, const ['körper', 'müde', 'schlaf', 'atem'])) score += 2;
-      if (lever == 'Verhalten' && _any(t, const ['aufschieb', 'start', 'beginnen', 'klein'])) score += 2;
-      if (lever == 'Kontext' && _any(t, const ['arbeit', 'termin', 'chef', 'famil'])) score += 2;
+      if (lever == 'Gedanken' &&
+          _any(t, const ['sollte', 'muss', 'immer', 'nie'])) {
+        score += 2;
+      }
+      if (lever == 'Gefühle' &&
+          _any(t, const ['fühl', 'angst', 'wut', 'traur'])) {
+        score += 2;
+      }
+      if (lever == 'Körper' &&
+          _any(t, const ['körper', 'müde', 'schlaf', 'atem'])) {
+        score += 2;
+      }
+      if (lever == 'Verhalten' &&
+          _any(t, const ['aufschieb', 'start', 'beginnen', 'klein'])) {
+        score += 2;
+      }
+      if (lever == 'Kontext' &&
+          _any(t, const ['arbeit', 'termin', 'chef', 'famil'])) {
+        score += 2;
+      }
       return score;
     }
     bullets.sort((a, b) => scoreOf(b).compareTo(scoreOf(a)));
@@ -1016,15 +1109,18 @@ class ApiService {
   }
 
   // ---------------- Reflect-Parsing ----------------
-  ReflectionTurn _turnFromReflectAny(Map<String, dynamic> any, ReflectionSession session) {
-    if (any.length == 1 && (any.containsKey('output_text') || any.containsKey('raw'))) {
+  ReflectionTurn _turnFromReflectAny(
+      Map<String, dynamic> any, ReflectionSession session) {
+    if (any.length == 1 &&
+        (any.containsKey('output_text') || any.containsKey('raw'))) {
       final text = (any['output_text'] ?? any['raw'] ?? '').toString();
       return ReflectionTurn(
-        outputText: text.trim().isEmpty ? errorHint : text.trim(),
+        outputText: text.trim().isNotEmpty ? text.trim() : errorHint,
         mirror: null,
         context: const [],
         followups: const [],
         answerHelpers: const [],
+        helperSuggestion: null,
         flow: const ReflectionFlow(recommendEnd: false, suggestBreak: false),
         session: session,
         tags: const [],
@@ -1035,8 +1131,10 @@ class ApiService {
     return _turnFromReflectJson(any, session);
   }
 
-  ReflectionTurn _turnFromReflectJson(Map<String, dynamic> json, ReflectionSession session) {
-    final questionsList = _parseStringList(json['questions'] ?? json['multi_questions'] ?? json['qs']);
+  ReflectionTurn _turnFromReflectJson(
+      Map<String, dynamic> json, ReflectionSession session) {
+    final questionsList = _parseStringList(
+        json['questions'] ?? json['multi_questions'] ?? json['qs']);
     final altList = _parseStringList(
       json['alt'] ??
           json['alt_question'] ??
@@ -1057,7 +1155,8 @@ class ApiService {
         ? _ensureQuestion(allQs.first)
         : (primaryRaw.isNotEmpty ? _ensureQuestion(primaryRaw) : '');
 
-    final mirrorRaw = (json['mirror'] ?? json['empathy'] ?? '').toString().trim();
+    final mirrorRaw =
+        (json['mirror'] ?? json['empathy'] ?? '').toString().trim();
     final String? mirror = mirrorRaw.isEmpty ? null : mirrorRaw;
 
     final ctxDyn = (json['context'] as List?) ??
@@ -1077,7 +1176,10 @@ class ApiService {
     final followups = _parseStringList(json['followups']);
 
     final talkDyn = (json['talk'] as List?) ?? const [];
-    final talk = talkDyn.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList(growable: true);
+    final talk = talkDyn
+        .map((e) => e.toString().trim())
+        .where((e) => e.isNotEmpty)
+        .toList(growable: true);
     final smalltalk = (json['smalltalk_reply'] ?? '').toString().trim();
     if (smalltalk.isNotEmpty && talk.length < 2) {
       talk.add(smalltalk);
@@ -1086,26 +1188,34 @@ class ApiService {
 
     final flowJson = (json['flow'] as Map?) ?? const {};
     final flow = ReflectionFlow(
-      recommendEnd: (flowJson['recommend_end'] == true) || (flowJson['end'] == true),
-      suggestBreak: (flowJson['suggest_break'] == true) || (flowJson['break'] == true),
+      recommendEnd:
+          (flowJson['recommend_end'] == true) || (flowJson['end'] == true),
+      suggestBreak:
+          (flowJson['suggest_break'] == true) || (flowJson['break'] == true),
       riskNotice: flowJson['risk_notice']?.toString(),
       sessionTurn: (flowJson['session_turn'] is num)
           ? (flowJson['session_turn'] as num).toInt()
           : session.turnIndex,
       talkOnly: flowJson['talk_only'] == true,
       allowReflect: flowJson['allow_reflect'] != false,
-      moodPrompt: flowJson['mood_prompt'] == true,
+      // PATCH: Mood-Prompt robust auch bei recommend_end / end
+      moodPrompt: (flowJson['mood_prompt'] == true) ||
+          (flowJson['recommend_end'] == true) ||
+          (flowJson['end'] == true),
     );
 
     final sJson = (json['session'] as Map?) ?? const {};
     final s = session.copyWith(
-      threadId: (sJson['id'] ?? sJson['thread_id'] ?? session.threadId).toString(),
+      threadId: (sJson['id'] ?? sJson['thread_id'] ?? session.threadId)
+          .toString(),
       turnIndex: (sJson['turn'] is num)
           ? (sJson['turn'] as num).toInt()
           : (sJson['turn_index'] is num)
               ? (sJson['turn_index'] as num).toInt()
               : session.turnIndex,
-      maxTurns: (sJson['max_turns'] is num) ? (sJson['max_turns'] as num).toInt() : session.maxTurns,
+      maxTurns: (sJson['max_turns'] is num)
+          ? (sJson['max_turns'] as num).toInt()
+          : session.maxTurns,
     );
 
     final schoolsDyn = (json['schools'] as List?) ??
@@ -1116,23 +1226,33 @@ class ApiService {
     final workerTags = _parseStringList(json['tags']);
     final tags = _dedupeStrings([...workerTags, ...normalizedSchools]);
 
-    final riskLevelRoot =
-        (json['risk_level'] ?? json['risk_flag'] ?? json['risk'] ?? 'none').toString().trim().toLowerCase();
+    final riskLevelRoot = (json['risk_level'] ??
+            json['risk_flag'] ??
+            json['risk'] ??
+            'none')
+        .toString()
+        .trim()
+        .toLowerCase();
     final riskFlag = (riskLevelRoot == 'high' || riskLevelRoot == 'crisis')
         ? 'crisis'
         : (riskLevelRoot == 'mild' ? 'support' : 'none');
+
+    // ---- helperSuggestion (robust, mehrere Pfade) ---------------------------
+    final helperSuggestion = _extractHelperSuggestion(json);
 
     return ReflectionTurn(
       outputText: outputText,
       mirror: mirror,
       context: ctx,
       followups: followups,
-      answerHelpers: helpers, // <- WICHTIG: echte Worker-Chips nach außen geben
+      answerHelpers: helpers, // ← Worker-Chips bleiben erhalten
+      helperSuggestion: helperSuggestion, // ← NEU
       flow: flow,
       session: s,
       tags: tags,
       riskFlag: riskFlag,
-      questions: allQs.isNotEmpty ? [firstQuestion, ...allQs.skip(1)] : const [],
+      questions:
+          allQs.isNotEmpty ? [firstQuestion, ...allQs.skip(1)] : const [],
       talk: talkLimited,
     );
   }
@@ -1177,19 +1297,54 @@ class ApiService {
     return _dedupeStrings(cleaned).take(3).toList(growable: false);
   }
 
+  // Liest helperSuggestion aus üblichen Feldern (Top-Level, flow, ui)
+  String? _extractHelperSuggestion(Map<String, dynamic> json) {
+    String pick(dynamic v) {
+      if (v == null) return '';
+      final s = v.toString().trim();
+      return s.isNotEmpty ? s : '';
+    }
+
+    final flow = (json['flow'] as Map?) ?? const {};
+    final ui = (json['ui'] as Map?) ?? const {};
+
+    final candidates = <String>[
+      pick(json['helper_suggestion']),
+      pick(json['helperSuggestion']),
+      pick(flow['helper_suggestion']),
+      pick(flow['helperSuggestion']),
+      pick(ui['helper_suggestion']),
+      pick(ui['helperSuggestion']),
+    ].where((s) => s.isNotEmpty).toList(growable: false);
+
+    if (candidates.isEmpty) return null;
+    // Sanft doppelte Punkte / Leerzeichen bereinigen
+    final raw = candidates.first;
+    final cleaned = raw
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .replaceAll(RegExp(r'\s*\.\s*\.\s*$'), '.')
+        .trim();
+    return cleaned.isEmpty ? null : cleaned;
+  }
+
   static String _extractPrimary(Map<String, dynamic> json) {
     final fromChoices = _contentFromChoices(json['choices']);
     final candidates = <String>[
       if (json['primary'] != null) json['primary'].toString(),
-      if (json['primary_question'] != null) json['primary_question'].toString(),
+      if (json['primary_question'] != null)
+        json['primary_question'].toString(),
       if (json['lead'] != null) json['lead'].toString(),
       if (json['lead_question'] != null) json['lead_question'].toString(),
       if (json['output_text'] != null) json['output_text'].toString(),
       if (json['question'] != null) json['question'].toString(),
-      if (fromChoices != null && fromChoices.trim().isNotEmpty) fromChoices.trim(),
+      if (fromChoices != null && fromChoices.trim().isNotEmpty)
+        fromChoices.trim(),
       if (json['content'] != null) json['content'].toString(),
       if (json['raw'] != null) json['raw'].toString(),
-    ].map((s) => s.trim()).where((s) => s.isNotEmpty).toList(growable: false);
+    ]
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList(growable: false);
 
     if (candidates.isEmpty) return '';
     final first = candidates.first;
@@ -1217,7 +1372,6 @@ class ApiService {
   static List<String> _parseStringList(dynamic v) {
     if (v == null) return const <String>[];
     if (v is List) {
-      // Nulls explizit filtern → kein dead_null_aware_expression
       final nonNull = v.where((e) => e != null).map((e) => e.toString());
       return nonNull
           .map((s) => s.trim())
@@ -1327,13 +1481,17 @@ class ApiService {
         out.add('Systemisch');
       } else if (k.contains('dynam')) {
         out.add('Psychodynamisch');
-      } else if (k.contains('human') || k.contains('client') || k.contains('person')) {
+      } else if (k.contains('human') ||
+          k.contains('client') ||
+          k.contains('person')) {
         out.add('Humanistisch');
       } else if (k.contains('solution')) {
         out.add('Lösungsfokussiert');
       } else if (k.contains('motiv')) {
         out.add('Motivational Interviewing');
-      } else if (k.contains('mindful') || k.contains('achtsam') || k.contains('mbct')) {
+      } else if (k.contains('mindful') ||
+          k.contains('achtsam') ||
+          k.contains('mbct')) {
         out.add('Achtsamkeit');
       } else {
         out.add(_neatEllipsis(s, 40));
@@ -1346,7 +1504,8 @@ class ApiService {
 
   String _estimateDepth(List<Map<String, String>> messages) {
     // sehr simple Heuristik: Länge der letzten User-Nachricht
-    final lastUser = messages.lastWhereOrNull((m) => (m['role'] ?? '') == 'user');
+    final lastUser =
+        messages.lastWhereOrNull((m) => (m['role'] ?? '') == 'user');
     final txt = (lastUser?['content'] ?? '').trim();
     final len = txt.length;
     if (len >= 320) return 'deep';
@@ -1389,6 +1548,165 @@ class ApiService {
         ];
     }
   }
+
+  // ---------------- Memory Helpers (Backend-only) ----------------
+
+  void _memorySave(Map<String, dynamic> json, String source) {
+    try {
+      unawaited(MemoryService.instance.saveFromWorker(json, source: source));
+    } catch (_) {
+      // Memory darf niemals die Hauptlogik stören
+    }
+  }
+
+  void _appendMemoryHints(Map<String, dynamic> payload) {
+    // Best-effort: falls MemoryService Hints liefern kann, mitschicken.
+    try {
+      final hint = MemoryService.instance.buildContextHint(
+        maxFacets: 3,
+        maxTags: 5,
+        maxAgeDays: 14,
+      );
+      if (hint != null) {
+        payload['context_hint'] = {
+          if (hint.facets != null) 'recent_facets': hint.facets,
+          if (hint.tags != null) 'recent_tags': hint.tags,
+          if (hint.topics != null) 'last_themes': hint.topics,
+        };
+      }
+    } catch (_) {
+      // still: keine Abhängigkeit für Build
+    }
+  }
+
+  void _appendContactTints(Map<String, dynamic> payload,
+      {required String locale, required String tz}) {
+    payload['contact_tins'] = {
+      'brand': _brand,
+      'channel': _channel,
+      'samfring': _samfring,
+      'locale': locale,
+      'tz': tz,
+    };
+  }
+
+  // Byte-Kontext (falls MemoryService das anbietet) → Base64, ohne await.
+  void _appendByteContext(Map<String, dynamic> payload, {int maxBytes = 2048}) {
+    try {
+      // dynamic, damit das Projekt kompiliert selbst wenn es diese API noch nicht hat.
+      // ignore: unused_local_variable
+      final mem = MemoryService.instance;
+      dynamic dyn = mem;
+      List<int>? bytes;
+      try {
+        // bevorzugte Namen:
+        // ignore: avoid_dynamic_calls
+        bytes = dyn.tryGetByteContext?.call(maxBytes);
+      } catch (_) {}
+      try {
+        bytes ??= // ignore: avoid_dynamic_calls
+            dyn.exportByteContext?.call(maxBytes);
+      } catch (_) {}
+      try {
+        bytes ??= // ignore: avoid_dynamic_calls
+            dyn.byteContext?.call(maxBytes);
+      } catch (_) {}
+
+      if (bytes is List<int> && bytes.isNotEmpty) {
+        final capped = bytes.length > maxBytes ? bytes.sublist(0, maxBytes) : bytes;
+        payload['context_bytes_b64'] = base64Encode(capped);
+      }
+    } catch (_) {
+      // niemals blockieren
+    }
+  }
+
+  // ========================== INTERNES DRY-UTILITY ===========================
+
+  Map<String, dynamic> _buildSessionMap(ReflectionSession s) => {
+        'id': s.threadId,
+        'turn': s.turnIndex,
+        'max_turns': s.maxTurns,
+      };
+
+  Map<String, dynamic> _basePayload({
+    required String text,
+    required String locale,
+    required String tz,
+    required ReflectionSession session,
+    List<Map<String, String>> messages = const [],
+    String? intent,
+  }) {
+    final payload = <String, dynamic>{
+      'text': text,
+      'messages': messages,
+      'locale': locale,
+      'tz': tz,
+      'session': _buildSessionMap(session),
+      if (intent != null) 'intent': intent,
+    };
+    _appendMemoryHints(payload);
+    _appendContactTints(payload, locale: locale, tz: tz);
+    _appendByteContext(payload);
+    return payload;
+  }
+
+  /// Postet JSON; speichert Memory-Hook, wenn erfolgreich.
+  Future<Map<String, dynamic>?> _postMaybe(
+    String path,
+    Map<String, dynamic> payload, {
+    String? saveSource,
+  }) async {
+    if (_http == null) return null;
+
+    // kleiner Start-Blocker direkt hier (falls nicht über Worker-Invoker gelaufen)
+    if (!_outGateOpen && !_isHealthPath(path)) {
+      final jitter = 90 + _rand.nextInt(90);
+      await Future.delayed(Duration(milliseconds: jitter));
+    }
+
+    try {
+      final json = await _http!(path, payload).timeout(_timeout);
+      if (saveSource != null) _memorySave(json, saveSource);
+      return json;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Einheitlicher Retry mit sanftem Backoff.
+  Future<Map<String, dynamic>?> _tryEndpoints({
+    required List<String> endpoints,
+    required Map<String, dynamic> payload,
+  }) async {
+    const bases = [420, 900, 1800];
+    for (int i = 0; i < endpoints.length; i++) {
+      final path = endpoints[i];
+      final json = await _postMaybe(path, payload, saveSource: path.replaceFirst('/', ''));
+      if (json != null) return json;
+
+      // Wenn aktueller Endpoint failt, ggf. Backoff vor *nächster* Variante
+      if (i < endpoints.length - 1) {
+        final jitter = _rand.nextInt(180);
+        await Future.delayed(Duration(milliseconds: bases[i.clamp(0, bases.length - 1)] + jitter));
+      }
+    }
+    return null;
+  }
+
+  Map<String, dynamic> _closureFallback(ReflectionSession? session) => <String, dynamic>{
+        'closure': {
+          'mood_intro': {'text': ''},
+        },
+        'flow': {
+          'recommend_end': true,
+          'talk_only': false,
+          'allow_reflect': true,
+          'suggest_break': false,
+          'mood_prompt': true,
+        },
+        if (session != null) 'session': _buildSessionMap(session),
+      };
 }
 
 // ---------------- Kompat-Struktur nur für aiReflect() ----------------
