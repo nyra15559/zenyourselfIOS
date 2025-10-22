@@ -44,3 +44,17 @@ flutter/
 
 ios_distribution_private_key
 ios_distribution_private_key.pub
+
+# --- Flutter/Android/iOS lokal ---
+/build/
+/.dart_tool/
+/.flutter-plugins-dependencies
+/android/.gradle/
+/android/local.properties
+/ios/Pods/
+/flutter/
+/*.jks
+/android/key.properties
+**/google-services.json
+**/GoogleService-Info.plist
+.env
