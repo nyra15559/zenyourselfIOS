@@ -1,35 +1,29 @@
 // lib/shared/zen_style.dart
 //
 // ZenYourself — Oxford-Zen Design System (Tokens · Themes · Backdrop · Glass)
-// v8.2 — 2025-10-16 · Deprecation-clean (withValues), SafeAssets, ZenAppBar compat
+// v8.3 — 2025-10-16 · Calm Styles + Panda Type + Charts + Send Tokens (withValue)
 // -----------------------------------------------------------------------------
-// • Keine Breaking Changes: gleiche öffentlichen Klassen/Signaturen.
-// • Deprecation-Fix: überall .withValues(alpha: x) statt .withOpacity(x).
-// • Safe-Assets: _SafeAssetImage rendert still, wenn Asset fehlt (kein Crash).
-// • ZenAppBar-Wrapper: behebt "hidden name 'ZenAppBar'"-Importwarnungen.
-// • Vollständiges M3-Theme (AA-kontrastsicher), warmes Dark-Theme.
-// • NEU: questionStyle/mirrorStyle/answerStyle für Reflection-UI.
+// • Kompatibler Alpha-Helper: .withValue(alpha: x) (singular) — Projekt-Standard
+// • Panda-Typografie (Header/Caption) für Panda-UI
+// • Bridge-/Hope-Styles für Reflection (ruhig, konsistent)
+// • Chart-Farbverläufe/-Farben (calm defaults)
+// • Radii/Spacing ergänzt (r14/r18), keine Breaking Changes
+// • Ruhige Farben/Alphas in Themes & Glass-Primitives
+// • Send-Unterstütz-Style-Daten (Counter/Mic/Send/Pulse)
 
 import 'dart:ui' as ui show ImageFilter;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 
 // ==========================================================================
-// COMPAT — einheitlich `withValues(alpha: …)` auf allen SDKs
+// COMPAT — einheitlich `withValue(alpha: …)` auf allen SDKs
 // ==========================================================================
 extension ZenColorCompat on Color {
   /// Setzt nur den Alpha-Kanal (0.0–1.0). RGB bleiben unverändert.
-  Color withValues({double? alpha}) {
+  Color withValue({double? alpha}) {
     if (alpha == null) return this;
     final a01 = alpha.clamp(0.0, 1.0);
-    // Robust gegenüber älteren/neuen Flutter-Versionen:
-    // nutze die stabilen Komponenten red/green/blue (0..255).
-    return Color.fromARGB(
-      (a01 * 255).round(),
-      red,
-      green,
-      blue,
-    );
+    return Color.fromARGB((a01 * 255).round(), red, green, blue);
   }
 }
 
@@ -72,7 +66,7 @@ class ZenAppBar extends StatelessWidget implements PreferredSizeWidget {
 }
 
 /// ==========================================================================
-/// COLORS — Oxford-Zen Palette (UI-Tokens)
+/// COLORS — Oxford-Zen Palette (UI-Tokens) · ruhige, warme Töne
 /// ==========================================================================
 class ZenColors {
   // Surfaces & Canvas
@@ -130,6 +124,10 @@ class ZenRadii {
   static const l   = Radius.circular(16);
   static const xl  = Radius.circular(20);
   static const xxl = Radius.circular(28);
+
+  // Ergänzungen (keine Breaking Changes)
+  static const r14 = Radius.circular(14);
+  static const r18 = Radius.circular(18);
 }
 
 class ZenSpacing {
@@ -148,6 +146,9 @@ class ZenSpacing {
   // Chips/Moods
   static const chipPadV = 6.0;
   static const chipPadH = 12.0;
+
+  // Ergänzung: enge Abstände (ruhige Verdichtung)
+  static const tight = 10.0;
 }
 
 class ZenShadows {
@@ -165,7 +166,7 @@ class ZenShadows {
 }
 
 /// ==========================================================================
-/// TYPOGRAPHY — Grundsystem
+/// TYPOGRAPHY — Grundsystem + Panda/Reflection
 /// ==========================================================================
 class ZenTypography {
   static const body = TextStyle(
@@ -197,7 +198,24 @@ class ZenTypography {
   );
 }
 
-/// Exporte für Reflection-UI (ruhig & konsistent)
+/// Panda-Typografie (für PandaHeader & verwandte Elemente)
+class ZenPandaType {
+  static final headerTitle = ZenTypography.display.copyWith(
+    fontSize: 30,
+    height: 34 / 30,
+    letterSpacing: 0.0,
+    color: ZenColors.inkStrong,
+  );
+
+  static final headerCaption = ZenTypography.body.copyWith(
+    fontSize: 14.5,
+    height: 1.36,
+    fontWeight: FontWeight.w600,
+    color: ZenColors.ink.withValue(alpha: .80),
+  );
+}
+
+/// Reflection-Text (ruhig & konsistent)
 class ZenReflectionText {
   static final questionStyle = ZenTypography.title.copyWith(
     fontStyle: FontStyle.normal,
@@ -208,7 +226,7 @@ class ZenReflectionText {
 
   static final mirrorStyle = ZenTypography.body.copyWith(
     fontWeight: FontWeight.w500,
-    color: ZenColors.ink.withValues(alpha: .87),
+    color: ZenColors.ink.withValue(alpha: .87),
     height: 1.35,
   );
 
@@ -216,6 +234,74 @@ class ZenReflectionText {
     fontWeight: FontWeight.w600,
     color: ZenColors.inkStrong,
     height: 1.35,
+  );
+}
+
+/// Bridge-/Hope-Styles (für BridgeBubble & Hope-Slot)
+class ZenBridgeText {
+  static final bridge = ZenTypography.body.copyWith(
+    height: 1.33,
+    fontWeight: FontWeight.w500,
+    color: ZenColors.ink.withValue(alpha: .87),
+  );
+}
+
+class ZenHopeText {
+  static final hope = ZenTypography.body.copyWith(
+    fontSize: 14.5,
+    height: 1.30,
+    fontWeight: FontWeight.w600,
+    color: ZenColors.ink.withValue(alpha: .87),
+  );
+}
+
+/// Ruhige Textfarben (kontextfrei, ohne BuildContext)
+class ZenQuiet {
+  static final textMuted   = ZenColors.ink.withValue(alpha: .65);
+  static final textFaint   = ZenColors.ink.withValue(alpha: .55);
+  static final textStrong  = ZenColors.inkStrong;
+  static final lineSoft    = ZenColors.outline.withValue(alpha: .75);
+}
+
+/// ==========================================================================
+/// CHARTS — ruhige Defaults (Linie + Area-Gradient, Grid/Fills)
+/// ==========================================================================
+class ZenCharts {
+  static final gridLine     = ZenColors.outline.withValue(alpha: .50);
+  static final axisLabel    = ZenColors.ink.withValue(alpha: .75);
+
+  // Primary Calm Line / Area
+  static final linePrimary  = ZenColors.jade.withValue(alpha: .95);
+  static final areaPrimary  = LinearGradient(
+    begin: Alignment.topCenter,
+    end: Alignment.bottomCenter,
+    colors: [
+      ZenColors.jade.withValue(alpha: .28),
+      ZenColors.jade.withValue(alpha: .04),
+      Colors.transparent,
+    ],
+    stops: const [0.0, 0.65, 1.0],
+  );
+
+  // Success / Risk Variants
+  static final lineSuccess  = ZenColors.success.withValue(alpha: .95);
+  static final areaSuccess  = LinearGradient(
+    begin: Alignment.topCenter,
+    end: Alignment.bottomCenter,
+    colors: [
+      ZenColors.success.withValue(alpha: .22),
+      Colors.transparent,
+    ],
+  );
+
+  static final lineRisk     = ZenColors.cherry.withValue(alpha: .95);
+  static final areaRisk     = LinearGradient(
+    begin: Alignment.topCenter,
+    end: Alignment.bottomCenter,
+    colors: [
+      ZenColors.cherry.withValue(alpha: .18),
+      Colors.transparent,
+    ],
   );
 }
 
@@ -349,7 +435,7 @@ ThemeData _buildTheme({required Brightness brightness}) {
     fillColor: isDark ? surfaceAltDark : ZenColors.surfaceAlt,
     contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
     hintStyle: TextStyle(
-      color: (isDark ? inkDark : ZenColors.ink).withValues(alpha: .55),
+      color: (isDark ? inkDark : ZenColors.ink).withValue(alpha: .55),
     ),
     border: const OutlineInputBorder(
       borderRadius: BorderRadius.all(ZenRadii.l),
@@ -368,7 +454,7 @@ ThemeData _buildTheme({required Brightness brightness}) {
   // Chips
   final chip = ChipThemeData(
     backgroundColor: isDark ? surfaceAltDark : ZenColors.surfaceAlt,
-    selectedColor: ZenColors.jade.withValues(alpha: .18),
+    selectedColor: ZenColors.jade.withValue(alpha: .18),
     labelStyle: TextStyle(color: isDark ? inkDark : ZenColors.ink),
     side: BorderSide(color: isDark ? borderDark : ZenColors.border),
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -384,7 +470,7 @@ ThemeData _buildTheme({required Brightness brightness}) {
     iconColor: isDark ? inkDark : ZenColors.ink,
     textColor: isDark ? inkDark : ZenColors.ink,
     contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-    tileColor: (isDark ? surfaceAltDark : ZenColors.surface).withValues(alpha: .6),
+    tileColor: (isDark ? surfaceAltDark : ZenColors.surface).withValue(alpha: .6),
   );
 
   // Tabs
@@ -417,7 +503,7 @@ ThemeData _buildTheme({required Brightness brightness}) {
     radius: const Radius.circular(6),
     thumbVisibility: const WidgetStatePropertyAll(false),
     thumbColor: WidgetStatePropertyAll(
-      (isDark ? ZenColors.jade : ZenColors.ink).withValues(alpha: .25),
+      (isDark ? ZenColors.jade : ZenColors.ink).withValue(alpha: .25),
     ),
   );
 
@@ -425,9 +511,9 @@ ThemeData _buildTheme({required Brightness brightness}) {
   final switchTheme = SwitchThemeData(
     trackColor: WidgetStateProperty.resolveWith((s) {
       if (s.contains(WidgetState.selected)) {
-        return ZenColors.jade.withValues(alpha: .45);
+        return ZenColors.jade.withValue(alpha: .45);
       }
-      return (isDark ? outlineDark : ZenColors.outline).withValues(alpha: .6);
+      return (isDark ? outlineDark : ZenColors.outline).withValue(alpha: .6);
     }),
     thumbColor: WidgetStateProperty.resolveWith((s) {
       if (s.contains(WidgetState.selected)) return ZenColors.jade;
@@ -462,7 +548,7 @@ ThemeData _buildTheme({required Brightness brightness}) {
   final bottomSheet = BottomSheetThemeData(
     backgroundColor: Colors.transparent,
     surfaceTintColor: Colors.transparent,
-    modalBackgroundColor: (isDark ? surfaceAltDark : ZenColors.surface).withValues(alpha: .92),
+    modalBackgroundColor: (isDark ? surfaceAltDark : ZenColors.surface).withValue(alpha: .92),
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: ZenRadii.xl),
     ),
@@ -470,11 +556,11 @@ ThemeData _buildTheme({required Brightness brightness}) {
 
   // Cards / Dividers
   final cardTheme = CardThemeData(
-    color: (isDark ? surfaceAltDark : ZenColors.surface).withValues(alpha: .88),
+    color: (isDark ? surfaceAltDark : ZenColors.surface).withValue(alpha: .88),
     elevation: 0,
     margin: const EdgeInsets.all(0),
     shape: const RoundedRectangleBorder(borderRadius: BorderRadius.all(ZenRadii.l)),
-    shadowColor: Colors.black.withValues(alpha: .08),
+    shadowColor: Colors.black.withValue(alpha: .08),
     surfaceTintColor: Colors.transparent,
   );
 
@@ -491,9 +577,9 @@ ThemeData _buildTheme({required Brightness brightness}) {
   );
 
   final bottomNavTheme = BottomNavigationBarThemeData(
-    backgroundColor: (isDark ? surfaceDark : ZenColors.surface).withValues(alpha: .92),
+    backgroundColor: (isDark ? surfaceDark : ZenColors.surface).withValue(alpha: .92),
     selectedItemColor: ZenColors.cta,
-    unselectedItemColor: (isDark ? inkDark : ZenColors.ink).withValues(alpha: .65),
+    unselectedItemColor: (isDark ? inkDark : ZenColors.ink).withValue(alpha: .65),
     showUnselectedLabels: false, type: BottomNavigationBarType.fixed, elevation: 0,
   );
 
@@ -590,9 +676,9 @@ class ZenOverlays {
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
               colors: [
-                Colors.black.withValues(alpha: strength),
+                Colors.black.withValue(alpha: strength),
                 Colors.transparent,
-                Colors.black.withValues(alpha: .08),
+                Colors.black.withValue(alpha: .08),
               ],
               stops: const [0, .28, 1],
             ),
@@ -610,7 +696,7 @@ class ZenOverlays {
       gradient: RadialGradient(
         center: Alignment(center.dx, center.dy),
         radius: .9,
-        colors: [ZenColors.goldenMist.withValues(alpha: opacity), Colors.transparent],
+        colors: [ZenColors.goldenMist.withValue(alpha: opacity), Colors.transparent],
         stops: const [.0, 1],
       ),
     );
@@ -736,7 +822,7 @@ class ZenBackdrop extends StatelessWidget {
         ImageFiltered(
           imageFilter: ui.ImageFilter.blur(sigmaX: 24, sigmaY: 24),
           child: ColorFiltered(
-            colorFilter: ColorFilter.mode(Colors.white.withValues(alpha: 0.05), BlendMode.srcATop),
+            colorFilter: ColorFilter.mode(Colors.white.withValue(alpha: 0.05), BlendMode.srcATop),
             child: _SafeAssetImage(
               path: asset, fit: BoxFit.cover, alignment: Alignment.center,
               filterQuality: FilterQuality.low,
@@ -760,7 +846,7 @@ class ZenBackdrop extends StatelessWidget {
               ),
       ),
 
-      if (wash > 0) IgnorePointer(child: Container(color: Colors.white.withValues(alpha: wash))),
+      if (wash > 0) IgnorePointer(child: Container(color: Colors.white.withValue(alpha: wash))),
 
       // Gold-Grün Glow
       IgnorePointer(child:
@@ -775,8 +861,8 @@ class ZenBackdrop extends StatelessWidget {
               gradient: LinearGradient(
                 begin: Alignment.topCenter, end: Alignment.bottomCenter,
                 colors: [
-                  ZenColors.white.withValues(alpha: hazeStrength * 1.0),
-                  ZenColors.surfaceAlt.withValues(alpha: hazeStrength * 0.75),
+                  ZenColors.white.withValue(alpha: hazeStrength * 1.0),
+                  ZenColors.surfaceAlt.withValue(alpha: hazeStrength * 0.75),
                   Colors.transparent,
                 ],
                 stops: const [0.0, 0.45, 1.0],
@@ -791,7 +877,7 @@ class ZenBackdrop extends StatelessWidget {
           decoration: BoxDecoration(
             gradient: RadialGradient(
               center: Alignment.center, radius: 1.15,
-              colors: [Colors.transparent, Colors.black.withValues(alpha: vignette)],
+              colors: [Colors.transparent, Colors.black.withValue(alpha: vignette)],
               stops: const [0.78, 1.0],
             ),
           ),
@@ -806,7 +892,7 @@ class ZenBackdrop extends StatelessWidget {
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.centerRight, end: Alignment.centerLeft,
-                  colors: [Colors.black.withValues(alpha: dimRightStrength), Colors.transparent],
+                  colors: [Colors.black.withValue(alpha: dimRightStrength), Colors.transparent],
                   stops: const [0.0, 0.22],
                 ),
               ),
@@ -922,7 +1008,7 @@ class _ContainArtwork extends StatelessWidget {
 
 /// ==========================================================================
 /// GLASS PRIMITIVES — generische Glas-Bausteine (UI-unabhängig)
-/// ==========================================================================
+// ==========================================================================
 class ZenGlassCard extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry? padding;
@@ -974,12 +1060,12 @@ class ZenGlassCard extends StatelessWidget {
               gradient: LinearGradient(
                 begin: Alignment.topCenter, end: Alignment.bottomCenter,
                 colors: [
-                  ZenColors.surface.withValues(alpha: resolvedTopOpacity),
-                  ZenColors.surface.withValues(alpha: resolvedBottomOpacity),
+                  ZenColors.surface.withValue(alpha: resolvedTopOpacity),
+                  ZenColors.surface.withValue(alpha: resolvedBottomOpacity),
                 ],
               ),
               borderRadius: borderRadius,
-              border: Border.all(color: Colors.white.withValues(alpha: borderOpacity), width: 1.0),
+              border: Border.all(color: Colors.white.withValue(alpha: borderOpacity), width: 1.0),
               boxShadow: const [
                 BoxShadow(
                   color: Color(0x14000000), blurRadius: 18, spreadRadius: 1.2, offset: Offset(0, 5),
@@ -1024,7 +1110,7 @@ class ZenGlassInput extends StatelessWidget {
               colors: [Color(0x26FFFFFF), Color(0x1AFFFFFF)],
             ),
             borderRadius: borderRadius,
-            border: Border.all(color: Colors.white.withValues(alpha: 0.16), width: 1.0),
+            border: Border.all(color: Colors.white.withValue(alpha: 0.16), width: 1.0),
             boxShadow: const [ZenShadows.glow],
           ),
           child: child,
@@ -1045,7 +1131,7 @@ class ZenDivider extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Divider(
-      height: height, thickness: 1, color: ZenColors.outline.withValues(alpha: opacity),
+      height: height, thickness: 1, color: ZenColors.outline.withValue(alpha: opacity),
     );
   }
 }
@@ -1065,9 +1151,9 @@ class ZenBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 8),
       decoration: BoxDecoration(
-        color: ZenColors.mist.withValues(alpha: .80),
+        color: ZenColors.mist.withValue(alpha: .80),
         borderRadius: const BorderRadius.all(ZenRadii.s),
-        border: Border.all(color: ZenColors.jadeMid.withValues(alpha: .18)),
+        border: Border.all(color: ZenColors.jadeMid.withValue(alpha: .18)),
         boxShadow: const [BoxShadow(color: Color(0x14000000), blurRadius: 8)],
       ),
       child: Row(
@@ -1111,8 +1197,43 @@ class ZenTextStyles {
 }
 
 /// ==========================================================================
-/// FORMAT — Datum/Zeit/Helfer (ohne intl-Abhängigkeit)
+/// SEND SUPPORT — Tokens/Styles für Input/Send (Plan 6.2.2)
+// ==========================================================================
+class ZenSendTokens {
+  static const inputSoftLimit = 420;
+
+  static final counter        = ZenColors.ink.withValue(alpha: .65);
+  static final counterOver    = Colors.redAccent.withValue(alpha: .85);
+
+  static final mic            = ZenColors.jade;
+  static final sendEnabled    = ZenColors.jade;
+  static final sendDisabled   = ZenColors.jade.withValue(alpha: .45);
+
+  static List<BoxShadow> micPulse(bool active) => active
+      ? [
+          const BoxShadow(
+            color: Color(0x1A000000),
+            blurRadius: 14,
+            offset: Offset(0, 4),
+          ),
+          BoxShadow(
+            color: ZenColors.jade.withValue(alpha: 0.30),
+            blurRadius: 22,
+            spreadRadius: 1.2,
+          ),
+        ]
+      : const [
+          BoxShadow(
+            color: Color(0x15000000),
+            blurRadius: 14,
+            offset: Offset(0, 6),
+          ),
+        ];
+}
+
 /// ==========================================================================
+/// FORMAT — Datum/Zeit/Helfer (ohne intl-Abhängigkeit)
+// ==========================================================================
 class ZenFormat {
   static String two(int n) => n.toString().padLeft(2, '0');
 

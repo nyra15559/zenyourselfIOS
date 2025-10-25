@@ -8,6 +8,20 @@
 // - Light Contact-Tints (Header + Payload), Samfring=optional
 // - Out-Soft-Gate: kleiner Start-Blocker; blockiert NIE Offline-Flows
 // - Parser & Offline-Heuristiken bleiben erhalten (kompatibel)
+// - v6.3.1:
+//     • reflectFull/nextTurnFull(..., memories, memoryConsent) → sendet
+//       context.memories{...} (snake_case) + memory_consent:true/false,
+//       tolerant gegen fehlende Memory-Typen (dynamic/toMap/toJson/Map)
+//     • nextTurnAction(session, action, ...) → eigener Endpoint mit Fallback
+//     • Legacy-Fallback: insight_score aus Top-Level/flow wird – falls keine
+//       TurnAnalysis vorhanden – in eine minimalistische TurnAnalysis übernommen.
+// - v6.3.2 (robustness):
+//     • Risk-Mapping akzeptiert zusätzlich Legacy 'level'
+//     • Flow: verschachteltes mood: { prompt: true } wird erkannt
+//     • Session-Felder aus Strings toleriert (turn/turn_index/max_turns)
+// - v6.3.3 (choices parsing):
+//     • _contentFromChoices versteht OpenAI- und Anthropic-Varianten (message.content
+//       als String ODER als Liste mit {type:"text", text:{value:"..."}})
 // -----------------------------------------------------------------------------
 
 import 'dart:async';
@@ -31,7 +45,9 @@ import '../guidance/dtos.dart'
         ReflectionTurn,
         StoryResult,
         StructuredThoughtResult,
-        IfEmptyX;
+        IfEmptyX,
+        UserAction,
+        TurnAnalysis; // NEU: für Legacy-Fallback von insight_score
 
 // ReflectionEntry & Co; hier VERMEIDEN wir den Typ Analysis aus diesem File:
 import '../../data/reflection_entry.dart' as re hide Analysis;
@@ -248,6 +264,8 @@ class ApiService {
     String tz = 'Europe/Zurich',
     int maxTurns = 3,
     List<Map<String, String>>? history,
+    UserAction? userAction,                        // v6.2.2 (optional)
+    Map<String, dynamic>? clientContext,           // v6.2.2 (optional)
   }) async {
     final input = (text ?? userText ?? '').trim();
     final session = ReflectionSession(
@@ -261,6 +279,8 @@ class ApiService {
       locale: locale,
       tz: tz,
       history: history ?? const [],
+      userAction: userAction,
+      clientContext: clientContext,
     );
   }
 
@@ -271,6 +291,11 @@ class ApiService {
     String tz = 'Europe/Zurich',
     int maxTurns = 3,
     List<Map<String, String>>? history,
+    // NEU (optional): explizite Memories + Consent
+    dynamic memories,
+    bool memoryConsent = false,
+    UserAction? userAction,                        // v6.2.2 (optional)
+    Map<String, dynamic>? clientContext,           // v6.2.2 (optional)
   }) async {
     final s = session ??
         ReflectionSession(
@@ -284,7 +309,46 @@ class ApiService {
       locale: locale,
       tz: tz,
       history: history ?? const [],
+      memories: memories,
+      memoryConsent: memoryConsent,
+      userAction: userAction,
+      clientContext: clientContext,
     );
+  }
+
+  /// NEU: Direkter Zugriff – schickt `context.memories{...}` + `memory_consent`.
+  Future<ReflectionTurn> reflectFull({
+    required String text,
+    required ReflectionSession session,
+    String locale = 'de',
+    String tz = 'Europe/Zurich',
+    List<Map<String, String>>? history,
+    dynamic memories,                  // akzeptiert Map | has toMap() | JSON-String
+    bool memoryConsent = false,
+    UserAction? userAction,
+    Map<String, dynamic>? clientContext,
+  }) async {
+    if (_http == null) return _errorTurn(session);
+
+    final payload = _basePayload(
+      text: text.trim(),
+      locale: locale,
+      tz: tz,
+      session: session,
+      messages: history ?? const [],
+      userAction: userAction,
+      clientContext: clientContext,
+    );
+
+    _attachMemories(payload, memories: memories, memoryConsent: memoryConsent);
+
+    final json = await _tryEndpoints(
+      endpoints: const ['/reflect_full', '/reflect'],
+      payload: payload,
+    );
+
+    if (json == null) return _errorTurn(session);
+    return _turnFromReflectAny(json, session);
   }
 
   Future<ReflectionTurn> continueSession({
@@ -294,6 +358,8 @@ class ApiService {
     String locale = 'de',
     String tz = 'Europe/Zurich',
     List<Map<String, String>>? history,
+    UserAction? userAction,                        // v6.2.2 (optional)
+    Map<String, dynamic>? clientContext,           // v6.2.2 (optional)
   }) async {
     final input = (text ?? userText ?? '').trim();
     final next = session.copyWith(turnIndex: session.turnIndex + 1);
@@ -303,6 +369,8 @@ class ApiService {
       locale: locale,
       tz: tz,
       history: history ?? const [],
+      userAction: userAction,
+      clientContext: clientContext,
     );
   }
 
@@ -312,6 +380,11 @@ class ApiService {
     String locale = 'de',
     String tz = 'Europe/Zurich',
     List<Map<String, String>>? history,
+    // optional: Mem-Weitergabe (z. B. wenn On-Device neu gesammelt)
+    dynamic memories,
+    bool? memoryConsent,
+    UserAction? userAction,                        // v6.2.2 (optional)
+    Map<String, dynamic>? clientContext,           // v6.2.2 (optional)
   }) async {
     if (_http == null) return _errorTurn(session);
     final next = session.copyWith(turnIndex: session.turnIndex + 1);
@@ -322,11 +395,52 @@ class ApiService {
       tz: tz,
       session: next,
       messages: history ?? const [],
+      userAction: userAction,
+      clientContext: clientContext,
     );
+
+    if (memories != null || memoryConsent != null) {
+      _attachMemories(payload,
+          memories: memories, memoryConsent: memoryConsent ?? false);
+    }
 
     // Fallback-Reihenfolge beibehalten
     final json = await _tryEndpoints(
       endpoints: const ['/next_turn_full', '/reflect_full', '/reflect'],
+      payload: payload,
+    );
+
+    if (json == null) return _errorTurn(next);
+    return _turnFromReflectAny(json, next);
+  }
+
+  /// NEU (v6.3.1): dedizierter Action-Pfad (falls Server ihn anbietet).
+  Future<ReflectionTurn> nextTurnAction({
+    required ReflectionSession session,
+    required UserAction action,
+    String locale = 'de',
+    String tz = 'Europe/Zurich',
+  }) async {
+    if (_http == null) return _errorTurn(session);
+    final next = session.copyWith(turnIndex: session.turnIndex + 1);
+
+    final payload = _basePayload(
+      text: '', // Action-Turn ohne Usertext
+      locale: locale,
+      tz: tz,
+      session: next,
+      messages: const [],
+      userAction: action,
+      clientContext: null,
+    );
+
+    final json = await _tryEndpoints(
+      endpoints: const [
+        '/next_turn_action',
+        '/next_turn_full',
+        '/reflect_full',
+        '/reflect'
+      ],
       payload: payload,
     );
 
@@ -340,6 +454,8 @@ class ApiService {
     String locale = 'de',
     String tz = 'Europe/Zurich',
     List<Map<String, String>>? history,
+    UserAction? userAction,                        // v6.2.2 (optional)
+    Map<String, dynamic>? clientContext,           // v6.2.2 (optional)
   }) =>
       continueSession(
         session: session,
@@ -347,6 +463,8 @@ class ApiService {
         locale: locale,
         tz: tz,
         history: history,
+        userAction: userAction,
+        clientContext: clientContext,
       );
 
   Future<ReflectionSession> endSession(ReflectionSession s) async => s;
@@ -357,6 +475,8 @@ class ApiService {
     required String answer,
     String locale = 'de',
     String tz = 'Europe/Zurich',
+    UserAction? userAction,                  // optional – Konsistenz zu Turns
+    Map<String, dynamic>? clientContext,     // optional – Konsistenz zu Turns
   }) async {
     if (_http == null) {
       return _closureFallback(session);
@@ -368,6 +488,10 @@ class ApiService {
       'locale': locale,
       'tz': tz,
       'session': session == null ? null : _buildSessionMap(session),
+      'intent': 'closure', // sanfter Hinweis für den Worker
+      if (userAction != null) 'user_action': userAction.toJson(),
+      if (clientContext != null && clientContext.isNotEmpty)
+        'client_context': _sanitizeClientContext(clientContext),
     };
     _appendMemoryHints(payload);
     _appendContactTints(payload, locale: locale, tz: tz);
@@ -384,6 +508,8 @@ class ApiService {
     required String locale,
     required String tz,
     required List<Map<String, String>> history,
+    UserAction? userAction,
+    Map<String, dynamic>? clientContext,
   }) async {
     if (_http == null) return _errorTurn(session);
     final payload = _basePayload(
@@ -392,6 +518,8 @@ class ApiService {
       tz: tz,
       session: session,
       messages: history,
+      userAction: userAction,
+      clientContext: clientContext,
     );
     final json =
         await _tryEndpoints(endpoints: const ['/reflect'], payload: payload);
@@ -405,6 +533,10 @@ class ApiService {
     required String locale,
     required String tz,
     required List<Map<String, String>> history,
+    dynamic memories,
+    bool memoryConsent = false,
+    UserAction? userAction,
+    Map<String, dynamic>? clientContext,
   }) async {
     if (_http == null) return _errorTurn(session);
     final payload = _basePayload(
@@ -413,7 +545,12 @@ class ApiService {
       tz: tz,
       session: session,
       messages: history,
+      userAction: userAction,
+      clientContext: clientContext,
     );
+
+    _attachMemories(payload, memories: memories, memoryConsent: memoryConsent);
+
     final json = await _tryEndpoints(
       endpoints: const ['/reflect_full'],
       payload: payload,
@@ -428,6 +565,8 @@ class ApiService {
     String tz = 'Europe/Zurich',
     String? userText,
     List<Map<String, String>>? history,
+    UserAction? userAction,                        // v6.2.2 (optional)
+    Map<String, dynamic>? clientContext,           // v6.2.2 (optional)
   }) async {
     if (_http == null) {
       // Offline-Talk bleibt verfügbar (nicht blockieren)
@@ -462,6 +601,8 @@ class ApiService {
       session: session,
       intent: 'talk',
       messages: history ?? const [],
+      userAction: userAction,
+      clientContext: clientContext,
     );
 
     try {
@@ -536,6 +677,7 @@ class ApiService {
       'locale': 'de',
       'tz': 'Europe/Zurich',
       'session': {'id': _uuid.v4(), 'turn': 0, 'max_turns': 3},
+      'intent': 'analyze', // sanfter Routing-Hinweis
       if (durationSec != null) 'duration_sec': durationSec,
       if (recentMoods != null) 'recent_moods': recentMoods,
       if (streak != null) 'streak': streak,
@@ -941,7 +1083,7 @@ class ApiService {
       score += 2;
     }
 
-    return score.clamp(0, 4);
+    return score.clamp(0, 4).toInt();
   }
 
   Future<void> _delay({int minMs = 300, int maxMs = 420}) async {
@@ -1133,6 +1275,10 @@ class ApiService {
 
   ReflectionTurn _turnFromReflectJson(
       Map<String, dynamic> json, ReflectionSession session) {
+    // --- DTO-Basis (liefert u. a. analysis/topic_suggestions/risk/talk/helpers) ---
+    final dtoBase = ReflectionTurn.fromMaybe(json);
+
+    // Alt-Parser: Fragen & Primary ableiten (Kompatibilität behalten)
     final questionsList = _parseStringList(
         json['questions'] ?? json['multi_questions'] ?? json['qs']);
     final altList = _parseStringList(
@@ -1187,7 +1333,8 @@ class ApiService {
     final talkLimited = talk.take(2).toList(growable: false);
 
     final flowJson = (json['flow'] as Map?) ?? const {};
-    final flow = ReflectionFlow(
+    final moodNested = _boolLike(((flowJson['mood'] as Map?) ?? const {})['prompt']);
+    final flowCompat = ReflectionFlow(
       recommendEnd:
           (flowJson['recommend_end'] == true) || (flowJson['end'] == true),
       suggestBreak:
@@ -1198,24 +1345,18 @@ class ApiService {
           : session.turnIndex,
       talkOnly: flowJson['talk_only'] == true,
       allowReflect: flowJson['allow_reflect'] != false,
-      // PATCH: Mood-Prompt robust auch bei recommend_end / end
+      // robust: Mood-Prompt auch bei recommend_end oder verschachteltem mood.prompt
       moodPrompt: (flowJson['mood_prompt'] == true) ||
           (flowJson['recommend_end'] == true) ||
-          (flowJson['end'] == true),
+          (flowJson['end'] == true) ||
+          moodNested,
     );
 
     final sJson = (json['session'] as Map?) ?? const {};
     final s = session.copyWith(
-      threadId: (sJson['id'] ?? sJson['thread_id'] ?? session.threadId)
-          .toString(),
-      turnIndex: (sJson['turn'] is num)
-          ? (sJson['turn'] as num).toInt()
-          : (sJson['turn_index'] is num)
-              ? (sJson['turn_index'] as num).toInt()
-              : session.turnIndex,
-      maxTurns: (sJson['max_turns'] is num)
-          ? (sJson['max_turns'] as num).toInt()
-          : session.maxTurns,
+      threadId: (sJson['id'] ?? sJson['thread_id'] ?? session.threadId).toString(),
+      turnIndex: _asInt(sJson['turn'] ?? sJson['turn_index'] ?? session.turnIndex) ?? session.turnIndex,
+      maxTurns: _asInt(sJson['max_turns'] ?? session.maxTurns) ?? session.maxTurns,
     );
 
     final schoolsDyn = (json['schools'] as List?) ??
@@ -1224,36 +1365,88 @@ class ApiService {
         const [];
     final normalizedSchools = _normalizeSchools(_parseStringList(schoolsDyn));
     final workerTags = _parseStringList(json['tags']);
-    final tags = _dedupeStrings([...workerTags, ...normalizedSchools]);
+    final tagsCompat = _dedupeStrings([...workerTags, ...normalizedSchools]);
 
     final riskLevelRoot = (json['risk_level'] ??
             json['risk_flag'] ??
+            json['level'] ??          // v6.3.2: Legacy 'level'
             json['risk'] ??
             'none')
         .toString()
         .trim()
         .toLowerCase();
-    final riskFlag = (riskLevelRoot == 'high' || riskLevelRoot == 'crisis')
+    final riskFlagCompat = (riskLevelRoot == 'high' || riskLevelRoot == 'crisis')
         ? 'crisis'
-        : (riskLevelRoot == 'mild' ? 'support' : 'none');
+        : (riskLevelRoot == 'mild' || riskLevelRoot == 'support' || riskLevelRoot == 'true')
+            ? 'support'
+            : 'none';
 
     // ---- helperSuggestion (robust, mehrere Pfade) ---------------------------
     final helperSuggestion = _extractHelperSuggestion(json);
 
+    // ---- Legacy-Fallback für insight_score → TurnAnalysis --------------------
+    final TurnAnalysis? legacyAnalysis = _analysisFromLegacy(json, flowJson);
+
+    // ---- Merge mit DTO-Basis (bevorzugt DTO, Kompat-Zusätze mergen) ---------
+    final mergedFlow = ReflectionFlow(
+      recommendEnd: (dtoBase?.flow?.recommendEnd ?? false) || flowCompat.recommendEnd,
+      suggestBreak: (dtoBase?.flow?.suggestBreak ?? false) || flowCompat.suggestBreak,
+      riskNotice: dtoBase?.flow?.riskNotice ?? flowCompat.riskNotice,
+      sessionTurn: dtoBase?.flow?.sessionTurn ?? flowCompat.sessionTurn,
+      talkOnly: (dtoBase?.flow?.talkOnly ?? false) || flowCompat.talkOnly,
+      allowReflect: dtoBase?.flow?.allowReflect ?? flowCompat.allowReflect,
+      moodPrompt: (dtoBase?.flow?.moodPrompt ?? false) || flowCompat.moodPrompt,
+    );
+
+    final mergedHelpers = _dedupeStrings([
+      ...helpers,
+      if (dtoBase != null) ...dtoBase.answerHelpers,
+    ]).take(3).toList(growable: false);
+
+    final mergedContext = _dedupeStrings([
+      ...ctx,
+      if (dtoBase != null) ...dtoBase.context,
+    ]);
+
+    final mergedFollowups = _dedupeStrings([
+      ...followups,
+      if (dtoBase != null) ...dtoBase.followups,
+    ]);
+
+    final mergedTags = _dedupeStrings([
+      ...tagsCompat,
+      if (dtoBase != null) ...dtoBase.tags,
+    ]);
+
+    final mergedQuestions = _dedupeStrings([
+      if (firstQuestion.isNotEmpty) firstQuestion,
+      ...allQs.skip(1),
+      if (dtoBase != null) ...dtoBase.questions,
+    ]);
+
+    final mergedTalk = (() {
+      final list = <String>[
+        ...talkLimited,
+        if (dtoBase != null) ...dtoBase.talk,
+      ].where((e) => e.trim().isNotEmpty).toList();
+      return list.take(2).toList(growable: false);
+    })();
+
     return ReflectionTurn(
       outputText: outputText,
-      mirror: mirror,
-      context: ctx,
-      followups: followups,
-      answerHelpers: helpers, // ← Worker-Chips bleiben erhalten
-      helperSuggestion: helperSuggestion, // ← NEU
-      flow: flow,
+      mirror: dtoBase?.mirror ?? mirror,
+      context: mergedContext,
+      followups: mergedFollowups,
+      answerHelpers: mergedHelpers,
+      helperSuggestion: dtoBase?.helperSuggestion ?? helperSuggestion,
+      flow: mergedFlow,
       session: s,
-      tags: tags,
-      riskFlag: riskFlag,
-      questions:
-          allQs.isNotEmpty ? [firstQuestion, ...allQs.skip(1)] : const [],
-      talk: talkLimited,
+      tags: mergedTags,
+      riskFlag: dtoBase?.riskFlag ?? riskFlagCompat,
+      questions: mergedQuestions,
+      talk: mergedTalk,
+      analysis: dtoBase?.analysis ?? legacyAnalysis, // <-- Fallback für insight_score
+      topicSuggestions: dtoBase?.topicSuggestions ?? const <String>[],
     );
   }
 
@@ -1327,6 +1520,20 @@ class ApiService {
     return cleaned.isEmpty ? null : cleaned;
   }
 
+  // Minimalistische TurnAnalysis aus Legacy-Feldern (insbesondere insight_score)
+  TurnAnalysis? _analysisFromLegacy(Map<String, dynamic> root, Map flow) {
+    double? asDouble(dynamic x) {
+      if (x is num) return x.toDouble();
+      final s = x?.toString();
+      if (s == null) return null;
+      return double.tryParse(s);
+    }
+
+    final v = asDouble(root['insight_score'] ?? flow['insight_score']);
+    if (v == null) return null;
+    return TurnAnalysis(insightScore: v);
+  }
+
   static String _extractPrimary(Map<String, dynamic> json) {
     final fromChoices = _contentFromChoices(json['choices']);
     final candidates = <String>[
@@ -1351,16 +1558,31 @@ class ApiService {
     return first.endsWith('?') ? first : '$first?';
   }
 
+  // v6.3.3: unterstützt OpenAI & Anthropic choice-Formate
   static String? _contentFromChoices(dynamic choicesDyn) {
     if (choicesDyn is List && choicesDyn.isNotEmpty) {
       final first = choicesDyn.first;
       if (first is Map) {
+        // OpenAI: { message: { content: String | List }, text?: ... }
         final msg = first['message'];
         if (msg is Map) {
           final content = msg['content'];
           if (content is String) return content;
+          // content als Liste (z. B. [{type:"text", text:{value:"..."}}])
+          if (content is List && content.isNotEmpty) {
+            final c0 = content.first;
+            if (c0 is Map) {
+              final txt = c0['text'];
+              if (txt is Map && txt['value'] is String) return txt['value'] as String;
+              if (txt is String) return txt;
+              // Fallback: alles stringifizieren
+              final v = txt?.toString();
+              if (v != null && v.trim().isNotEmpty) return v;
+            }
+          }
           if (content != null) return content.toString();
         }
+        // Manche Provider legen Text direkt auf "text"
         final text = first['text'];
         if (text is String) return text;
         if (text != null) return text.toString();
@@ -1579,6 +1801,112 @@ class ApiService {
     }
   }
 
+  void _attachMemories(Map<String, dynamic> payload,
+      {dynamic memories, bool? memoryConsent}) {
+    if (memoryConsent != null) {
+      payload['memory_consent'] = memoryConsent == true;
+    }
+    final mem = _normalizeMemories(memories);
+    if (mem == null || mem.isEmpty) return;
+
+    // In einen 'context'-Container einhängen (Worker-Erwartung)
+    final ctx = <String, dynamic>{
+      'memories': mem,
+    };
+
+    // Merge: existierende context-Map (falls vorhanden) respektieren
+    final existing = payload['context'];
+    if (existing is Map<String, dynamic>) {
+      payload['context'] = {
+        ...existing,
+        ...ctx,
+      };
+    } else {
+      payload['context'] = ctx;
+    }
+
+    // Kompat-Alias (falls ältere Worker nur top-level erwarten)
+    payload['memories'] ??= mem;
+  }
+
+  Map<String, dynamic>? _normalizeMemories(dynamic src) {
+    if (src == null) return null;
+
+    Map<String, dynamic>? asMap(dynamic x) {
+      if (x is Map<String, dynamic>) return x;
+      if (x is Map) {
+        return x.map((k, v) => MapEntry(k.toString(), v));
+      }
+      try {
+        // ignore: avoid_dynamic_calls
+        final m = x.toMap?.call();
+        if (m is Map) {
+          return m.map((k, v) => MapEntry(k.toString(), v));
+        }
+      } catch (_) {}
+      try {
+        // ignore: avoid_dynamic_calls
+        final j = x.toJson?.call();
+        if (j is Map) {
+          return j.map((k, v) => MapEntry(k.toString(), v));
+        }
+        if (j is String && j.trim().startsWith('{')) {
+          final parsed = jsonDecode(j);
+          if (parsed is Map) {
+            return parsed.map((k, v) => MapEntry(k.toString(), v));
+          }
+        }
+      } catch (_) {}
+      if (x is String && x.trim().startsWith('{')) {
+        try {
+          final parsed = jsonDecode(x);
+          if (parsed is Map) {
+            return parsed.map((k, v) => MapEntry(k.toString(), v));
+          }
+        } catch (_) {}
+      }
+      return null;
+    }
+
+    final map = asMap(src);
+    if (map == null) return null;
+
+    // Flache snake_case Normalisierung gängiger Felder
+    Map<String, dynamic> norm = {};
+    map.forEach((k, v) {
+      final key = k.toString();
+      switch (key) {
+        case 'recentTopics':
+          norm['recent_topics'] = v;
+          break;
+        case 'moodTrend':
+          norm['mood_trend'] = v;
+          break;
+        case 'nextHint':
+          norm['next_hint'] = v;
+          break;
+        case 'insightScore':
+          norm['insight_score'] = v;
+          break;
+        case 'contextFacets':
+          norm['context_facets'] = v;
+          break;
+        case 'facts':
+        case 'memoryFacts':
+          norm['facts'] = v;
+          break;
+        case 'summary':
+          norm['summary'] = v;
+          break;
+        default:
+          // falls bereits snake_case oder unbekannt → übernehmen
+          norm[key] = v;
+      }
+    });
+
+    return norm;
+  }
+
   void _appendContactTints(Map<String, dynamic> payload,
       {required String locale, required String tz}) {
     payload['contact_tins'] = {
@@ -1636,6 +1964,8 @@ class ApiService {
     required ReflectionSession session,
     List<Map<String, String>> messages = const [],
     String? intent,
+    UserAction? userAction,                  // v6.2.2 optional
+    Map<String, dynamic>? clientContext,     // v6.2.2 optional
   }) {
     final payload = <String, dynamic>{
       'text': text,
@@ -1644,11 +1974,40 @@ class ApiService {
       'tz': tz,
       'session': _buildSessionMap(session),
       if (intent != null) 'intent': intent,
+      if (userAction != null) 'user_action': userAction.toJson(),
+      if (clientContext != null && clientContext.isNotEmpty)
+        'client_context': _sanitizeClientContext(clientContext),
     };
     _appendMemoryHints(payload);
     _appendContactTints(payload, locale: locale, tz: tz);
     _appendByteContext(payload);
     return payload;
+  }
+
+  Map<String, dynamic> _sanitizeClientContext(Map<String, dynamic> src) {
+    // Keine PII; whitelist bekannte harmlose Schlüssel
+    const allowed = {
+      'appVersion',
+      'build',
+      'platform',
+      'device',
+      'os',
+      'screen',
+      'net',
+      'flags',
+      'ab',
+      'experiment',
+      'source',
+      'campaign',
+      'locale',
+      'tz',
+    };
+    final out = <String, dynamic>{};
+    for (final e in src.entries) {
+      final k = e.key.toString();
+      if (allowed.contains(k)) out[k] = e.value;
+    }
+    return out;
   }
 
   /// Postet JSON; speichert Memory-Hook, wenn erfolgreich.
@@ -1688,7 +2047,8 @@ class ApiService {
       // Wenn aktueller Endpoint failt, ggf. Backoff vor *nächster* Variante
       if (i < endpoints.length - 1) {
         final jitter = _rand.nextInt(180);
-        await Future.delayed(Duration(milliseconds: bases[i.clamp(0, bases.length - 1)] + jitter));
+        final idx = i.clamp(0, bases.length - 1).toInt();
+        await Future.delayed(Duration(milliseconds: bases[idx] + jitter));
       }
     }
     return null;
@@ -1707,6 +2067,24 @@ class ApiService {
         },
         if (session != null) 'session': _buildSessionMap(session),
       };
+
+  // ---------------- kleine Parser-Helfer ----------------
+
+  static int? _asInt(dynamic v) {
+    if (v is num) return v.toInt();
+    if (v is String) return int.tryParse(v.trim());
+    return null;
+  }
+
+  static bool _boolLike(dynamic v) {
+    if (v is bool) return v;
+    if (v is num) return v != 0;
+    if (v is String) {
+      final s = v.trim().toLowerCase();
+      return s == 'true' || s == '1' || s == 'yes' || s == 'y';
+    }
+    return false;
+  }
 }
 
 // ---------------- Kompat-Struktur nur für aiReflect() ----------------

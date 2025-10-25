@@ -1,18 +1,24 @@
 // lib/core/memory/memory_entry.dart
 //
-// MemoryEntry (v2) — DTO für lokales Kontext-Gedächtnis.
-// Felder:
-// - sessionId: Thread/Session-ID (Fallback: früheres 'id')
-// - createdAt: Zeitstempel
-// - contextFacets: Liste semantischer Facetten (Facet)
-// - insightScore: optional (0..1 oder frei), inkl. baseline möglich
-// - mood: optional (0..4 mental/physical)
-// - summary / nextHint: kurze Texte
+// MemoryEntry v2.2 — DTO für lokales Kontext-Gedächtnis (snake_case-Maps).
+// -----------------------------------------------------------------------------
+// Kompatibilität (v1 → v2):
+// • sessionId              ⇆  id / session_id
+// • createdAt (ISO-UTC)    ⇆  created_at
+// • contextFacets[List<Facet>] ⇆  context_facets / facets[List<String>]
+// • insightScore[Map|num]  ⇆  insight_score
+// • mood{mental,physical}  ⇆  Strings/Nums; Aliasse: icon/body/somatic
+// • summary / nextHint     ⇆  summary / next_hint
 //
-// Abwärtskompatibilität:
-// - liest alte Strukturen (id, facets:[String], insightScore:num, mood:{mental,physical} als String/num)
+// Hinweise:
+// • toMap() gibt NUR snake_case-Schlüssel zurück (v2 Standard).
+// • fromMap() akzeptiert v1/v2 und normalisiert Daten defensiv.
+// • toJson()/fromJson() sind Convenience-Wrapper für (De-)Serialisierung.
+
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+
 import '../models/insight_models.dart';
 
 @immutable
@@ -35,6 +41,8 @@ class MemoryEntry {
     this.nextHint,
   });
 
+  // ---------- Copy ------------------------------------------------------------
+
   MemoryEntry copyWith({
     String? sessionId,
     DateTime? createdAt,
@@ -47,7 +55,9 @@ class MemoryEntry {
     return MemoryEntry(
       sessionId: sessionId ?? this.sessionId,
       createdAt: createdAt ?? this.createdAt,
-      contextFacets: contextFacets ?? List<Facet>.from(this.contextFacets),
+      contextFacets: contextFacets != null
+          ? List<Facet>.unmodifiable(List<Facet>.from(contextFacets))
+          : List<Facet>.unmodifiable(List<Facet>.from(this.contextFacets)),
       insightScore: insightScore ?? this.insightScore,
       mood: mood ?? this.mood,
       summary: summary ?? this.summary,
@@ -55,89 +65,114 @@ class MemoryEntry {
     );
   }
 
-  // ---------- (De-)Serialisierung -------------------------------------------
+  // ---------- Helpers ---------------------------------------------------------
+
+  static String _asString(dynamic x) => (x == null) ? '' : x.toString();
+
+  static int _asMood(dynamic x, {int fallback = 2}) {
+    if (x is num) return x.clamp(0, 4).toInt();
+    final s = _asString(x).trim();
+    final n = int.tryParse(s);
+    return (n == null) ? fallback : n.clamp(0, 4);
+  }
+
+  static DateTime _asDateTimeUtc(dynamic x) {
+    final s = _asString(x);
+    final dt = DateTime.tryParse(s);
+    return (dt ?? DateTime.now()).toUtc();
+  }
+
+  // ---------- (De-)Serialisierung --------------------------------------------
 
   factory MemoryEntry.fromMap(Map<String, dynamic> m) {
-    // sessionId: akzeptiere altes 'id'
-    final sid = (m['sessionId'] ?? m['id'] ?? '').toString();
+    // sessionId (Aliases)
+    final sidRaw = m['sessionId'] ?? m['session_id'] ?? m['id'];
+    final sid = _asString(sidRaw).trim();
 
-    // createdAt
-    final createdAt = DateTime.tryParse((m['createdAt'] ?? '').toString()) ??
-        DateTime.now().toUtc();
+    // createdAt (Aliases)
+    final createdRaw = m['createdAt'] ?? m['created_at'];
+    final createdAt = _asDateTimeUtc(createdRaw);
 
-    // contextFacets: akzeptiere neues 'contextFacets' (List<Map>) oder altes 'facets' (List<String>)
+    // contextFacets: bevorzugt neue Struktur (List<Map>), fallback alte (List<String>)
     final facets = <Facet>[];
-    if (m['contextFacets'] is List) {
-      for (final e in (m['contextFacets'] as List)) {
+    final cfRaw = m['contextFacets'] ?? m['context_facets'] ?? m['facets'];
+    if (cfRaw is List) {
+      for (final e in cfRaw) {
         if (e is Map) {
-          facets.add(Facet.fromMap(Map<String, dynamic>.from(e)));
+          try {
+            facets.add(Facet.fromMap(Map<String, dynamic>.from(e)));
+          } catch (_) {
+            // defektes Einzelelement ignorieren
+          }
         } else {
-          final s = e?.toString() ?? '';
-          if (s.trim().isNotEmpty) {
+          final s = _asString(e).trim();
+          if (s.isNotEmpty) {
             facets.add(Facet(key: s, label: s));
           }
         }
       }
-    } else if (m['facets'] is List) {
-      for (final e in (m['facets'] as List)) {
-        final s = e?.toString() ?? '';
-        if (s.trim().isNotEmpty) {
-          facets.add(Facet(key: s, label: s));
-        }
-      }
     }
 
-    // insightScore: akzeptiere Map (v2) oder num (v1)
+    // insightScore: Map (v2) oder num/String (v1)
     InsightScore? insightScore;
-    final rawInsight = m['insightScore'];
+    final rawInsight = m['insightScore'] ?? m['insight_score'];
     if (rawInsight is Map) {
-      insightScore =
-          InsightScore.fromMap(Map<String, dynamic>.from(rawInsight));
+      try {
+        insightScore = InsightScore.fromMap(Map<String, dynamic>.from(rawInsight));
+      } catch (_) {/* ignore */}
     } else if (rawInsight is num) {
       insightScore = InsightScore(rawInsight.toDouble());
+    } else if (rawInsight is String) {
+      final n = double.tryParse(rawInsight);
+      if (n != null) insightScore = InsightScore(n);
     }
 
-    // mood: akzeptiere Map mit int/num/String
+    // mood: akzeptiere Map mit int/num/String und Aliasse
     MoodPair? mood;
-    if (m['mood'] is Map) {
-      final mm = Map<String, dynamic>.from(m['mood'] as Map);
-      int coerce(dynamic x) {
-        if (x is num) return x.clamp(0, 4).toInt();
-        final s = x?.toString() ?? '';
-        final n = int.tryParse(s);
-        return (n == null) ? 2 : n.clamp(0, 4);
-      }
+    final rawMood = m['mood'];
+    if (rawMood is Map) {
+      final mm = Map<String, dynamic>.from(rawMood);
       mood = MoodPair(
-        mental: coerce(mm['mental'] ?? mm['icon']),
-        physical: coerce(mm['physical'] ?? mm['body'] ?? mm['somatic']),
+        mental: _asMood(mm['mental'] ?? mm['icon']),
+        physical: _asMood(mm['physical'] ?? mm['body'] ?? mm['somatic']),
       );
     }
 
-    final summary =
-        (m['summary']?.toString().trim().isEmpty ?? true) ? null : m['summary'].toString();
-    final nextHint =
-        (m['nextHint']?.toString().trim().isEmpty ?? true) ? null : m['nextHint'].toString();
+    // summary / nextHint (Aliasse)
+    final summaryRaw = m['summary'];
+    final nextHintRaw = m['nextHint'] ?? m['next_hint'];
+
+    final summary = _asString(summaryRaw).trim();
+    final nextHint = _asString(nextHintRaw).trim();
 
     return MemoryEntry(
-      sessionId: sid.isNotEmpty ? sid : 'local_${DateTime.now().millisecondsSinceEpoch}',
-      createdAt: createdAt.toUtc(),
-      contextFacets: facets,
+      sessionId: sid.isNotEmpty
+          ? sid
+          : 'local_${DateTime.now().millisecondsSinceEpoch}',
+      createdAt: createdAt,
+      contextFacets: List<Facet>.unmodifiable(facets),
       insightScore: insightScore,
       mood: mood,
-      summary: summary,
-      nextHint: nextHint,
+      summary: summary.isEmpty ? null : summary,
+      nextHint: nextHint.isEmpty ? null : nextHint,
     );
   }
 
-  Map<String, dynamic> toMap() => {
-        'sessionId': sessionId,
-        'createdAt': createdAt.toUtc().toIso8601String(),
-        'contextFacets': contextFacets.map((f) => f.toMap()).toList(),
-        'insightScore': insightScore?.toMap(),
+  Map<String, dynamic> toMap() => <String, dynamic>{
+        // v2: ausschließlich snake_case Keys zurückgeben
+        'session_id': sessionId,
+        'created_at': createdAt.toUtc().toIso8601String(),
+        'context_facets': contextFacets.map((f) => f.toMap()).toList(),
+        'insight_score': insightScore?.toMap(),
         'mood': mood?.toMap(),
         'summary': summary,
-        'nextHint': nextHint,
+        'next_hint': nextHint,
       };
+
+  /// JSON-Convenience
+  String toJson() => jsonEncode(toMap());
+  factory MemoryEntry.fromJson(String json) =>
+      MemoryEntry.fromMap(jsonDecode(json) as Map<String, dynamic>);
 
   @override
   bool operator ==(Object o) =>
@@ -161,4 +196,8 @@ class MemoryEntry {
         summary,
         nextHint,
       );
+
+  @override
+  String toString() =>
+      'MemoryEntry(sessionId:$sessionId, createdAt:$createdAt, facets:${contextFacets.length})';
 }

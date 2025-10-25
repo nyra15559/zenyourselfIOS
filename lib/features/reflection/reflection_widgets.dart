@@ -1,11 +1,14 @@
 // lib/features/reflection/reflection_widgets.dart
 // Part: UI-Widgets (library: reflection_screen)
 // -----------------------------------------------------------------------------
-// Oxford–Zen v6.10 — Reflection UI (calm type & fixes, 2025-appear)
+// Oxford–Zen v6.11 — Reflection UI (calm type & fixes, 2025-appear)
 // - Intro-Text angepasst (Hallo – wie geht es dir? … Schreib’s mir in 1–2 Sätzen …)
 // - Typing-Row: Punkte NACH dem Text, kein führendes „…“
 // - Leitfrage: gleicher ruhiger Stil wie Mirror (keine Bold-Überschrift)
 // - Memory/RecentTopics weiterhin vorhanden, aber Screen zeigt sie nicht an
+// - Hope Slot integriert (kurzer, hoffnungsvoller Satz unter der Frage)
+// - v6.10.1: Hope-Compat (s.hopeText → s.hopeTextCompat()) + withValues-Fixes
+// - v6.11: Kleiner Dev-Indikator (nur Debug) – dezenter Punkt mit Tooltip
 // -----------------------------------------------------------------------------
 
 part of 'reflection_screen.dart';
@@ -236,8 +239,10 @@ class _RoundThread extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: _kRadius18,
-                    border:
-                        Border.all(color: Colors.black.withValues(alpha: .06), width: 1),
+                    border: Border.all(
+                      color: Colors.black.withValues(alpha: .06),
+                      width: 1,
+                    ),
                     boxShadow: const [
                       BoxShadow(
                         color: Color(0x14000000),
@@ -302,10 +307,10 @@ class _RoundThread extends StatelessWidget {
     if (!suppressQuestion && s.question.trim().isNotEmpty) {
       buffer.writeln(s.question.trim());
     }
-    if (!suppressQuestion &&
-        (s.helperSuggestion ?? '').trim().isNotEmpty) {
+    if (!suppressQuestion && (s.helperSuggestion ?? '').trim().isNotEmpty) {
       buffer.writeln((s.helperSuggestion ?? '').trim());
     }
+    // Hope nicht in die Kopie erzwingen – bleibt kurz/optional in der UI.
     final copyAll = buffer.toString();
 
     return Center(
@@ -1047,8 +1052,7 @@ class _PandaCardInner extends StatelessWidget {
     }
 
     // HelperSuggestion: nur zeigen, wenn Frage sichtbar (gleiche Achse, sanfter Satz)
-    if (!suppressQuestion &&
-        (s.helperSuggestion ?? '').trim().isNotEmpty) {
+    if (!suppressQuestion && (s.helperSuggestion ?? '').trim().isNotEmpty) {
       children.add(const SizedBox(height: 8));
       children.add(
         Row(
@@ -1073,17 +1077,48 @@ class _PandaCardInner extends StatelessWidget {
       );
     }
 
-    // Timestamp bottom-right
+    // ---------------------- Hope Slot (optional) ----------------------
+    // Kurzer, hoffnungsvoller Satz unterhalb der Frage/HelperSuggestion.
+    final hope = s.hopeTextCompat();
+    if (!suppressQuestion && (hope ?? '').trim().isNotEmpty) {
+      children.add(const SizedBox(height: 8));
+      children.add(
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const ExcludeSemantics(
+              child: Icon(Icons.auto_awesome_rounded, size: 18, color: _kInk),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: SelectableText(
+                (hope ?? '').trim(),
+                style: tt.bodySmall?.copyWith(
+                  color: _kInk.withValues(alpha: .87),
+                  height: 1.30,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Timestamp + (nur Debug) kleiner Dev-Indikator
     children.add(const SizedBox(height: 6));
     children.add(
-      const Align(
-        alignment: Alignment.bottomRight,
-        child: ExcludeSemantics(
-          child: Opacity(
-            opacity: .55,
-            child: _TimeStampText(),
+      Row(
+        children: const [
+          _DevIndicator(), // zeigt in Release NICHTS
+          Spacer(),
+          ExcludeSemantics(
+            child: Opacity(
+              opacity: .55,
+              child: _TimeStampText(),
+            ),
           ),
-        ),
+        ],
       ),
     );
 
@@ -1103,6 +1138,54 @@ class _TimeStampText extends StatelessWidget {
     return Text(
       scope.timeStamp,
       style: tt.bodySmall?.copyWith(fontSize: 12, color: _kInk),
+    );
+  }
+}
+
+// --- Kleiner Dev-Indikator (nur Debug) ---------------------------------------
+
+class _DevIndicator extends StatelessWidget {
+  const _DevIndicator();
+
+  @override
+  Widget build(BuildContext context) {
+    if (!kDebugMode) return const SizedBox.shrink();
+
+    final scope = _PandaStepScope.of(context);
+    final s = scope.step;
+
+    final hasQ = s.question.trim().isNotEmpty;
+    final helpers = s.followups.length;
+    final risk = s.risk;
+    final hope = (s.hopeTextCompat() ?? '').trim().isNotEmpty;
+    final talk = s.talkLines.length;
+    final mirrorLen = s.mirror.trim().length;
+
+    // Farb-Codierung: Risk > Helpers > Neutral
+    final Color dotColor = risk
+        ? Colors.orange
+        : (helpers > 0 ? _kJade : Colors.black.withValues(alpha: .45));
+
+    final tooltip =
+        'm:$mirrorLen  q:${hasQ ? 1 : 0}  h:$helpers  talk:$talk  hope:${hope ? 1 : 0}';
+
+    return Tooltip(
+      message: 'DEV $tooltip',
+      child: ExcludeSemantics(
+        child: Container(
+          width: 10,
+          height: 10,
+          margin: const EdgeInsets.only(left: 2),
+          decoration: BoxDecoration(
+            color: dotColor,
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: Colors.black.withValues(alpha: .10),
+              width: 1,
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -1408,4 +1491,47 @@ class _SafetyScope extends InheritedWidget {
 
   @override
   bool updateShouldNotify(_SafetyScope oldWidget) => oldWidget.text != text;
+}
+
+// -----------------------------------------------------------------------------
+// Kompatibilitäts-Extension für Hope-Text (_PandaStep.hopeTextCompat())
+// Liest robust aus alten/neuen Feldern oder aus speech_sequence (type == "hope").
+// -----------------------------------------------------------------------------
+extension _PandaStepCompatExt on _PandaStep {
+  String? hopeTextCompat() {
+    // 1) Legacy: direkter Getter/Feld "hopeText"
+    try {
+      final v = (this as dynamic).hopeText;
+      if (v is String && v.trim().isNotEmpty) return v.trim();
+    } catch (_) {}
+
+    // 2) Neues Feld "hope"
+    try {
+      final v = (this as dynamic).hope;
+      if (v is String && v.trim().isNotEmpty) return v.trim();
+    } catch (_) {}
+
+    // 3) Sequenz durchsuchen
+    try {
+      final seq = (this as dynamic).speechSequence;
+      if (seq is List) {
+        for (final e in seq) {
+          if (e is Map && e['type'] == 'hope' && e['text'] is String) {
+            final t = (e['text'] as String).trim();
+            if (t.isNotEmpty) return t;
+          } else {
+            try {
+              final t = (e as dynamic).type;
+              final txt = (e as dynamic).text;
+              if (t == 'hope' && txt is String && txt.trim().isNotEmpty) {
+                return txt.trim();
+              }
+            } catch (_) {}
+          }
+        }
+      }
+    } catch (_) {}
+
+    return null;
+  }
 }

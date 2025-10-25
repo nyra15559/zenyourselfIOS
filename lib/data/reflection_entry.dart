@@ -3,20 +3,25 @@
 // ReflectionEntry — v5-kompatibles Datenmodell (rückwärtskompatibel)
 // ------------------------------------------------------------------
 // • Bestehende Felder bleiben erhalten (timestamp, content, moodScore, …)
-// • NEU (optional): analysis (Spiegelung/Frage, SORC, Risk), answer,
-//   challenge (Mini-Challenge), links (z. B. storyId), inputMeta,
+// • NEU (optional): analysis, answer, challenge, links, inputMeta,
 //   helperSuggestion (sanfter 0–1-Satz unter Leitfrage).
-// • `toJsonV5()` exportiert direkt den v5-Union-Shape für JournalEntry:
-//   { type: "reflection", input, analysis, answer, challenge, mood, links, …, reflection }
+// • toJsonV5() exportiert den v5-Union-Shape für JournalEntry:
+//   { type:"reflection", input, analysis, answer, challenge, mood, links, …, reflection }
 //
-// Sicherheit/Robustheit
+// Robustheit & Kompat:
 // • Null-safe, Normalisierung von Text/Tags, Mood clamped (0–4)
-// • Tolerante JSON-Parser für alte/alias Feldnamen
+// • Tolerante JSON-Parser (Alias-Felder, gemischte Formate)
+// • Zeit-Parsing: diverse Formate (ISO, Sek./Millis/Mikros) → **lokale** Zeit
 //
-// Zeit-Handling
-// • Diverse Eingabeformate (ISO, Sekunden/Millis/Mikros) → lokale Zeit.
-//   So stimmen Tages-Gruppierungen mit der UI.
+// Zusätze in dieser Überarbeitung:
+// • fromJson: liest auch { mood:{icon,note} } und reflection.helper_suggestion
+// • InputMeta.fromMaybe: akzeptiert duration_sec | durationSec | duration
+// • Answer.fromMaybe: akzeptiert content | text
+// • MiniChallenge.fromMaybe: akzeptiert duration_sec | durationSec
+// • Analysis.fromMaybe: mappt risk=true → risk_level:"high"
+// • ReflectionLinks.fromMaybe: akzeptiert story_id | storyId
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../../shared/zen_style.dart'; // ZenColors
 
@@ -96,17 +101,34 @@ class ReflectionEntry {
     final challenge = MiniChallenge.fromMaybe(json['challenge']);
     final links = ReflectionLinks.fromMaybe(json['links']);
 
-    // helperSuggestion tolerant einlesen (camelCase & snake_case)
-    final helperSuggestion = _asTrimmedOrNull(
+    // helperSuggestion tolerant einlesen (camelCase & snake_case + reflection-block)
+    String? helperSuggestion = _asTrimmedOrNull(
       json['helperSuggestion'] ?? json['helper_suggestion'],
     );
+    if (helperSuggestion == null && json['reflection'] is Map) {
+      final ref = Map<String, dynamic>.from(json['reflection'] as Map);
+      helperSuggestion = _asTrimmedOrNull(
+        ref['helper_suggestion'] ?? ref['helperSuggestion'],
+      );
+    }
+
+    // Mood-Block lesen (optional): { mood: { icon, note } }
+    int? moodScore = _clampMood(_toInt(json['moodScore'] ?? json['mood_score']));
+    String? moodNote =
+        _asTrimmedOrNull(json['moodNote'] ?? json['mood_note'] ?? json['moodComment']);
+    final moodObj = json['mood'];
+    if (moodObj is Map) {
+      final mm = Map<String, dynamic>.from(moodObj);
+      moodScore ??= _clampMood(_toInt(mm['icon'] ?? mm['score'] ?? mm['mood']));
+      moodNote ??= _asTrimmedOrNull(mm['note'] ?? mm['text'] ?? mm['comment']);
+    }
 
     return ReflectionEntry(
       id: id,
       timestamp: ts,
       content: content,
       moodDayTag: (json['moodDayTag'] ?? json['mood_day_tag']) as String?,
-      moodScore: _clampMood(_toInt(json['moodScore'] ?? json['mood_score'])),
+      moodScore: moodScore,
       category: _asTrimmedOrNull(json['category']),
       tags: _coerceTags(json['tags']),
       audioPath: _asTrimmedOrNull(json['audioPath'] ?? json['audio_path']),
@@ -117,8 +139,7 @@ class ReflectionEntry {
       answer: answer,
       challenge: challenge,
       links: links,
-      moodNote:
-          _asTrimmedOrNull(json['moodNote'] ?? json['mood_note'] ?? json['moodComment']),
+      moodNote: moodNote,
       helperSuggestion: helperSuggestion,
     );
   }
@@ -545,7 +566,9 @@ class InputMeta {
     if (v is Map<String, dynamic>) {
       return InputMeta(
         mode: ReflectionEntry._asTrimmedOrNull(v['mode']),
-        durationSec: ReflectionEntry._toInt(v['duration_sec']),
+        durationSec: ReflectionEntry._toInt(
+          v['duration_sec'] ?? v['durationSec'] ?? v['duration'],
+        ),
       );
     }
     // Fallback-Heuristik: audioPath → voice, sonst text
@@ -594,6 +617,11 @@ class Analysis {
   static Analysis? fromMaybe(dynamic v) {
     if (v == null) return null;
     if (v is Map<String, dynamic>) {
+      // risk (bool) → risk_level
+      final riskLevel = ReflectionEntry._asTrimmedOrNull(
+            v['risk_level'] ??
+                (v['risk'] == true ? 'high' : null),
+          );
       return Analysis(
         sorc: Sorc.fromMaybe(v['sorc']),
         levers: (v['levers'] is List)
@@ -601,7 +629,7 @@ class Analysis {
             : const [],
         mirror: ReflectionEntry._asTrimmedOrNull(v['mirror']),
         question: ReflectionEntry._asTrimmedOrNull(v['question']),
-        riskLevel: ReflectionEntry._asTrimmedOrNull(v['risk_level']),
+        riskLevel: riskLevel,
       );
     }
     return null;
@@ -672,15 +700,15 @@ class Answer {
   const Answer({this.content, this.mode});
 
   Map<String, dynamic> toJson() => {
-    if (content != null) 'content': content,
-    if (mode != null) 'mode': mode,
-  };
+        if (content != null) 'content': content,
+        if (mode != null) 'mode': mode,
+      };
 
   static Answer? fromMaybe(dynamic v) {
     if (v == null) return null;
     if (v is Map<String, dynamic>) {
       return Answer(
-        content: ReflectionEntry._asTrimmedOrNull(v['content']),
+        content: ReflectionEntry._asTrimmedOrNull(v['content'] ?? v['text']),
         mode: ReflectionEntry._asTrimmedOrNull(v['mode']),
       );
     }
@@ -729,7 +757,7 @@ class MiniChallenge {
         id: ReflectionEntry._asTrimmedOrNull(v['id']),
         title: ReflectionEntry._asTrimmedOrNull(v['title']),
         kind: ReflectionEntry._asTrimmedOrNull(v['kind']),
-        durationSec: ReflectionEntry._toInt(v['duration_sec']),
+        durationSec: ReflectionEntry._toInt(v['duration_sec'] ?? v['durationSec']),
         status: ReflectionEntry._asTrimmedOrNull(v['status']),
       );
     }
@@ -762,9 +790,12 @@ class ReflectionLinks {
 
   static ReflectionLinks? fromMaybe(dynamic v) {
     if (v == null) return null;
+    if (v is String && v.trim().isNotEmpty) {
+      return ReflectionLinks(storyId: v.trim());
+    }
     if (v is Map<String, dynamic>) {
       return ReflectionLinks(
-        storyId: ReflectionEntry._asTrimmedOrNull(v['story_id']),
+        storyId: ReflectionEntry._asTrimmedOrNull(v['story_id'] ?? v['storyId']),
       );
     }
     return null;
@@ -779,4 +810,181 @@ class ReflectionLinks {
 
   @override
   int get hashCode => storyId.hashCode;
+}
+
+// ============================================================================
+// Guiding Question (nur für Leitfragen – nicht für Community-Fragen!)
+// - Stabil & nullsafe
+// - Optionales [createdAt] für Sortierung/Analytics (kein Pflichtfeld)
+// ============================================================================
+
+@immutable
+class Question {
+  final String id;
+  final String text;
+  final bool isFollowUp;
+
+  /// Optional: Erstellzeitpunkt (kann vom Backend kommen oder lokal gesetzt werden)
+  final DateTime? createdAt;
+
+  const Question({
+    required this.id,
+    required this.text,
+    this.isFollowUp = false,
+    this.createdAt,
+  });
+
+  /// Nullsichere Deserialisierung aus JSON/Map (mit Aliassen)
+  factory Question.fromJson(Map<String, dynamic> j) {
+    final dt = _parseDate(
+      j['createdAt'] ??
+          j['created_at'] ??
+          j['timestamp'] ??
+          j['ts'] ??
+          j['date'] ??
+          j['time'],
+    );
+
+    final String rawId = (j['id'] ?? '').toString().trim();
+    final String text = (j['text'] ?? '').toString();
+
+    // isFollowUp: akzeptiere diverse Schreibweisen
+    final bool isFollowUp = _readBool(
+          j['isFollowUp'] ??
+              j['is_follow_up'] ??
+              j['followUp'] ??
+              j['follow_up'],
+        ) ??
+        false;
+
+    // Fallback-ID, falls leer (deterministisch & stabil)
+    final String id = rawId.isEmpty ? _fallbackId(dt, text) : rawId;
+
+    return Question(
+      id: id,
+      text: text,
+      isFollowUp: isFollowUp,
+      createdAt: dt,
+    );
+  }
+
+  /// Alias
+  factory Question.fromMap(Map<String, dynamic> j) => Question.fromJson(j);
+
+  /// Serialisierung in Map (für JSON, Persistenz)
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'id': id,
+        'text': text,
+        'isFollowUp': isFollowUp,
+        if (createdAt != null) 'createdAt': createdAt!.toUtc().toIso8601String(),
+      };
+
+  /// Alias
+  Map<String, dynamic> toMap() => toJson();
+
+  /// Kopie mit Änderungen (immutables Pattern)
+  Question copyWith({
+    String? id,
+    String? text,
+    bool? isFollowUp,
+    DateTime? createdAt,
+  }) {
+    return Question(
+      id: id ?? this.id,
+      text: text ?? this.text,
+      isFollowUp: isFollowUp ?? this.isFollowUp,
+      createdAt: createdAt ?? this.createdAt,
+    );
+  }
+
+  /// Hilfreich für Sortierung: neue zuerst (fallback auf id, wenn kein Datum)
+  int compareByRecency(Question other) {
+    final a = createdAt;
+    final b = other.createdAt;
+    if (a != null && b != null) {
+      final cmp = b.compareTo(a);
+      if (cmp != 0) return cmp;
+      // Tie-breaker: ID absteigend, damit stabil
+      return other.id.compareTo(id);
+    }
+    if (a == null && b == null) return other.id.compareTo(id);
+    return a == null ? 1 : -1; // Fragen ohne Datum ans Ende
+  }
+
+  /// Bequemer Validitätscheck
+  bool get isValid => id.isNotEmpty && text.trim().isNotEmpty;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is Question &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          text == other.text &&
+          isFollowUp == other.isFollowUp &&
+          createdAt == other.createdAt;
+
+  @override
+  int get hashCode => Object.hash(id, text, isFollowUp, createdAt);
+
+  @override
+  String toString() =>
+      'Question(id: $id, followUp: $isFollowUp, createdAt: $createdAt, text: $text)';
+
+  // ---- Helpers ----
+
+  /// Intuitive Bool-Deserialisierung (true/false, 1/0, yes/no, ja/nein, y/n)
+  static bool? _readBool(dynamic v) {
+    if (v == null) return null;
+    if (v is bool) return v;
+    if (v is num) return v != 0;
+    final s = v.toString().trim().toLowerCase();
+    if (s.isEmpty) return null;
+    if (const ['true', '1', 'yes', 'y', 'ja', 'wahr'].contains(s)) return true;
+    if (const ['false', '0', 'no', 'n', 'nein', 'falsch'].contains(s)) return false;
+    return null;
+  }
+
+  /// Akzeptiert ISO-String, Sekunden/Millis/Mikrosekunden seit Epoch, DateTime und numerische Strings
+  static DateTime? _parseDate(dynamic v) {
+    if (v == null) return null;
+    if (v is DateTime) return v.toUtc();
+    if (v is num) {
+      final n = v.toInt().abs();
+      if (n < 1000000000000) {
+        // Sekunden
+        return DateTime.fromMillisecondsSinceEpoch(v.toInt() * 1000, isUtc: true);
+      } else if (n < 10000000000000000) {
+        // Millisekunden
+        return DateTime.fromMillisecondsSinceEpoch(v.toInt(), isUtc: true);
+      } else {
+        // Mikrosekunden
+        return DateTime.fromMicrosecondsSinceEpoch(v.toInt(), isUtc: true);
+      }
+    }
+    if (v is String) {
+      final s = v.trim();
+      if (s.isEmpty) return null;
+      final digitsOnly = RegExp(r'^\d+$');
+      if (digitsOnly.hasMatch(s)) {
+        // numerischer String → wiederverwende num-Pfad
+        return _parseDate(int.parse(s));
+      }
+      try {
+        return DateTime.parse(s).toUtc();
+      } catch (_) {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  /// Fallback-ID (deterministisch), falls keine ID geliefert wird
+  static String _fallbackId(DateTime? created, String text) {
+    final ts = (created ?? DateTime.now().toUtc()).millisecondsSinceEpoch;
+    return 'q_${ts}_${text.hashCode}';
+  }
+
+  /// Leeres Objekt (z. B. für Placeholders)
+  static const empty = Question(id: '', text: '', isFollowUp: false);
 }

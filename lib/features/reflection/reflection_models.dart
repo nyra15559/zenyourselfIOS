@@ -1,24 +1,18 @@
 // lib/features/reflection/reflection_models.dart
 // Part: Modelle/Typen/Utils (library: reflection_screen)
 // -----------------------------------------------------------------------------
-// v3.24 — Worker v15.x Alignment (Oxford style)
-// - Frage optional (0–1): liest 'question' ODER 'output_text' (Fallback: first of
-//   'questions' | 'qs' | 'multi_questions').
-// - Answer-Chips: liest primär 'answer_helpers' (+ Aliase & verschachtelt in flow/ui);
-//   Fallback: 'followups'; toleriert auch String mit Aufzählungs-Trennzeichen.
-// - helperSuggestion: neues optionales Feld; liest 'helper_suggestion' (+ Aliase,
-//   auch verschachtelt in flow/ui).
-// - risk: wie im Screen → risk_level in {high, mild} → true; Fallback: bool 'risk'.
-// - toMap: schreibt zusätzlich 'answer_helpers' + 'helper_suggestion'.
-// - normalizeForCompare: whitespace-normalisiert (Deckungsgleich mit Screen).
-// - Robustere (De-)Serialisierung: 'talk' akzeptiert List oder String (und
-//   toleriert 'smalltalk_reply').
+// v3.25.1 — Worker v15.x Alignment (Oxford style, +Flow/Session-Checks, fixes)
+// - Risk-Fallback robuster: _asBool(m['risk']) statt striktem == true
+// - Followups: Doppelpunkte am Ende entfernen (harmoniert mit UI-Chips)
+// - String→Liste: Trennzeichen „;“ auch ohne Leerraum splitten (\s*;\s*)
+// - Answer-Helper: weitere verschachtelte Aliase (flow/ui: chips/answers/options)
+// - Bestehende v3.25 Features bleiben unverändert (Fragen/Chips/HelperSuggestion)
 // -----------------------------------------------------------------------------
-//
+/*
 // Lints / Analyzer:
 // Private Typen in öffentlicher API sind hier bewusst gewollt.
 // Unterdrücken wir zentral für diese Datei:
-//
+*/
 // ignore_for_file: library_private_types_in_public_api
 
 part of 'reflection_screen.dart';
@@ -174,7 +168,7 @@ class _PandaStep {
 
     // risk: wie im Screen — nur 'high' oder 'mild' setzen das UI-Risiko-Flag; sonst Fallback auf bool.
     final rl = _asString(m['risk_level']).toLowerCase();
-    final risk = (rl == 'high' || rl == 'mild') || (m['risk'] == true);
+    final risk = (rl == 'high' || rl == 'mild') || _asBool(m['risk']);
 
     // Helper-Satz: 'helper_suggestion' (oder Aliase), ggf. aus flow/ui verschachtelt.
     final hs = _pickFirstNonEmptyString([
@@ -258,7 +252,8 @@ class _PandaStep {
       var s = raw.toString().trim();
       if (s.isEmpty) return '';
       s = s.replaceAll(RegExp(r'^[„“"»«]+|[„“"»«]+$'), '');
-      s = s.replaceAll(RegExp(r'[?？.。!！]+$'), ''); // '…' bleibt bewusst stehen
+      s = s.replaceAll(RegExp(r'[?？.。!！]+$'), '');   // '…' bleibt bewusst stehen
+      s = s.replaceAll(RegExp(r'\s*[:：]\s*$'), '');  // Doppelpunkte am Ende weg
       s = s.replaceAll(RegExp(r'\s+'), ' ').trim();
       if (s.length > 72) s = '${s.substring(0, 72).trimRight()}…';
       return s;
@@ -299,8 +294,12 @@ class _PandaStep {
     final nested = <String>[
       ...asList(flow['answer_helpers']),
       ...asList(flow['helpers']),
+      ...asList(flow['chips']),
+      ...asList(flow['answers']),
       ...asList(ui['answer_helpers']),
       ...asList(ui['chips']),
+      ...asList(ui['answers']),
+      ...asList(ui['options']),
     ];
 
     final raw = <String>[...top, ...nested]
@@ -380,7 +379,7 @@ class ReflectionRound {
   bool get answered => steps.any((s) => s.hasAnswer);
 
   /// true, wenn die Stimmung gesetzt ist.
-  bool get hasMood => moodScore != null;
+  bool get hasMood => moodScore != null || ((moodLabel ?? '').trim().isNotEmpty);
 
   /// true, wenn Antwort + Stimmung vorhanden sind.
   bool get isComplete => answered && hasMood;
@@ -480,10 +479,10 @@ class ReflectionRound {
       userInput: _asString(m['userInput']),
       steps: parsedSteps,
       entryId: _asNullableTrimmedString(m['entryId']),
-      moodScore: (m['moodScore'] is int) ? m['moodScore'] as int : null,
+      moodScore: _coerceInt(m['moodScore']),
       moodLabel: _asNullableTrimmedString(m['moodLabel']),
       moodIntro: _asNullableTrimmedString(m['moodIntro']),
-      allowClosure: m['allowClosure'] == true,
+      allowClosure: _asBool(m['allowClosure']),
     );
   }
 
@@ -567,7 +566,7 @@ class ReflectionRound {
 }
 
 // =============================================================================
-// Shared Normalizer & Utils
+/* Shared Normalizer & Utils */
 // =============================================================================
 
 /// Vergleicht Fragen „weich“: nur Leerzeichen werden zusammengezogen, Kleinbuchstaben.
@@ -612,7 +611,7 @@ List<String> _asStringList(dynamic v) {
     final s = v.trim();
     if (s.isEmpty) return const <String>[];
     final parts = s
-        .split(RegExp(r'\n+|[•\-–—]\s+|;\s+'))
+        .split(RegExp(r'\n+|[•\-–—]\s+|\s*;\s*'))
         .map((e) => e.trim())
         .where((e) => e.isNotEmpty)
         .toList();
@@ -659,5 +658,171 @@ String? _pickFirstNonEmptyString(List<dynamic> candidates) {
     final s = _asNullableTrimmedString(c);
     if (s != null && s.isNotEmpty) return s;
   }
+  return null;
+}
+
+// =============================================================================
+// TurnProbe — Session/Flow Normalizer & Checks (ergänzend, ohne Brüche)
+// =============================================================================
+
+/// Hilfsklasse zur robusten Normalisierung von Session- und Flow-Feldern
+/// über unterschiedliche Worker-Versionen hinweg.
+/// * Nicht invasiv: Nur Zusatz-Utilities. Bestehende Modelle bleiben unverändert.
+class TurnProbe {
+  TurnProbe._();
+
+  /// Normalisiert eine Session-Struktur auf den Kanon:
+  /// {thread_id, turn_index, max_turns}
+  static JsonMap coerceSession(dynamic turnOrSession) {
+    dynamic s;
+
+    if (turnOrSession is Map && turnOrSession['session'] != null) {
+      s = turnOrSession['session'];
+    } else if (turnOrSession is Map) {
+      s = turnOrSession;
+    } else {
+      try {
+        final j = (turnOrSession as dynamic).toJson?.call();
+        if (j is Map) s = j['session'] ?? j;
+      } catch (_) {}
+    }
+
+    final map =
+        (s is Map) ? Map<String, dynamic>.from(s as Map) : <String, dynamic>{};
+
+    final threadId = _pickFirstNonEmptyString([
+          map['thread_id'],
+          map['id'],
+          map['threadId'],
+        ]) ??
+        '';
+    final turnIdx = _coerceInt(map['turn_index'] ?? map['turn'] ?? map['turnIndex']) ?? 0;
+    final maxTurns = _coerceInt(map['max_turns'] ?? map['maxTurns']) ?? 3;
+
+    return {
+      'thread_id': threadId,
+      'turn_index': turnIdx,
+      'max_turns': maxTurns,
+    };
+  }
+
+  /// Normalisiert Flow-Flags auf den Kanon:
+  /// {mood_prompt, recommend_end, [question], [insight_score]}
+  static JsonMap coerceFlow(dynamic turnOrFlow) {
+    Map<String, dynamic> f = const {};
+    if (turnOrFlow is Map && turnOrFlow['flow'] is Map) {
+      f = Map<String, dynamic>.from(turnOrFlow['flow'] as Map);
+    } else if (turnOrFlow is Map) {
+      f = Map<String, dynamic>.from(turnOrFlow);
+    } else {
+      try {
+        final j = (turnOrFlow as dynamic).toJson?.call();
+        if (j is Map && j['flow'] is Map) {
+          f = Map<String, dynamic>.from(j['flow'] as Map);
+        }
+      } catch (_) {}
+    }
+
+    final recommendEnd = _asBool(f['recommend_end']);
+    final moodPrompt = _asBool(f['mood_prompt']) ||
+        recommendEnd ||
+        _asBool(_extractNested(turnOrFlow, const ['mood', 'prompt']));
+    final q = _pickFirstNonEmptyString([
+      f['question'],
+      ..._asStringList(f['questions']),
+      _extractNested(turnOrFlow, const ['question']),
+    ]);
+    final iscore = _coerceNum(f['insight_score']);
+
+    return <String, dynamic>{
+      'mood_prompt': moodPrompt,
+      'recommend_end': recommendEnd,
+      if ((q ?? '').toString().trim().isNotEmpty) 'question': q!.trim(),
+      if (iscore != null) 'insight_score': iscore,
+    };
+  }
+
+  /// Risk-Level → 'high' | 'mild' | 'none' (bool 'risk' als Fallback mild).
+  static String riskLevel(dynamic turn) {
+    final rl = _asString(_extractNested(turn, const ['risk_level'])).toLowerCase();
+    final legacy = _asString(_extractNested(turn, const ['level'])).toLowerCase();
+    if (rl == 'high' || rl == 'mild') return rl;
+    if (legacy == 'high' || legacy == 'mild') return legacy;
+    final flag = _asBool(_extractNested(turn, const ['risk']));
+    return flag ? 'mild' : 'none';
+  }
+
+  /// Risk-Flag (true bei high/mild oder bool 'risk' == true).
+  static bool risk(dynamic turn) {
+    final lvl = riskLevel(turn);
+    return (lvl == 'high' || lvl == 'mild') ||
+        _asBool(_extractNested(turn, const ['risk']));
+  }
+
+  /// Prüft, ob die Session dem Kanon entspricht (alle Schlüssel vorhanden).
+  static bool isCanonicalSession(dynamic turnOrSession) {
+    final s = coerceSession(turnOrSession);
+    return _asString(s['thread_id']).isNotEmpty &&
+        s['turn_index'] is int &&
+        s['max_turns'] is int;
+  }
+
+  /// Prüft, ob die Flow-Flags dem Kanon entsprechen (beide Bool-Keys vorhanden).
+  static bool isCanonicalFlow(dynamic turnOrFlow) {
+    final f = coerceFlow(turnOrFlow);
+    return f.containsKey('mood_prompt') && f.containsKey('recommend_end');
+  }
+}
+
+// ---- interne Helfer für TurnProbe ------------------------------------------
+
+dynamic _extractNested(dynamic obj, List<String> path) {
+  dynamic cur = obj;
+  for (final k in path) {
+    if (cur == null) return null;
+    if (cur is Map) {
+      cur = cur[k];
+      continue;
+    }
+    try {
+      final j = (cur as dynamic).toJson?.call();
+      if (j is Map) {
+        cur = j[k];
+        continue;
+      }
+    } catch (_) {}
+    try {
+      cur = (cur as dynamic)[k];
+    } catch (_) {
+      return null;
+    }
+  }
+  return cur;
+}
+
+bool _asBool(dynamic v) {
+  if (v is bool) return v;
+  if (v is num) return v != 0;
+  if (v is String) {
+    final s = v.trim().toLowerCase();
+    return s == 'true' || s == '1' || s == 'yes' || s == 'y';
+  }
+  return false;
+}
+
+int? _coerceInt(dynamic v) {
+  if (v is int) return v;
+  if (v is num) return v.toInt();
+  if (v is String) {
+    final s = v.trim();
+    if (s.isEmpty) return null;
+    return int.tryParse(s);
+  }
+  return null;
+}
+
+num? _coerceNum(dynamic v) {
+  if (v is num) return v;
+  if (v is String) return num.tryParse(v.trim());
   return null;
 }

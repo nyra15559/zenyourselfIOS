@@ -1,28 +1,32 @@
 // lib/services/guidance_service.dart
 //
-// ZenYourself — Guidance / Coaching Service (PANDA-REFLECT-12.6)
+// ZenYourself — Guidance / Coaching Service (PANDA-REFLECT-12.7 → v6.4.1)
 // -----------------------------------------------------------------------------
-// Fassade über core/ApiService mit UI-freundlicher Normalisierung.
-// Garantien / Verhalten:
-// • UI erhält NUR answer_helpers (max. 3, sanitisiert). Interner Fallback auf
-//   followups, aber diese werden NICHT an die UI zurückgereicht.
-// • Mindestens 2 Answer-Chips: Liefert der Worker nur 1, ergänzt der Service
-//   sanft einen zweiten generischen Starter („Wichtig ist mir außerdem“).
-// • Zusätzlich answer_helpers_insert: Variante zum direkten Einfügen ins Textfeld
-//   (ohne „…“, ohne Satzzeichen, ohne Auto-Send).
-// • Chips sind Insert-only, persistieren bis User-Interaktion, werden NICHT
-//   inline als Chat-Bubble gerendert (composer_only).
-// • Frage wird unterdrückt, wenn flow.mood_prompt bzw. recommend_end aktiv ist.
-// • Ruhiger Ton: Mirror wird von Instruktionssätzen befreit; reine Frage ≠ Mirror.
-// • Risk-Mapping {none|mild|high}; risk=true bei mild/high.
-// • Session passthrough; Legacy-Keys werden robust behandelt.
-// • Footer-Disclaimer wird immer durchgereicht.
-// • recentTopics()/recentHelpers(): liefern bewusst leere Listen
-//   (Themenchips laufen „nur im Background“ / UI zeigt nichts).
+// Fassade über core/ApiService mit *zwei* stabilen Ebenen:
+// 1) Typed-API (Primary): liefert ReflectionTurn (für Controller/VM)
+// 2) Normalized-API (Convenience): liefert UI-freundliches Json
 //
-// Hinweis: Dieser Service ruft NUR Methoden, die in ApiService vorhanden sind.
-// Keine harte Abhängigkeit auf entfernte/optionale ApiService-Methoden.
+// Neu (v6.4.1):
+// • Kleine Robustheitsverbesserungen beim Risk-Normalizer und Chip-Handling.
+// • Präzisere Telemetrie-Flags in _buildMeta().
+// • Kommentare/Docs aufgeräumt.
 //
+// v6.4.0:
+// • Voller `meta`-Support in start/next/reflect/closure — wird an ApiService
+//   durchgereicht, *rückwärtskompatibel* via dyn-call + Fallback ohne `meta`.
+//
+// v6.3.x (zur Einordnung):
+// • Alle "Full"-Aufrufe können optional `memories` (dynamic) + `memoryConsent` (bool)
+//   durchreichen. Der ApiService verpackt dies als `context.memories{...}` (snake_case)
+//   und setzt `memory_consent: true|false`. Tolerant gegenüber Map/DTO/String.
+// • recallTopics(): nutzt topicHint bereits für das Ranking im Memory-Recall.
+// • Normalized-JSON enthält (falls vorhanden) auch `analysis` inkl. `insight_score`,
+//   sowie optionale `topic_suggestions`. `insight_score` kommt aus TurnAnalysis.
+// • Keine PII im Logging; nur knappe Debug-Hinweise.
+// • Garantien: mind. 2 Answer-Chips (sanfter Fallback), ruhiger Mirror,
+//   Risk-Mapping {none|mild|high}, Session passthrough.
+//
+// -----------------------------------------------------------------------------
 
 library guidance_service;
 
@@ -32,7 +36,7 @@ import 'package:flutter/foundation.dart' show debugPrint, kDebugMode;
 import 'core/api_service.dart';
 import 'guidance/dtos.dart';
 
-// Memory-Fassade (für UI-Bridge/Hope & optionalen Debug-Hint)
+// Memory-Fassade (für UI-Bridge/Hope & optionalen Debug-Hinweis)
 import '../core/memory/memory_service.dart' as mem;
 
 typedef Json = Map<String, dynamic>;
@@ -46,8 +50,9 @@ class GuidanceService {
   static const String kFooterDisclaimer =
       'Dies ist keine Therapie, sondern eine mentale Begleitungs-App.';
 
-  // Sanfter, universeller Fallback-Text für den 2. Chip
+  // Sanfter, universeller Fallback-Text für Chips
   static const String _kFallbackChipSeed = 'Wichtig ist mir außerdem';
+  static const String _kFallbackChipSeedAlt = 'Ich mag klein anfangen';
 
   String get errorHint => ApiService.errorHint;
 
@@ -70,127 +75,407 @@ class GuidanceService {
     }
   }
 
-  Future<bool> health() => ApiService.instance.healthCheck();
-
-  // ---------------------------------------------------------------------------
-  // Reflect / Session
-  // ---------------------------------------------------------------------------
-
-  /// Legacy-Start (Kompatibilität).
-  Future<Json> startSession({
-    required String text,
-    String locale = 'de',
-    String tz = 'Europe/Zurich',
-    int maxTurns = 3,
-    List<Map<String, String>>? history,
-    Map<String, dynamic>? clientContext, // bleibt toleriert, derzeit ungenutzt
-  }) async {
-    final turn = await ApiService.instance.startSessionFull(
-      text: text,
-      session: null,
-      locale: locale,
-      tz: tz,
-      maxTurns: maxTurns,
-      history: history,
+  /// Bequeme Worker-Konfiguration (Wrapper um ApiService.configureForWorker).
+  void configureForWorker({
+    required String baseUrl,
+    String? appToken,
+    Duration timeout = const Duration(seconds: 25),
+  }) {
+    ApiService.instance.configureForWorker(
+      baseUrl: baseUrl,
+      appToken: appToken,
+      timeout: timeout,
     );
-    return _turnToJson(turn);
+    if (kDebugMode) {
+      debugPrint('[GuidanceService] Worker configured '
+          '(base=$baseUrl, token=${appToken == null ? 'none' : '***'}, timeout=${timeout.inSeconds}s)');
+    }
   }
 
-  /// Start einer v12-Runde (voll).
-  Future<Json> startSessionFull({
+  Future<bool> health() => ApiService.instance.healthCheck();
+
+  // ===========================================================================
+  // 1) TYPED-API (Primary) — liefert ReflectionTurn (kompatibel zu Controller)
+  // ===========================================================================
+
+  Future<ReflectionTurn> startSessionFull({
     required String text,
     ReflectionSession? session,
     String locale = 'de',
     String tz = 'Europe/Zurich',
     int maxTurns = 3,
     List<Map<String, String>>? history,
+    dynamic memories,                // optional
+    bool memoryConsent = false,      // optional
+    UserAction? userAction,          // optional
+    Map<String, dynamic>? clientContext,
+    Map<String, dynamic>? meta,      // ✅ neu (rückwärtskompatibel)
   }) async {
-    final turn = await ApiService.instance.startSessionFull(
+    final svc = ApiService.instance;
+    try {
+      // Neuer ApiService mit `meta`?
+      final dyn = svc as dynamic;
+      final Future<ReflectionTurn>? fut = dyn.startSessionFull?.call(
+        text: text,
+        session: session,
+        locale: locale,
+        tz: tz,
+        maxTurns: maxTurns,
+        history: history,
+        memories: memories,
+        memoryConsent: memoryConsent,
+        userAction: userAction,
+        clientContext: clientContext,
+        meta: meta, // <—
+      );
+      if (fut != null) return await fut;
+    } catch (_) {/* fall back */}
+    // Fallback ohne `meta`
+    return ApiService.instance.startSessionFull(
       text: text,
       session: session,
       locale: locale,
       tz: tz,
       maxTurns: maxTurns,
       history: history,
+      memories: memories,
+      memoryConsent: memoryConsent,
+      userAction: userAction,
+      clientContext: clientContext,
     );
-    return _turnToJson(turn);
   }
 
-  /// Fortsetzung (voll).
-  Future<Json> nextTurnFull({
+  Future<ReflectionTurn> reflectFull({
     required ReflectionSession session,
     required String text,
     String locale = 'de',
     String tz = 'Europe/Zurich',
     List<Map<String, String>>? history,
+    dynamic memories,                // optional
+    bool memoryConsent = false,      // optional
+    UserAction? userAction,
+    Map<String, dynamic>? clientContext,
+    Map<String, dynamic>? meta,      // ✅ neu
   }) async {
-    final turn = await ApiService.instance.nextTurnFull(
+    final svc = ApiService.instance;
+    try {
+      final dyn = svc as dynamic;
+      final Future<ReflectionTurn>? fut = dyn.reflectFull?.call(
+        text: text,
+        session: session,
+        locale: locale,
+        tz: tz,
+        history: history,
+        memories: memories,
+        memoryConsent: memoryConsent,
+        userAction: userAction,
+        clientContext: clientContext,
+        meta: meta,
+      );
+      if (fut != null) return await fut;
+    } catch (_) {/* fall back */}
+    return ApiService.instance.reflectFull(
+      text: text,
+      session: session,
+      locale: locale,
+      tz: tz,
+      history: history,
+      memories: memories,
+      memoryConsent: memoryConsent,
+      userAction: userAction,
+      clientContext: clientContext,
+    );
+  }
+
+  Future<ReflectionTurn> nextTurnFull({
+    required ReflectionSession session,
+    required String text,
+    String locale = 'de',
+    String tz = 'Europe/Zurich',
+    List<Map<String, String>>? history,
+    dynamic memories,                // optional
+    bool? memoryConsent,             // optional
+    UserAction? userAction,
+    Map<String, dynamic>? clientContext,
+    Map<String, dynamic>? meta,      // ✅ neu
+  }) async {
+    final svc = ApiService.instance;
+    try {
+      final dyn = svc as dynamic;
+      final Future<ReflectionTurn>? fut = dyn.nextTurnFull?.call(
+        session: session,
+        text: text,
+        locale: locale,
+        tz: tz,
+        history: history,
+        memories: memories,
+        memoryConsent: memoryConsent,
+        userAction: userAction,
+        clientContext: clientContext,
+        meta: meta,
+      );
+      if (fut != null) return await fut;
+    } catch (_) {/* fall back */}
+    return ApiService.instance.nextTurnFull(
       session: session,
       text: text,
       locale: locale,
       tz: tz,
       history: history,
+      memories: memories,
+      memoryConsent: memoryConsent,
+      userAction: userAction,
+      clientContext: clientContext,
     );
-    return _turnToJson(turn);
   }
 
-  /// Shim für alte Call-Sites.
-  Future<Json> reflectFull({
+  Future<ReflectionTurn> nextTurnAction({
     required ReflectionSession session,
-    required String text,
+    required UserAction action,
     String locale = 'de',
     String tz = 'Europe/Zurich',
   }) async {
-    final turn = await ApiService.instance.nextTurnFull(
+    final svc = ApiService.instance;
+    try {
+      final dyn = svc as dynamic;
+      final Future<ReflectionTurn>? fut = dyn.nextTurnAction?.call(
+        session: session,
+        action: action,
+        locale: locale,
+        tz: tz,
+      );
+      if (fut != null) return await fut;
+    } catch (_) {/* fallback unten */}
+    return ApiService.instance.nextTurnFull(
       session: session,
-      text: text,
+      text: '',
       locale: locale,
       tz: tz,
     );
-    return _turnToJson(turn);
   }
 
-  /// Smalltalk / „Ich will nur erzählen“ (talkOnly-Pfad).
-  Future<Json> talk({
+  Future<ReflectionTurn> talk({
     required ReflectionSession session,
     String? userText,
     String locale = 'de',
     String tz = 'Europe/Zurich',
     List<Map<String, String>>? history,
-  }) async {
-    final turn = await ApiService.instance.talk(
+    UserAction? userAction,
+    Map<String, dynamic>? clientContext,
+  }) {
+    return ApiService.instance.talk(
       session: session,
       userText: userText,
       locale: locale,
       tz: tz,
       history: history,
+      userAction: userAction,
+      clientContext: clientContext,
     );
-    return _turnToJson(turn);
+  }
+
+  // ===========================================================================
+  // 2) NORMALIZED-API (Convenience) — liefert UI-freundliches Json
+  // ===========================================================================
+
+  Future<Json> startSession({
+    required String text,
+    String locale = 'de',
+    String tz = 'Europe/Zurich',
+    int maxTurns = 3,
+    List<Map<String, String>>? history,
+    Map<String, dynamic>? clientContext,
+    dynamic memories,           // optional
+    bool memoryConsent = false, // optional
+    UserAction? userAction,     // optional
+    Map<String, dynamic>? meta, // ✅ neu
+  }) async {
+    final t = await startSessionFull(
+      text: text,
+      session: null,
+      locale: locale,
+      tz: tz,
+      maxTurns: maxTurns,
+      history: history,
+      clientContext: clientContext,
+      memories: memories,
+      memoryConsent: memoryConsent,
+      userAction: userAction,
+      meta: meta,
+    );
+    return _turnToJson(t);
+  }
+
+  Future<Json> startSessionNormalized({
+    required String text,
+    ReflectionSession? session,
+    String locale = 'de',
+    String tz = 'Europe/Zurich',
+    int maxTurns = 3,
+    List<Map<String, String>>? history,
+    dynamic memories,                // optional
+    bool memoryConsent = false,      // optional
+    Map<String, dynamic>? clientContext,
+    UserAction? userAction,
+    Map<String, dynamic>? meta,      // ✅ neu
+  }) async {
+    final t = await startSessionFull(
+      text: text,
+      session: session,
+      locale: locale,
+      tz: tz,
+      maxTurns: maxTurns,
+      history: history,
+      memories: memories,
+      memoryConsent: memoryConsent,
+      clientContext: clientContext,
+      userAction: userAction,
+      meta: meta,
+    );
+    return _turnToJson(t);
+  }
+
+  Future<Json> nextTurnNormalized({
+    required ReflectionSession session,
+    required String text,
+    String locale = 'de',
+    String tz = 'Europe/Zurich',
+    List<Map<String, String>>? history,
+    dynamic memories,           // optional
+    bool? memoryConsent,        // optional
+    Map<String, dynamic>? clientContext,
+    UserAction? userAction,
+    Map<String, dynamic>? meta, // ✅ neu
+  }) async {
+    final t = await nextTurnFull(
+      session: session,
+      text: text,
+      locale: locale,
+      tz: tz,
+      history: history,
+      memories: memories,
+      memoryConsent: memoryConsent,
+      clientContext: clientContext,
+      userAction: userAction,
+      meta: meta,
+    );
+    return _turnToJson(t);
+  }
+
+  Future<Json> reflectNormalized({
+    required ReflectionSession session,
+    required String text,
+    String locale = 'de',
+    String tz = 'Europe/Zurich',
+    List<Map<String, String>>? history,
+    dynamic memories,                // optional
+    bool memoryConsent = false,      // optional
+    Map<String, dynamic>? clientContext,
+    UserAction? userAction,
+    Map<String, dynamic>? meta,      // ✅ neu
+  }) async {
+    final t = await reflectFull(
+      session: session,
+      text: text,
+      locale: locale,
+      tz: tz,
+      history: history,
+      memories: memories,
+      memoryConsent: memoryConsent,
+      clientContext: clientContext,
+      userAction: userAction,
+      meta: meta,
+    );
+    return _turnToJson(t);
+  }
+
+  Future<Json> nextTurnActionNormalized({
+    required ReflectionSession session,
+    required UserAction action,
+    String locale = 'de',
+    String tz = 'Europe/Zurich',
+  }) async {
+    final t = await nextTurnAction(
+      session: session,
+      action: action,
+      locale: locale,
+      tz: tz,
+    );
+    return _turnToJson(t);
+  }
+
+  Future<Json> talkNormalized({
+    required ReflectionSession session,
+    String? userText,
+    String locale = 'de',
+    String tz = 'Europe/Zurich',
+    List<Map<String, String>>? history,
+    Map<String, dynamic>? clientContext,
+    UserAction? userAction,
+  }) async {
+    final t = await talk(
+      session: session,
+      userText: userText,
+      locale: locale,
+      tz: tz,
+      history: history,
+      clientContext: clientContext,
+      userAction: userAction,
+    );
+    return _turnToJson(t);
   }
 
   // ---------------------------------------------------------------------------
-  // Closure / Mood-Intro
+  // Closure / Mood-Intro (liefert Json; typed ist hier nicht nötig)
   // ---------------------------------------------------------------------------
   Future<Json> closureFull({
     required ReflectionSession? session,
     required String answer,
     String locale = 'de',
     String tz = 'Europe/Zurich',
+    Map<String, dynamic>? meta, // ✅ neu
   }) async {
     try {
-      final res = await ApiService.instance.closureFull(
-        session: session,
-        answer: answer,
-        locale: locale,
-        tz: tz,
-      );
+      // Neuer ApiService mit `meta`?
+      Map<String, dynamic> res;
+      try {
+        final dyn = ApiService.instance as dynamic;
+        final Future<Map<String, dynamic>>? fut = dyn.closureFull?.call(
+          session: session,
+          answer: answer,
+          locale: locale,
+          tz: tz,
+          meta: meta,
+        );
+        if (fut != null) {
+          res = await fut;
+        } else {
+          // Fallback ohne meta
+          res = await ApiService.instance.closureFull(
+            session: session,
+            answer: answer,
+            locale: locale,
+            tz: tz,
+          );
+        }
+      } on NoSuchMethodError {
+        res = await ApiService.instance.closureFull(
+          session: session,
+          answer: answer,
+          locale: locale,
+          tz: tz,
+        );
+      }
+
       final norm = _normalizeClosureResponse(res);
+      final risk = _normalizeRisk(res);
+
       return {
         ...norm,
+        ...risk, // garantiert: risk_level + risk
         'disclaimer': kFooterDisclaimer,
       };
     } on NoSuchMethodError {
-      // Sehr alte Builds: minimaler Fallback
       return <String, dynamic>{
         'flow': {
           'recommend_end': true,
@@ -202,10 +487,10 @@ class GuidanceService {
           'hope_reply': '',
           'closure_prompt': '',
         },
+        ..._normalizeRisk(null),
         'disclaimer': kFooterDisclaimer,
       };
     } catch (_) {
-      // Netz/Worker-Fehler: minimal
       return <String, dynamic>{
         'flow': {
           'recommend_end': true,
@@ -217,6 +502,7 @@ class GuidanceService {
           'hope_reply': '',
           'closure_prompt': '',
         },
+        ..._normalizeRisk(null),
         'disclaimer': kFooterDisclaimer,
       };
     }
@@ -254,17 +540,13 @@ class GuidanceService {
   // Memory-Recall (UI-Fassade) — Phase 1
   // ---------------------------------------------------------------------------
 
-  /// Liefert deduplizierte Top-Themen aus dem lokalen Memory (für Bridge/Hope).
-  /// *Kein* Einfluss auf den Worker — der `context_hint` wird bereits im ApiService
-  /// automatisch mitgeschickt.
   Future<List<String>> recallTopics({int limit = 6, String? topicHint}) async {
     try {
-      // Signatur-tolerant: nur limit übergeben; optional nachträglich filtern.
-      final items = await mem.MemoryService.instance.recall(limit: limit);
+      final items = await mem.MemoryService.instance
+          .recall(limit: limit, topicHint: topicHint);
 
       final out = <String>[];
       String topicOf(dynamic it) {
-        // tolerant gegenüber Map, DTO, toJson()
         if (it is Map) {
           final m = Map<String, dynamic>.from(it);
           return (m['topic'] ?? m['tag'] ?? '').toString();
@@ -303,9 +585,6 @@ class GuidanceService {
     }
   }
 
-  /// Optionaler Debug-/Telemetry-Helfer: Gibt den aktuellen Kontext-Hint
-  /// (die kompakte Payload) so zurück, wie er an den Worker gesendet wird.
-  /// Praktisch für Logs oder A/B-Checks – UI nutzt das nicht direkt.
   Future<Json?> contextHint({
     int maxFacets = 3,
     int maxTags = 5,
@@ -331,7 +610,6 @@ class GuidanceService {
         return null;
       }
 
-      // tolerant: Feldnamen wie in MemoryContextHint (facets/tags/topics)
       final facets = asList((hint as dynamic).facets);
       final tags = asList((hint as dynamic).tags);
       final topics = asList((hint as dynamic).topics);
@@ -349,33 +627,35 @@ class GuidanceService {
   // ---------------------------------------------------------------------------
   // Home/Starter-Chips: bewusst leer (nur „Background“)
   // ---------------------------------------------------------------------------
-
-  /// Themen-Starter: aktuell leer lassen (UI zeigt nichts an).
   Future<List<String>> recentTopics({int limit = 6}) async => <String>[];
-
-  /// Letzte Answer-Chips: aktuell leer lassen (UI optional).
   Future<List<String>> recentHelpers({int limit = 3}) async => <String>[];
 
-  // ---------------------------------------------------------------------------
+  // ===========================================================================
   // Helpers (Sanitizer / Normalisierung)
-  // ---------------------------------------------------------------------------
+  // ===========================================================================
 
-  /// Extrahiert & säubert Answer-Chips (max. 3). Fallback auf followups (intern).
-  /// ACHTUNG: Mindestens 2 Chips sicherstellen (Service-seitig).
+  /// Extrahiert & säubert Answer-Chips (max. 3). Fallback auf followups.
+  /// **Mindestens 2 Chips**: bei 0 → 2 Defaults, bei 1 → 1 Default ergänzen.
   List<String> _extractAnswerHelpers(ReflectionTurn t) {
     final primary = t.answerHelpers;
     final legacy = t.followups;
     final candidates = primary.isNotEmpty ? primary : legacy;
 
+    final seen = <String>{};
     final out = <String>[];
     for (final f in candidates) {
       final cleaned = _cleanChipForDisplay(f);
-      if (cleaned.isNotEmpty) out.add(cleaned);
+      if (cleaned.isEmpty) continue;
+      final key = cleaned.toLowerCase();
+      if (!seen.add(key)) continue;
+      out.add(cleaned);
       if (out.length >= 3) break;
     }
 
-    if (out.length == 1) {
-      // Sanfter zweiter Starter (Display-Variante mit „…“)
+    if (out.isEmpty) {
+      out.add(_cleanChipForDisplay(_kFallbackChipSeed));
+      out.add(_cleanChipForDisplay(_kFallbackChipSeedAlt));
+    } else if (out.length == 1) {
       out.add(_cleanChipForDisplay(_kFallbackChipSeed));
     }
     return out;
@@ -387,6 +667,7 @@ class GuidanceService {
     x = x.replaceAll(RegExp(r'^[0-9]+[.)]\s+'), '');
     x = x.replaceAll(RegExp(r'^[\u2013\-\u2022\s]+'), '');
     x = x.replaceAll(RegExp('^[„“"\'»«]+'), '');
+    x = x.replaceAll(RegExp(r'\s*[:：]\s*$'), ''); // trailing ':' entfernen
     x = x.replaceAll(RegExp(r'\s+'), ' ').trim();
     x = x.replaceAll(RegExp(r'\s*[?!]+$'), '');
     if (x.length > 72) x = '${x.substring(0, 72).trimRight()}…';
@@ -400,6 +681,7 @@ class GuidanceService {
     x = x.replaceAll(RegExp(r'^[0-9]+[.)]\s+'), '');
     x = x.replaceAll(RegExp(r'^[\u2013\-\u2022\s]+'), '');
     x = x.replaceAll(RegExp('^[„“"\'»«]+'), '');
+    x = x.replaceAll(RegExp(r'\s*[:：]\s*$'), '');
     x = x.replaceAll(RegExp(r'[…]+$'), '');
     x = x.replaceAll(RegExp(r'\s*[?!.\u2026]+$'), '');
     x = x.replaceAll(RegExp(r'\s+'), ' ').trim();
@@ -455,6 +737,37 @@ class GuidanceService {
     };
   }
 
+  /// Risk immer verfügbar machen (risk_level + risk).
+  Map<String, dynamic> _normalizeRisk(dynamic src) {
+    String asStr(dynamic v) => (v ?? '').toString().trim().toLowerCase();
+
+    String level = 'none';
+    bool risk = false;
+
+    if (src is Map) {
+      final s = Map<String, dynamic>.from(src);
+      final lvl = asStr(s['risk_level']);
+      final legacyLvl = asStr(s['level']); // manche Server
+      final flag = asStr(s['risk_flag']);  // support|crisis
+      final boolFlag = s['risk'] == true;
+
+      // vorrangig Strings mappen
+      String mapLevel(String x) {
+        if (x == 'high' || x == 'crisis') return 'high';
+        if (x == 'mild' || x == 'support' || x == 'true') return 'mild';
+        return 'none';
+      }
+
+      final candidate = lvl.isNotEmpty ? lvl : (legacyLvl.isNotEmpty ? legacyLvl : flag);
+      level = mapLevel(candidate);
+
+      if (level == 'none' && boolFlag) level = 'mild'; // konservativ
+      risk = level == 'high' || level == 'mild' || boolFlag;
+    }
+
+    return {'risk_level': level, 'risk': risk};
+  }
+
   // ---------------------------------------------------------------------------
   // Normalisierung → UI-freundliches JSON
   // ---------------------------------------------------------------------------
@@ -468,6 +781,7 @@ class GuidanceService {
       'mood_prompt': (flowJson['mood_prompt'] == true) || (flow.recommendEnd == true),
       'recommend_end': flow.recommendEnd == true,
     };
+
     final bool shouldPromptMood =
         (flowOut['mood_prompt'] == true) || (flow.recommendEnd == true);
 
@@ -482,25 +796,17 @@ class GuidanceService {
     // Mirror (gereinigt)
     final String? cleanedMirror = _cleanMirror(t.mirror);
 
-    // Primäre Frage (falls vorhanden)
-    final String? primaryQuestion =
-        (t.questions.isNotEmpty) ? t.questions.first : null;
+    // Primäre Frage (DTO-Getter sichert '?')
+    final String? primaryQuestion = t.primaryQuestion;
 
-    // Facetten: wir nutzen t.tags als thematische Facetten
+    // Facetten/Tags
     final List<String> facets =
         t.tags.map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
 
     // Chips (Display & Insert) — mind. 2 sicherstellen
-    List<String> answerHelpersDisplay = _extractAnswerHelpers(t);
-    List<String> answerHelpersInsert =
+    final List<String> answerHelpersDisplay = _extractAnswerHelpers(t);
+    final List<String> answerHelpersInsert =
         answerHelpersDisplay.map(_cleanChipForInsert).where((e) => e.isNotEmpty).toList(growable: false);
-    if (answerHelpersDisplay.length == 1) {
-      // identischen Fallback in beide Varianten einfügen
-      final fbDisplay = _cleanChipForDisplay(_kFallbackChipSeed);
-      final fbInsert  = _cleanChipForInsert(_kFallbackChipSeed);
-      answerHelpersDisplay = [...answerHelpersDisplay, fbDisplay];
-      answerHelpersInsert  = [...answerHelpersInsert,  fbInsert];
-    }
 
     // Chip-Typ nur als Stil-Hinweis
     final String chipType = _inferChipType(primaryQuestion, t.tags);
@@ -509,7 +815,8 @@ class GuidanceService {
     final sessMap = t.session.toJson();
     final sid = (sessMap['thread_id'] ?? sessMap['id'] ?? '').toString();
     final sturn = (sessMap['turn_index'] ?? sessMap['turn'] ?? 0).toString();
-    final chipSetId = '$sid:$sturn:${answerHelpersDisplay.join("|").hashCode}';
+    final seed = answerHelpersDisplay.join('|');
+    final chipSetId = '$sid:$sturn:${_fnv1a32(seed).toRadixString(16)}';
 
     final map = <String, dynamic>{
       'session': t.session.toJson(),
@@ -533,10 +840,13 @@ class GuidanceService {
       },
     };
 
-    // insight_score (falls vorhanden)
-    final dynamic maybeInsight = flowJson['insight_score'];
-    if (maybeInsight is num) {
-      map['insight_score'] = maybeInsight;
+    // insight_score bevorzugt aus TurnAnalysis (Fallback: evtl. aus flow)
+    final double? insightFromAnalysis = t.analysis?.insightScore;
+    final dynamic maybeInsightInFlow = flowJson['insight_score'];
+    if (insightFromAnalysis != null) {
+      map['insight_score'] = insightFromAnalysis;
+    } else if (maybeInsightInFlow is num) {
+      map['insight_score'] = maybeInsightInFlow;
     }
 
     if (cleanedMirror != null) {
@@ -562,10 +872,17 @@ class GuidanceService {
     if (t.context.isNotEmpty) {
       map['context'] = t.context;
     }
-    // NEW: helper_suggestion aus Worker durchreichen (Screen zeigt sie nahe der Frage)
     final hs = (t.helperSuggestion ?? '').trim();
     if (hs.isNotEmpty) {
       map['helper_suggestion'] = hs;
+    }
+
+    // TurnAnalysis + topic_suggestions (optional)
+    if (t.analysis != null) {
+      map['analysis'] = t.analysis!.toJson();
+    }
+    if (t.topicSuggestions.isNotEmpty) {
+      map['topic_suggestions'] = t.topicSuggestions;
     }
 
     return map;
@@ -582,4 +899,15 @@ class GuidanceService {
     }
     return 'reflect';
   }
+}
+
+/// Stabiler 32-bit FNV-1a Hash (plattform-/buildunabhängig für Telemetrie/IDs).
+int _fnv1a32(String s) {
+  const int FNV_PRIME = 0x01000193;
+  int hash = 0x811C9DC5;
+  for (final cu in s.codeUnits) {
+    hash ^= cu;
+    hash = (hash * FNV_PRIME) & 0xFFFFFFFF;
+  }
+  return hash;
 }

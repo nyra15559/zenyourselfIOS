@@ -2,21 +2,23 @@
 //
 // Ruhige, klare Texte (CH) für Ghost-Mode, Teilen & Export-Disclaimer.
 // Rückwärts-kompatibel: *Body*/Blurb-Aliasse vorhanden.
+// Vorgaben: neutraler Ton, keine „Cloud“-Hinweise.
 
 class PrivacyTexts {
   // ----- Ghost-Mode -----
   static const String ghostTitle = 'Kontext-Gedächtnis (Ghost-Mode)';
   static const String ghostBlurb =
       'Der Panda merkt sich Themen und Facetten lokal auf deinem Gerät. '
-      'Das hilft, Gespräche natürlicher fortzusetzen. Es gibt keine Cloud-Kopie.';
+      'Das unterstützt, Gespräche natürlicher fortzusetzen. '
+      'Die Speicherung erfolgt ausschliesslich auf dem Gerät.';
   // Alias für ältere Aufrufe
   static const String ghostBody = ghostBlurb;
 
   // ----- Optionales Teilen -----
   static const String shareTitle = 'Mit Therapeut·in teilen (Opt-in)';
   static const String shareBlurb =
-      'Wenn du möchtest, kannst du ausgewählte Einträge sicher teilen. '
-      'Du entscheidest jederzeit, was geteilt wird – und kannst alles wieder stoppen.';
+      'Wenn du möchtest, kannst du ausgewählte Einträge teilen. '
+      'Du bestimmst jederzeit, was geteilt wird, und kannst das Teilen jederzeit beenden.';
   // Alias
   static const String shareBody = shareBlurb;
 
@@ -31,7 +33,7 @@ class PrivacyTexts {
   // ----- Facetten zurücksetzen -----
   static const String resetFacetsTitle = 'Facetten zurücksetzen';
   static const String resetFacetsBlurb =
-      'Setzt die intern gezählten Facetten/Häufigkeiten zurück. '
+      'Setzt die intern gezählten Facetten und Häufigkeiten zurück. '
       'Deine Einträge bleiben erhalten.';
   // Alias
   static const String resetFacetsBody = resetFacetsBlurb;

@@ -1,0 +1,7 @@
+{
+  "messages":[
+    {"role":"assistant","content":"Magst du mir kurz sagen, was gerade hilft?"},
+    {"role":"user","content":"Kurze Pausen und etwas frische Luft helfen mir."}
+  ],
+  "locale":"de","tz":"Europe/Berlin"
+}

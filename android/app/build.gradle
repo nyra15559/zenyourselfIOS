@@ -35,7 +35,7 @@ android {
         minSdkVersion flutter.minSdkVersion
         targetSdkVersion flutter.targetSdkVersion
 
-        // Versionen kommen aus local.properties (oder überschreibe hier direkt)
+        // Versionen kommen aus local.properties (oder hier überschreiben)
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
 
@@ -70,12 +70,21 @@ android {
     buildTypes {
         release {
             signingConfig signingConfigs.release
-            // Für die erste Einreichung auf "false" lassen; später ggf. aktivieren
+
+            // --- R8/ProGuard einschalten ---
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+
+            // Optional: für reproduzierbare Builds/Debug erleichtern
+            // pseudoLocalesEnabled false
+        }
+
+        debug {
+            // Debug bleibt ungeschrumpft, für schnelleres Iterieren
             minifyEnabled false
             shrinkResources false
-            // proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
-        // debug { signingConfig signingConfigs.release } // optional
     }
 }
 

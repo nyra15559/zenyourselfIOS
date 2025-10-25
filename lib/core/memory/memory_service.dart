@@ -2,14 +2,18 @@
 //
 // MemoryService — Worker-Kontext-Recall (nicht UI-blockierend)
 // ------------------------------------------------------------
-// • Flags (enabled/shareEnabled) mit Persistenz via MemoryStore
+// • Flags (enabled/shareEnabled) mit Persistenz via MemoryStore (best-effort)
 // • saveFromWorker(): tolerant, fängt Fehler ab, aktualisiert leichten Hint-Cache
 // • Read-APIs: latest(), topFacets(), recentTopics() — alle async
 // • buildContextHint(): SYNCHRON, nutzt kleinen In-Memory-Cache (TTL)
 // • recall(): sanfte, asynchrone Vorschläge (Labels), deduped
+// • Byte-Kontext (sync, klein): tryGetByteContext/exportByteContext/byteContext
+// • Warmup-Hooks: warmup()/preload() (best-effort, ohne UI zu blockieren)
 //
 // Leitlinie: Memory darf die UI nie blockieren. Alle schweren Pfade sind async,
 // der synchrone Hint nutzt nur kleine In-Memory-Daten.
+
+import 'dart:convert' show jsonEncode, utf8;
 
 import '../models/insight_models.dart';
 import 'memory_entry.dart';
@@ -33,7 +37,7 @@ class MemoryService {
   final MemoryStore _store = MemoryStore.instance;
 
   bool _enabled = true;       // „Kontext-Gedächtnis“ (Ghost-Mode)
-  bool _shareEnabled = false; // Opt-in Share (Therapist-Mode) – nur Flag, Logik extern
+  bool _shareEnabled = false; // Opt-in Share (Therapist-Mode) – Flag, Logik extern
 
   bool get enabled => _enabled;
   bool get shareEnabled => _shareEnabled;
@@ -42,7 +46,7 @@ class MemoryService {
   MemoryContextHint? _lastHint;
   DateTime? _lastHintTs;
 
-  // Optional: weiche Caches für UI-nahe Abfragen (kurzer TTL, wenige Elemente)
+  // Optionale weiche Caches (kurzer TTL, wenige Elemente)
   List<String>? _latestTopicsCache;
   DateTime? _latestTopicsTs;
 
@@ -54,18 +58,95 @@ class MemoryService {
   static const _topicsTtlSec = 30;
   static const _facetsTtlSec = 30;
 
+  // ---------------- Lifecycle / Flags ----------------------------------------
+
   Future<void> init() async {
-    await _store.init();
-    _enabled = _store.isEnabled;
+    try {
+      await _store.init();
+      _enabled = _store.isEnabled;
+
+      // shareEnabled best-effort lesen (mehrere mögliche Store-APIs, sicher nacheinander testen)
+      bool enabled = false;
+      // Variante 1: boolesches Feld/Getter 'isShareEnabled'
+      try {
+        final dyn = _store as dynamic;
+        final v = dyn.isShareEnabled; // kann NoSuchMethod werfen
+        if (v is bool) {
+          enabled = v;
+        }
+      } catch (_) {/* ignore */}
+
+      // Variante 2: Methode/Getter 'getShareEnabled()'
+      if (!enabled) {
+        try {
+          final dyn = _store as dynamic;
+          final res = dyn.getShareEnabled(); // kann NoSuchMethod werfen
+          if (res is bool) {
+            enabled = res;
+          } else if (res is Future) {
+            final v = await res;
+            if (v is bool) enabled = v;
+          }
+        } catch (_) {/* ignore */}
+      }
+
+      _shareEnabled = enabled;
+    } catch (_) {
+      // Niemals UI blockieren; Flags bleiben bei Defaults.
+    }
+  }
+
+  /// Best-effort: initialisiert Store & wärmt leichte Caches an.
+  /// Wird vom ApiService opportunistisch (ohne await) aufgerufen.
+  Future<void> warmup() async {
+    try {
+      await init();
+      // kleine, häufig benutzte Reads anstoßen (aber nicht kritisch)
+      await Future.wait([
+        topFacets(limit: 8),
+        latestTopics(limit: 6),
+      ]).catchError((_) {});
+    } catch (_) {/* ignore */}
+  }
+
+  /// Fire-and-forget-Anschubser (keine Abhängigkeit auf unawaited()).
+  void preload() {
+    // bewusst ohne await — Analyzer-Warnung ist ok; Fehler intern abgefangen
+    warmup();
   }
 
   Future<void> setEnabled(bool v) async {
     _enabled = v;
-    await _store.setEnabled(v);
+    try {
+      await _store.setEnabled(v);
+    } catch (_) {/* ignore */}
   }
 
   Future<void> setShareEnabled(bool v) async {
     _shareEnabled = v;
+    // Best-effort Persistenz, ohne das konkrete Store-Interface vorauszusetzen.
+    // Wichtig: Jede Variante in einem eigenen try/catch – damit ein NoSuchMethod
+    // nicht die folgenden Fallbacks verhindert.
+    try {
+      final dyn = _store as dynamic;
+      final r = dyn.setShareEnabled(v); // bevorzugte Methode
+      if (r is Future) await r;
+      return;
+    } catch (_) {/* try next */}
+    try {
+      final dyn = _store as dynamic;
+      final r = dyn.setFlag('share_enabled', v); // generischer Flag-Setter
+      if (r is Future) await r;
+      return;
+    } catch (_) {/* try next */}
+    try {
+      final dyn = _store as dynamic;
+      final r = dyn.setOpt('share_enabled', v); // alternative Option-API
+      if (r is Future) await r;
+      return;
+    } catch (_) {
+      // still – niemals UI blockieren
+    }
   }
 
   // ---------------- Write -----------------------------------------------------
@@ -103,7 +184,7 @@ class MemoryService {
         _lastHintTs = DateTime.now();
       }
 
-      // Weiche UI-Caches update’n (best effort, keine Garantien)
+      // Weiche UI-Caches invalidieren (best effort, keine Garantien)
       _latestTopicsCache = null;
       _latestTopicsTs = null;
       _topFacetsCache = null;
@@ -121,82 +202,98 @@ class MemoryService {
     _latestTopicsTs = null;
     _topFacetsCache = null;
     _topFacetsTs = null;
-    await _store.clearAll();
+    try {
+      await _store.clearAll();
+    } catch (_) {/* ignore */}
   }
 
   // ---------------- Read ------------------------------------------------------
 
-  Future<List<MemoryEntry>> latest(int n) => _store.latest(limit: n);
+  Future<List<MemoryEntry>> latest(int n) async {
+    try {
+      return await _store.latest(limit: n);
+    } catch (_) {
+      return const <MemoryEntry>[];
+    }
+  }
 
   /// Aggregiert Top-Facetten (als Facet-Objekte mit 'hits').
   Future<List<Facet>> topFacets({int limit = 8}) async {
-    // kurzer Cache (vermeidet häufige SharedPrefs-Reads in UI-Schleifen)
-    if (_topFacetsCache != null &&
-        _topFacetsTs != null &&
-        DateTime.now().difference(_topFacetsTs!).inSeconds <= _facetsTtlSec) {
-      return _topFacetsCache!.take(limit).toList(growable: false);
-    }
-
-    final all = await _store.all();
-    if (all.isEmpty) return const [];
-    final counts = <String, int>{};
-    final labels = <String, String>{};
-
-    for (final e in all) {
-      for (final f in e.contextFacets) {
-        final k = f.key;
-        counts[k] = (counts[k] ?? 0) + (f.hits <= 0 ? 1 : f.hits);
-        labels.putIfAbsent(k, () => f.label);
+    try {
+      // kurzer Cache (vermeidet häufige SharedPrefs-Reads in UI-Schleifen)
+      if (_topFacetsCache != null &&
+          _topFacetsTs != null &&
+          DateTime.now().difference(_topFacetsTs!).inSeconds <= _facetsTtlSec) {
+        return _topFacetsCache!.take(limit).toList(growable: false);
       }
+
+      final all = await _store.all();
+      if (all.isEmpty) return const [];
+      final counts = <String, int>{};
+      final labels = <String, String>{};
+
+      for (final e in all) {
+        for (final f in e.contextFacets) {
+          final k = f.key;
+          counts[k] = (counts[k] ?? 0) + (f.hits <= 0 ? 1 : f.hits);
+          labels.putIfAbsent(k, () => f.label);
+        }
+      }
+
+      final keys = counts.keys.toList()
+        ..sort((a, b) {
+          final byCount = (counts[b] ?? 0).compareTo(counts[a] ?? 0);
+          if (byCount != 0) return byCount;
+          // leichte Recency-Präferenz: erster Index im Verlauf
+          final aIdx = all.indexWhere((e) => e.contextFacets.any((f) => f.key == a));
+          final bIdx = all.indexWhere((e) => e.contextFacets.any((f) => f.key == b));
+          return aIdx.compareTo(bIdx);
+        });
+
+      final result = keys.take(limit).map((k) =>
+        Facet(key: k, label: labels[k] ?? k, hits: counts[k] ?? 1)
+      ).toList(growable: false);
+
+      _topFacetsCache = result;
+      _topFacetsTs = DateTime.now();
+      return result;
+    } catch (_) {
+      return const <Facet>[];
     }
-
-    final keys = counts.keys.toList()
-      ..sort((a, b) {
-        final byCount = (counts[b] ?? 0).compareTo(counts[a] ?? 0);
-        if (byCount != 0) return byCount;
-        // leichte Recency-Präferenz: erster Index im Verlauf
-        final aIdx = all.indexWhere((e) => e.contextFacets.any((f) => f.key == a));
-        final bIdx = all.indexWhere((e) => e.contextFacets.any((f) => f.key == b));
-        return aIdx.compareTo(bIdx);
-      });
-
-    final result = keys.take(limit).map((k) =>
-      Facet(key: k, label: labels[k] ?? k, hits: counts[k] ?? 1)
-    ).toList(growable: false);
-
-    _topFacetsCache = result;
-    _topFacetsTs = DateTime.now();
-    return result;
   }
 
   /// Human-friendly „Letzte Themen“ (nur Labels, deduped, neueste zuerst).
   Future<List<String>> latestTopics({int limit = 6}) async {
-    // kurzer Cache
-    if (_latestTopicsCache != null &&
-        _latestTopicsTs != null &&
-        DateTime.now().difference(_latestTopicsTs!).inSeconds <= _topicsTtlSec) {
-      return _latestTopicsCache!.take(limit).toList(growable: false);
-    }
+    try {
+      // kurzer Cache
+      if (_latestTopicsCache != null &&
+          _latestTopicsTs != null &&
+          DateTime.now().difference(_latestTopicsTs!).inSeconds <= _topicsTtlSec) {
+        return _latestTopicsCache!.take(limit).toList(growable: false);
+      }
 
-    final entries = await latest(12);
-    final out = <String>[];
-    final seen = <String>{};
-    for (final e in entries) {
-      for (final f in e.contextFacets) {
-        final key = f.key.toLowerCase();
-        if (seen.add(key)) {
-          out.add(f.label);
-          if (out.length >= limit) {
-            _latestTopicsCache = out;
-            _latestTopicsTs = DateTime.now();
-            return out;
+      final entries = await latest(12);
+      final out = <String>[];
+      final seen = <String>{};
+      for (final e in entries) {
+        for (final f in e.contextFacets) {
+          final key = f.key.toLowerCase();
+          if (seen.add(key)) {
+            out.add(f.label);
+            if (out.length >= limit) {
+              _latestTopicsCache = out;
+              _latestTopicsTs = DateTime.now();
+              return out;
+            }
           }
         }
       }
+      _latestTopicsCache = out;
+      _latestTopicsTs = DateTime.now();
+      return out;
+    } catch (_) {
+      return const <String>[];
     }
-    _latestTopicsCache = out;
-    _latestTopicsTs = DateTime.now();
-    return out;
   }
 
   /// Alias (für ApiService.recentTopics)
@@ -207,8 +304,8 @@ class MemoryService {
   /// damit bestehende Call-Sites ohne Cast funktionieren.
   ///
   /// Strategie:
-  /// 1) Nimm die jüngsten Themenlabels (latestTopics), dedupe, ggf. nach topicHint
-  ///    leicht vorreihen.
+  /// 1) Nimm die jüngsten Themenlabels (latestTopics), dedupe, leicht
+  ///    priorisiert nach topicHint (Prefix > Teiltreffer).
   /// 2) Falls leer → Fallback auf Facetten-Labels (topFacets).
   Future<List<dynamic>> recall({int limit = 6, String? topicHint}) async {
     try {
@@ -223,12 +320,13 @@ class MemoryService {
       final tmp = [...rawTopics];
 
       if (hint.isNotEmpty) {
-        tmp.sort((a, b) {
-          final al = a.toLowerCase().contains(hint);
-          final bl = b.toLowerCase().contains(hint);
-          if (al == bl) return 0;
-          return al ? -1 : 1; // Treffer zuerst
-        });
+        int score(String s) {
+          final t = s.toLowerCase();
+          if (t.startsWith(hint)) return 2; // Prefix-Booster
+          if (t.contains(hint)) return 1;   // Teiltreffer
+          return 0;
+        }
+        tmp.sort((a, b) => score(b).compareTo(score(a)));
       }
 
       for (final t in tmp) {
@@ -308,4 +406,35 @@ class MemoryService {
       return null;
     }
   }
+
+  // ---------------- Byte-Kontext (sync, klein) ------------------------------
+  // Diese Hooks werden vom ApiService per dynamic optional aufgerufen.
+  // Sie sind bewusst leichtgewichtig und nutzen nur den lokalen Hint-Cache.
+
+  /// Bevorzugter Hook: gibt bis zu [maxBytes] Kontext-Bytes zurück (oder null).
+  /// Inhalt: kompaktes JSON mit Facet-Keys & Topic-Labels aus dem Hint-Cache.
+  List<int>? tryGetByteContext([int maxBytes = 2048]) {
+    try {
+      if (_lastHint == null) return null;
+      final map = <String, dynamic>{
+        if (_lastHint!.facets != null && _lastHint!.facets!.isNotEmpty)
+          'facets': _lastHint!.facets!.take(6).toList(),
+        if (_lastHint!.topics != null && _lastHint!.topics!.isNotEmpty)
+          'topics': _lastHint!.topics!.take(6).toList(),
+        if (_shareEnabled) 'share': true,
+      };
+      if (map.isEmpty) return null;
+      final bytes = utf8.encode(jsonEncode(map));
+      if (bytes.length <= maxBytes) return bytes;
+      return bytes.sublist(0, maxBytes);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Alternative Hook-Name (kompatibel zu ApiService): identisch zu tryGetByteContext.
+  List<int>? exportByteContext([int maxBytes = 2048]) => tryGetByteContext(maxBytes);
+
+  /// Minimaler Fallback-Name (kompatibel): identisch zu tryGetByteContext.
+  List<int>? byteContext([int maxBytes = 2048]) => tryGetByteContext(maxBytes);
 }

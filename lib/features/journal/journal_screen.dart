@@ -280,6 +280,7 @@ class _JournalScreenState extends State<JournalScreen> {
         }
         if (i == 1) {
           // Zentrierte, kompakte Filter-Pille unter dem Panda
+          final cs = Theme.of(ctx).colorScheme;
           return Padding(
             padding: const EdgeInsets.only(bottom: 6, top: 12),
             child: Center(
@@ -290,6 +291,7 @@ class _JournalScreenState extends State<JournalScreen> {
                   topOpacity: .26,
                   bottomOpacity: .10,
                   borderOpacity: .18,
+                  // Hintergrund via ZenGlassCard; die Chips selbst nutzen unten cs.surface
                   child: _FilterPill(
                     provider: provider,
                     allCount: allCount,
@@ -704,6 +706,8 @@ class _FilterPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
     Widget chip(jp.JournalFilterKind kind, String label, IconData icon, int count) {
       final selected = provider.filterKind == kind;
       return Padding(
@@ -726,8 +730,9 @@ class _FilterPill extends StatelessWidget {
               Text('$label ($count)'),
             ],
           ),
+          // Token-/Theme-basiert statt Weiß: bessere Dark-Mode-Kohärenz
           selectedColor: zs.ZenColors.sage.withValues(alpha: .22),
-          backgroundColor: zs.ZenColors.white.withValues(alpha: .18),
+          backgroundColor: cs.surface.withValues(alpha: .18),
           showCheckmark: false,
           labelStyle: Theme.of(context).textTheme.labelMedium?.copyWith(
                 color: selected ? zs.ZenColors.deepSage : zs.ZenColors.jadeMid,
@@ -776,6 +781,7 @@ class _DayHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final txt = _label(date);
+    final cs = Theme.of(context).colorScheme;
     return Align(
       alignment: Alignment.centerLeft,
       child: Semantics(
@@ -783,7 +789,8 @@ class _DayHeader extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 10),
           decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: .66),
+            // vorher: Colors.white.withValues(.66) → Theme-Surface für Dark/Light
+            color: cs.surface.withValues(alpha: .66),
             borderRadius: const BorderRadius.all(zs.ZenRadii.m),
             border: Border.all(
               color: zs.ZenColors.jadeMid.withValues(alpha: 0.14),
@@ -858,15 +865,15 @@ class _RailPainter extends CustomPainter {
       ..strokeWidth = 2
       ..style = PaintingStyle.stroke;
 
-    Shader grad(Offset from, Offset to) => const LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            Color(0x2A6E8B74), // sage-ish
-            Color(0x442F5F49), // deep sage-ish
-            Color(0x2A6E8B74),
-          ],
-        ).createShader(Rect.fromPoints(from, to));
+    Shader grad(Offset from, Offset to) {
+      final top = zs.ZenColors.sage.withValues(alpha: .16);
+      final mid = zs.ZenColors.deepSage.withValues(alpha: .27);
+      return LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [top, mid, top],
+      ).createShader(Rect.fromPoints(from, to));
+    }
 
     if (showAbove) {
       final p1 = Offset(centerX, 0);
@@ -880,7 +887,7 @@ class _RailPainter extends CustomPainter {
     }
 
     final dotPaint = Paint()
-      ..color = const Color(0xFF2F5F49).withValues(alpha: .28)
+      ..color = zs.ZenColors.deepSage.withValues(alpha: .28)
       ..style = PaintingStyle.fill
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 1.2);
     canvas.drawCircle(Offset(centerX, dotY), 4.8, dotPaint);

@@ -1,6 +1,6 @@
 // lib/shared/ui/zen_widgets.dart
 //
-// Oxford–Zen UI Widgets (v6.91 · 2025-10-22)
+// Oxford–Zen UI Widgets (v6.95 · 2025-10-23)
 // ---------------------------------------------------------------------------
 // WICHTIG – Vereinheitlichung v6.1 (ohne neue Dateien):
 // • Glas: Blur σ=18, bg White @0.20, border White @0.22, Shadow (0,8,20,0.10), Radius 20
@@ -8,6 +8,12 @@
 // • CTA: Höhe 48, Stadium→Radius wie L, konsistentes Padding
 // • Scaffold: Default Max-Width 680, Padding 24 (Grid 8/16/24/32)
 // • Keine Breaking Changes: öffentliche API unverändert, nur Defaults/Styles justiert
+//
+// v6.95 – Änderungen (Task 15):
+// • SafeArea-Audit: ZenAppScaffold mit optionalen safeTop/Bottom/Left/Right & respectKeyboardInsets.
+// • Effektives Body-Padding berücksichtigt Tastatur-Insets > SafeArea.
+// • Buttons: einheitlicher Icon–Label Abstand (10 px), optionale Semantics (TalkBack).
+// • ZenMetricTile hinzugefügt (A11y-freundlicher Metric-Tile).
 //
 // Abhängigkeiten (pubspec):
 //   lottie: ^3.3.1
@@ -46,7 +52,7 @@ class ZenAppScaffold extends StatelessWidget {
   /// Maximalbreite des Inhaltsbereichs (z. B. Tablet/Desktop)
   final double maxBodyWidth;
 
-  /// Innenabstand um den Body herum
+  /// Basis-Innenabstand um den Body herum (wird mit SafeArea/Keyboard-Insets kombiniert)
   final EdgeInsets bodyPadding;
 
   /// Optional: Backdrop-Feinjustage (nur wirksam, wenn backdropAsset != null)
@@ -57,6 +63,20 @@ class ZenAppScaffold extends StatelessWidget {
 
   /// Extra: „Milchigkeit“ (kombiniert leichter Haze + Weißfilm)
   final double? backdropMilk;
+
+  // ---- SafeArea/Keyboard Optionen (NEU; abwärtskompatibel) -------------------
+  /// Top-SafeArea zusätzlich berücksichtigen (Default false, um Layouts nicht zu verschieben)
+  final bool safeTop;
+
+  /// Bottom-SafeArea berücksichtigen (Default true)
+  final bool safeBottom;
+
+  /// Seitliche SafeAreas (Notch/Curved) berücksichtigen (Default true)
+  final bool safeLeft;
+  final bool safeRight;
+
+  /// Wenn true, überschreibt die Tastatur die Bottom-SafeArea (Keyboard > SafeArea)
+  final bool respectKeyboardInsets;
 
   const ZenAppScaffold({
     super.key,
@@ -70,14 +90,43 @@ class ZenAppScaffold extends StatelessWidget {
     this.backdropGlow,
     this.backdropVignette,
     this.backdropMilk,
+    // SafeArea/Keyboard
+    this.safeTop = false,
+    this.safeBottom = true,
+    this.safeLeft = true,
+    this.safeRight = true,
+    this.respectKeyboardInsets = true,
   });
+
+  EdgeInsets _effectivePadding(BuildContext context) {
+    final mq = MediaQuery.of(context);
+    final pad = bodyPadding;
+
+    final addTop = safeTop ? mq.padding.top : 0.0;
+    final addLeft = safeLeft ? mq.padding.left : 0.0;
+    final addRight = safeRight ? mq.padding.right : 0.0;
+
+    final kb = respectKeyboardInsets ? mq.viewInsets.bottom : 0.0;
+    final safeBtm = safeBottom ? mq.padding.bottom : 0.0;
+    final addBottom = kb > 0 ? kb : safeBtm;
+
+    return EdgeInsets.fromLTRB(
+      pad.left + addLeft,
+      pad.top + addTop,
+      pad.right + addRight,
+      pad.bottom + addBottom,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final content = Center(
       child: ConstrainedBox(
         constraints: BoxConstraints(maxWidth: maxBodyWidth),
-        child: Padding(padding: bodyPadding, child: body),
+        child: Padding(
+          padding: _effectivePadding(context),
+          child: body,
+        ),
       ),
     );
 
@@ -855,6 +904,10 @@ class ZenOutlineButton extends StatelessWidget {
   final double? width;
   final Color? color;
 
+  /// A11y (optional)
+  final String? semanticsLabel;
+  final String? semanticsHint;
+
   const ZenOutlineButton({
     super.key,
     required this.label,
@@ -863,6 +916,8 @@ class ZenOutlineButton extends StatelessWidget {
     this.height = 48,
     this.width,
     this.color,
+    this.semanticsLabel,
+    this.semanticsHint,
   });
 
   @override
@@ -882,7 +937,7 @@ class ZenOutlineButton extends StatelessWidget {
       ],
     );
 
-    return OutlinedButton(
+    Widget btn = OutlinedButton(
       onPressed: onPressed,
       style: OutlinedButton.styleFrom(
         foregroundColor: c,
@@ -894,6 +949,18 @@ class ZenOutlineButton extends StatelessWidget {
       ),
       child: child,
     );
+
+    if ((semanticsLabel != null && semanticsLabel!.isNotEmpty) ||
+        (semanticsHint != null && semanticsHint!.isNotEmpty)) {
+      btn = Semantics(
+        button: true,
+        label: semanticsLabel,
+        hint: semanticsHint,
+        child: btn,
+      );
+    }
+
+    return btn;
   }
 }
 
@@ -903,25 +970,55 @@ class ZenGhostButton extends StatelessWidget {
   final IconData? icon;
   final Color? color;
 
-  const ZenGhostButton(
-      {super.key, required this.label, this.onPressed, this.icon, this.color});
+  /// A11y (optional)
+  final String? semanticsLabel;
+  final String? semanticsHint;
+
+  const ZenGhostButton({
+    super.key,
+    required this.label,
+    this.onPressed,
+    this.icon,
+    this.color,
+    this.semanticsLabel,
+    this.semanticsHint,
+  });
 
   @override
   Widget build(BuildContext context) {
     final c = color ?? ZenColors.jade;
-    return TextButton.icon(
+
+    Widget btn = TextButton(
       onPressed: onPressed,
-      icon: Icon(icon ?? Icons.play_arrow_rounded, size: 18, color: c),
-      label: Text(
-        label,
-        style: TextStyle(fontWeight: FontWeight.w600, color: c),
-      ),
       style: TextButton.styleFrom(
         minimumSize: const Size(0, 40),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         shape: const StadiumBorder(),
       ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon ?? Icons.play_arrow_rounded, size: 18, color: c),
+          const SizedBox(width: 10),
+          Text(
+            label,
+            style: TextStyle(fontWeight: FontWeight.w600, color: c),
+          ),
+        ],
+      ),
     );
+
+    if ((semanticsLabel != null && semanticsLabel!.isNotEmpty) ||
+        (semanticsHint != null && semanticsHint!.isNotEmpty)) {
+      btn = Semantics(
+        button: true,
+        label: semanticsLabel,
+        hint: semanticsHint,
+        child: btn,
+      );
+    }
+
+    return btn;
   }
 }
 
@@ -929,23 +1026,51 @@ class ZenGhostButtonDanger extends StatelessWidget {
   final String label;
   final VoidCallback? onPressed;
 
-  const ZenGhostButtonDanger({super.key, required this.label, this.onPressed});
+  /// A11y (optional)
+  final String? semanticsLabel;
+  final String? semanticsHint;
+
+  const ZenGhostButtonDanger({
+    super.key,
+    required this.label,
+    this.onPressed,
+    this.semanticsLabel,
+    this.semanticsHint,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return TextButton.icon(
+    Widget btn = TextButton(
       onPressed: onPressed,
-      icon: const Icon(Icons.delete_outline, size: 18, color: Colors.redAccent),
-      label: Text(
-        label, // fix: benutze übergebenes Label (z. B. „Löschen“)
-        style: const TextStyle(fontWeight: FontWeight.w700, color: Colors.redAccent),
-      ),
       style: TextButton.styleFrom(
         minimumSize: const Size(0, 40),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         shape: const StadiumBorder(),
       ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: const [
+          Icon(Icons.delete_outline, size: 18, color: Colors.redAccent),
+          SizedBox(width: 10),
+          Text(
+            'Löschen',
+            style: TextStyle(fontWeight: FontWeight.w700, color: Colors.redAccent),
+          ),
+        ],
+      ),
     );
+
+    if ((semanticsLabel != null && semanticsLabel!.isNotEmpty) ||
+        (semanticsHint != null && semanticsHint!.isNotEmpty)) {
+      btn = Semantics(
+        button: true,
+        label: semanticsLabel,
+        hint: semanticsHint,
+        child: btn,
+      );
+    }
+
+    return btn;
   }
 }
 
@@ -1345,12 +1470,16 @@ class ZenVoiceButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return IconButton(
-      tooltip: 'Spracheingabe',
-      icon: const Icon(Icons.mic_rounded),
-      iconSize: 32,
-      color: ZenColors.deepSage,
-      onPressed: onPressed,
+    return Semantics(
+      label: 'Spracheingabe starten',
+      button: true,
+      child: IconButton(
+        tooltip: 'Spracheingabe',
+        icon: const Icon(Icons.mic_rounded),
+        iconSize: 32,
+        color: ZenColors.deepSage,
+        onPressed: onPressed,
+      ),
     );
   }
 }
@@ -1611,6 +1740,53 @@ class ZenBackground extends StatelessWidget {
   Widget build(BuildContext context) {
     return const DecoratedBox(
       decoration: BoxDecoration(color: ZenColors.bg),
+    );
+  }
+}
+
+/// ======================================================================
+/// ZEN METRIC TILE — kompakte KPI-Kachel (A11y, konsistente Spacing)
+/// ======================================================================
+class ZenMetricTile extends StatelessWidget {
+  final String label;
+  final String value;
+  final IconData icon;
+  final String? semanticsLabel;
+
+  const ZenMetricTile({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.icon,
+    this.semanticsLabel,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+
+    return Semantics(
+      label: semanticsLabel ?? '$label: $value',
+      container: true,
+      child: Column(
+        children: [
+          CircleAvatar(
+            backgroundColor: ZenColors.sage.withValues(alpha: .18),
+            radius: 20.5,
+            child: Icon(icon, color: ZenColors.sage, size: 20.5),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: tt.bodyMedium?.copyWith(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 2.5),
+          Text(
+            label,
+            style: tt.bodySmall?.copyWith(color: Colors.black54),
+          ),
+        ],
+      ),
     );
   }
 }

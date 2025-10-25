@@ -1,23 +1,25 @@
 // lib/features/pro/pro_screen.dart
 //
-// ProScreen — Oxford Journey Board (v4.4 · 2025-10-22)
+// ProScreen — Oxford Journey Board (v4.7 · 2025-10-24)
 // ------------------------------------------------------------------
-// Änderungen:
-// • Insights-Block komplett entfernt (gehört ins Tagebuch).
-// • Mood-Chart: klare Oxford-Zen-Linien (ohne Verlauf, ohne Emojis).
-//   – Primär: Tageswerte (−2..+2) in DeepSage, glattgezogen.
-//   – Sekundär: 7-Tage-Moving-Average in Jade (dezenter).
-//   – Keine Dots, keine Flächen, subtile Referenzlinien (−1/0/+1).
-// • PDF-Button öffnet den Export-Dialog (kein defekter Call).
-// • Sorgfältiges Responsive-Layout für kleine Phones.
+// Neu in v4.7:
+// • Community-Blöcke lesen/inkrementieren direkt den Cloudflare-Worker
+//   (GET /v1/community/help-total, POST /help-ack,
+//    GET /v1/community/conversations-total).
+// • Kein Abhängigkeitsspaghetti: kein CommunityStatsApi / CommunityApi nötig.
+// • Saubere Lade-/Fehlerzustände, flackerfreie Local-Updates.
+// • Settings-Button mit elegantem Fallback-Bottom-Sheet.
 //
-// Abhängigkeiten: fl_chart, provider, eigene Zen-UI.
+// Abhängigkeiten: fl_chart, provider, http, eigene Zen-UI.
 //
+// ENV/HOST: Bei Bedarf Host über .env/Flavor injizieren; hier hart verdrahtet.
 
+import 'dart:convert';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:provider/provider.dart';
+import 'package:http/http.dart' as http;
 
 // Shared UI & Design (Alias-Imports → keine Namenskollisionen)
 import '../../shared/zen_style.dart' as zs
@@ -35,6 +37,9 @@ import '../../providers/journal_entries_provider.dart';
 // Export (AnonExportWidget)
 import '../therapist/anon_export.dart';
 
+// Settings (für Fallback-Sheet)
+import '../../models/app_settings.dart';
+
 // ------------------------------------------------------------------
 
 enum _Range { d7, d30, d90 }
@@ -44,15 +49,31 @@ extension on _Range {
   String get label => switch (this) { _Range.d7 => '7', _Range.d30 => '30', _Range.d90 => '90' };
 }
 
+/// Optionaler Hook-Typ für externe Loader (wenn du später injizieren willst)
+typedef LoadIntFn = Future<int?> Function();
+typedef VoidAsyncFn = Future<void> Function();
+
 class ProScreen extends StatefulWidget {
   /// Legacy-Props bleiben für Export/Fallback erhalten.
   final List<MoodEntry> moodEntries;
   final List<ReflectionEntry> reflectionEntries;
 
+  /// Öffnet die Settings – Zahnrad oben rechts.
+  final VoidCallback? onOpenSettings;
+
+  /// Falls du Host/Calls extern überschreiben willst:
+  final LoadIntFn? loadCommunityHelpCount;
+  final LoadIntFn? loadCommunityTalkCount;
+  final VoidAsyncFn? sendCommunityHelpAck;
+
   const ProScreen({
     super.key,
     required this.moodEntries,
     required this.reflectionEntries,
+    this.onOpenSettings,
+    this.loadCommunityHelpCount,
+    this.loadCommunityTalkCount,
+    this.sendCommunityHelpAck,
   });
 
   @override
@@ -60,11 +81,205 @@ class ProScreen extends StatefulWidget {
 }
 
 class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMixin {
+  // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+  // Cloudflare-Worker Host (deiner):
+  static const String _HOST =
+      'https://nameless-breeze-87fb.edcvaultcom.workers.dev';
+  // <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
   _Range _range = _Range.d30;
 
   late final AnimationController _appearCtrl =
       AnimationController(vsync: this, duration: const Duration(milliseconds: 260))
         ..forward();
+
+  // ---- Community State -------------------------------------------------------
+  int? _communityHelpCount; // globaler Zähler „geholfen“
+  bool _communityLoading = false;
+  bool _sendingAck = false;
+  bool _ackSentThisSession = false;
+
+  int? _talkCount;          // globaler Zähler „mit Panda geredet“
+  bool _talkLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCommunityCount();
+    _loadTalkCount();
+  }
+
+  // -------------------------- Community Calls (direct) -----------------------
+
+  Future<int?> _fetchCount(String path, String field) async {
+    final uri = Uri.parse('$_HOST$path');
+    final res = await http.get(uri);
+    if (res.statusCode == 200) {
+      final m = jsonDecode(res.body) as Map<String, dynamic>;
+      final v = m[field];
+      if (v is int) return v;
+    }
+    return null;
+  }
+
+  Future<int?> _postAndGetCount(String path, String field) async {
+    final uri = Uri.parse('$_HOST$path');
+    final res = await http.post(uri);
+    if (res.statusCode == 200) {
+      final m = jsonDecode(res.body) as Map<String, dynamic>;
+      final v = m[field];
+      if (v is int) return v;
+    }
+    return null;
+  }
+
+  Future<void> _loadCommunityCount() async {
+    setState(() => _communityLoading = true);
+    try {
+      final loader = widget.loadCommunityHelpCount ??
+          (() => _fetchCount('/v1/community/help-total', 'help_total'));
+      final v = await loader();
+      if (!mounted) return;
+      setState(() => _communityHelpCount = v);
+    } catch (_) {
+      // leise ignorieren, UI bleibt mit „— — —“
+    } finally {
+      if (mounted) setState(() => _communityLoading = false);
+    }
+  }
+
+  Future<void> _loadTalkCount() async {
+    setState(() => _talkLoading = true);
+    try {
+      final loader = widget.loadCommunityTalkCount ??
+          (() => _fetchCount('/v1/community/conversations-total', 'conversations_total'));
+      final v = await loader();
+      if (!mounted) return;
+      setState(() => _talkCount = v);
+    } catch (_) {
+      // ruhig bleiben, leer lassen
+    } finally {
+      if (mounted) setState(() => _talkLoading = false);
+    }
+  }
+
+  Future<void> _sendHelpAck() async {
+    if (_sendingAck) return;
+    setState(() => _sendingAck = true);
+    try {
+      if (widget.sendCommunityHelpAck != null) {
+        await widget.sendCommunityHelpAck!.call();
+        // Wir wissen nicht ob der Zähler zurückkommt → sicherheitshalber nachladen
+        await _loadCommunityCount();
+      } else {
+        final v = await _postAndGetCount('/v1/community/help-ack', 'help_total');
+        if (!mounted) return;
+        if (v != null) {
+          _communityHelpCount = v; // aus Response
+        } else {
+          _communityHelpCount = (_communityHelpCount ?? 0) + 1; // Worst-case
+        }
+      }
+      if (!mounted) return;
+      setState(() => _ackSentThisSession = true);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Danke! Deine anonyme Stimme wurde gezählt.')),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Konnte das gerade nicht teilen. Versuche es später erneut.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _sendingAck = false);
+    }
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Settings-Fallback: Oxford-Zen Bottom-Sheet
+  // ───────────────────────────────────────────────────────────────────────────
+  Future<void> _openZenSettingsSheet(BuildContext context) async {
+    final settings = context.read<AppSettings>();
+    final tt = Theme.of(context).textTheme;
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      showDragHandle: true,
+      builder: (ctx) {
+        final isMobile = MediaQuery.of(ctx).size.width < 480;
+        final app = context.watch<AppSettings>();
+
+        return SafeArea(
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(12, 0, 12, 12 + MediaQuery.of(ctx).viewInsets.bottom),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 560),
+                child: ClipRRect(
+                  borderRadius: const BorderRadius.all(zs.ZenRadii.l),
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                    child: zw.ZenGlassCard(
+                      topOpacity: .26,
+                      bottomOpacity: .10,
+                      borderOpacity: .16,
+                      borderRadius: const BorderRadius.all(zs.ZenRadii.l),
+                      padding: EdgeInsets.fromLTRB(isMobile ? 14 : 18, 14, isMobile ? 14 : 18, 12),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(Icons.settings_rounded, color: zs.ZenColors.deepSage, size: 20),
+                              const SizedBox(width: 8),
+                              Text('Einstellungen', style: tt.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w800, color: zs.ZenColors.deepSage,
+                              )),
+                              const Spacer(),
+                              IconButton(
+                                tooltip: 'Schließen',
+                                onPressed: () => Navigator.of(ctx).maybePop(),
+                                icon: const Icon(Icons.close_rounded),
+                              )
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+
+                          _ZenSwitchTile(
+                            title: 'Dunkles Design',
+                            subtitle: 'Sanft für die Augen – Oxford-Zen bei Nacht.',
+                            value: app.darkMode,
+                            onChanged: (v) => settings.toggleDarkMode(v),
+                          ),
+
+                          const SizedBox(height: 12),
+                          _ZenSectionHeader(icon: Icons.language_rounded, text: 'Sprache'),
+                          const SizedBox(height: 6),
+                          _LocaleRow(
+                            current: app.locale,
+                            onSelect: (loc) => settings.setLocale(loc),
+                          ),
+
+                          const SizedBox(height: 8),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
 
   @override
   void dispose() {
@@ -85,11 +300,11 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
 
     // Serie & Kennzahlen aus Provider (−2 … +2); Fallbacks auf Legacy.
     final series = hasProv
-        ? _seriesFromProvider(prov, days: _range.days)
+        ? _seriesFromProvider(prov!, days: _range.days)
         : _fallbackSeriesFromMoodEntries(widget.moodEntries).takeLast(_range.days);
 
     final avgMood = hasProv
-        ? _averageMoodFromProvider(prov, window: Duration(days: _range.days))
+        ? _averageMoodFromProvider(prov!, window: Duration(days: _range.days))
         : _fallbackAvgMoodFromMoodEntries(widget.moodEntries);
 
     final reflectionsCount =
@@ -127,6 +342,27 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
               hazeStrength: .18,
               saturation: .92,
               wash: .12,
+            ),
+          ),
+
+          // 0.5) Settings-Zahnrad (oben rechts)
+          Positioned(
+            right: 12,
+            top: 0,
+            child: SafeArea(
+              child: Material(
+                color: Colors.transparent,
+                child: InkResponse(
+                  onTap: widget.onOpenSettings ?? () => _openZenSettingsSheet(context),
+                  radius: 24,
+                  child: CircleAvatar(
+                    backgroundColor: Colors.white.withValues(alpha: .18),
+                    radius: 18,
+                    child: const Icon(Icons.settings_rounded,
+                        size: 18, color: zs.ZenColors.deepSage),
+                  ),
+                ),
+              ),
             ),
           ),
 
@@ -188,7 +424,7 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
                           ],
                         ),
 
-                        // Range Switcher — kleine Bubble
+                        // Range Switcher
                         _RangeBubble(
                           range: _range,
                           onChange: (r) => setState(() => _range = r),
@@ -197,7 +433,7 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
 
                         const SizedBox(height: 12),
 
-                        // Mood-Trend — Glas-Bubble (clean Oxford-Zen Linien)
+                        // Mood-Trend
                         ClipRRect(
                           borderRadius: const BorderRadius.all(zs.ZenRadii.l),
                           child: BackdropFilter(
@@ -261,7 +497,7 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
 
                         const SizedBox(height: 16),
 
-                        // Statistiken — Bubble
+                        // Statistiken
                         Semantics(
                           label: 'Statistiken',
                           child: ClipRRect(
@@ -302,9 +538,143 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
                           ),
                         ),
 
+                        const SizedBox(height: 16),
+
+                        // Community — „Panda hat mir geholfen“ (anonym)
+                        ClipRRect(
+                          borderRadius: const BorderRadius.all(zs.ZenRadii.l),
+                          child: BackdropFilter(
+                            filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+                            child: zw.ZenGlassCard(
+                              padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+                              topOpacity: .24,
+                              bottomOpacity: .10,
+                              borderOpacity: .16,
+                              borderRadius: const BorderRadius.all(zs.ZenRadii.l),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      const Icon(Icons.favorite_rounded,
+                                          size: 18, color: zs.ZenColors.jade),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        'So vielen Menschen hat Panda geholfen',
+                                        style: tt.bodyMedium!.copyWith(
+                                          fontWeight: FontWeight.w700,
+                                          color: zs.ZenColors.deepSage,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 10),
+                                  AnimatedSwitcher(
+                                    duration: const Duration(milliseconds: 250),
+                                    switchInCurve: Curves.easeOutBack,
+                                    child: _communityLoading
+                                        ? const _CountSkeleton()
+                                        : Text(
+                                            _communityHelpCount == null
+                                                ? '— — —'
+                                                : _communityHelpCount!.toString(),
+                                            key: ValueKey(_communityHelpCount),
+                                            style: tt.headlineSmall?.copyWith(
+                                              color: zs.ZenColors.deepSage,
+                                              fontWeight: FontWeight.w900,
+                                              letterSpacing: 0.5,
+                                            ),
+                                          ),
+                                  ),
+                                  const SizedBox(height: 10),
+                                  _CommunityAckButton(
+                                    busy: _sendingAck,
+                                    done: _ackSentThisSession,
+                                    onPressed: _sendHelpAck,
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Opacity(
+                                    opacity: .78,
+                                    child: Text(
+                                      'Anonym & ohne Inhalte. Nur ein stilles Zeichen.',
+                                      textAlign: TextAlign.center,
+                                      style: tt.bodySmall,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+
+                        const SizedBox(height: 12),
+
+                        // Community – „Gespräche mit Panda (gesamt)“
+                        ClipRRect(
+                          borderRadius: const BorderRadius.all(zs.ZenRadii.l),
+                          child: BackdropFilter(
+                            filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+                            child: zw.ZenGlassCard(
+                              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                              topOpacity: .20,
+                              bottomOpacity: .08,
+                              borderOpacity: .14,
+                              borderRadius: const BorderRadius.all(zs.ZenRadii.l),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      const Icon(Icons.chat_bubble_rounded,
+                                          size: 16, color: zs.ZenColors.sage),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        'Gespräche mit Panda (gesamt)',
+                                        style: tt.bodyMedium!.copyWith(
+                                          fontWeight: FontWeight.w700,
+                                          color: zs.ZenColors.deepSage,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 8),
+                                  AnimatedSwitcher(
+                                    duration: const Duration(milliseconds: 250),
+                                    switchInCurve: Curves.easeOutBack,
+                                    child: _talkLoading
+                                        ? const _CountSkeleton()
+                                        : Text(
+                                            _talkCount == null
+                                                ? '— — —'
+                                                : _talkCount!.toString(),
+                                            key: ValueKey(_talkCount),
+                                            style: tt.titleLarge?.copyWith(
+                                              color: zs.ZenColors.deepSage,
+                                              fontWeight: FontWeight.w800,
+                                              letterSpacing: 0.4,
+                                            ),
+                                          ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Opacity(
+                                    opacity: .78,
+                                    child: Text(
+                                      'Nur ein Aggregat. Keine Inhalte, keine IDs.',
+                                      textAlign: TextAlign.center,
+                                      style: tt.bodySmall,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+
                         const SizedBox(height: 24),
 
-                        // Export-Bereich — Bubble (inkl. Datenschutz-Hinweise)
+                        // Export-Bereich
                         ClipRRect(
                           borderRadius: const BorderRadius.all(zs.ZenRadii.m),
                           child: BackdropFilter(
@@ -333,7 +703,6 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
                                   Row(
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
-                                      // PDF-Button → öffnet Export-Dialog (kein defekter Call)
                                       _ProExportCircleButton(
                                         icon: Icons.picture_as_pdf_rounded,
                                         label: 'PDF',
@@ -398,7 +767,6 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
                                     ],
                                   ),
                                   const SizedBox(height: 12),
-                                  // Datenschutz-/Feature-Hinweise — ruhig & knapp
                                   Opacity(
                                     opacity: .85,
                                     child: Column(
@@ -472,7 +840,7 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
   }
 }
 
-// ---------- Widgets ----------
+// ---------- Widgets: Range ---------------------------------------------------
 
 class _RangeBubble extends StatelessWidget {
   final _Range range;
@@ -594,6 +962,230 @@ class _RangeChip extends StatelessWidget {
     );
   }
 }
+
+// ---------- Widgets: Community ----------------------------------------------
+
+class _CommunityAckButton extends StatelessWidget {
+  final bool busy;
+  final bool done;
+  final VoidCallback onPressed;
+
+  const _CommunityAckButton({
+    required this.busy,
+    required this.done,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+    return SizedBox(
+      height: 42,
+      child: ElevatedButton.icon(
+        onPressed: busy || done ? null : onPressed,
+        icon: busy
+            ? const SizedBox(
+                width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+            : const Icon(Icons.volunteer_activism_rounded),
+        label: Text(
+          done ? 'Danke – gezählt' : 'Ja, teilen (anonym)',
+          style: tt.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+        ),
+      ),
+    );
+  }
+}
+
+class _CountSkeleton extends StatelessWidget {
+  const _CountSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 68,
+      height: 20,
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: .08),
+        borderRadius: BorderRadius.circular(6),
+      ),
+    );
+  }
+}
+
+// ---------- Widgets: Settings-Fallback Helpers -------------------------------
+
+class _ZenSwitchTile extends StatelessWidget {
+  final String title;
+  final String? subtitle;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  const _ZenSwitchTile({
+    required this.title,
+    this.subtitle,
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: .10),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.black.withValues(alpha: .08)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title,
+                    style: tt.bodyLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: zs.ZenColors.deepSage,
+                    )),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 2),
+                  Opacity(
+                    opacity: .80,
+                    child: Text(subtitle!, style: tt.bodySmall),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          Switch(
+            value: value,
+            onChanged: onChanged,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ZenSectionHeader extends StatelessWidget {
+  final IconData icon;
+  final String text;
+  const _ZenSectionHeader({required this.icon, required this.text});
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: zs.ZenColors.sage),
+        const SizedBox(width: 8),
+        Text(
+          text,
+          style: tt.titleSmall?.copyWith(
+            fontWeight: FontWeight.w800,
+            color: zs.ZenColors.deepSage,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _LocaleRow extends StatelessWidget {
+  final Locale current;
+  final ValueChanged<Locale> onSelect;
+  const _LocaleRow({required this.current, required this.onSelect});
+
+  @override
+  Widget build(BuildContext context) {
+    final items = const [
+      Locale('de', 'DE'),
+      Locale('en', 'US'),
+      Locale('fr', 'FR'),
+      Locale('it', 'IT'),
+    ];
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: items
+          .map((l) => _LocaleChip(
+                locale: l,
+                selected: _eq(l, current),
+                onTap: () => onSelect(l),
+              ))
+          .toList(),
+    );
+  }
+
+  static bool _eq(Locale a, Locale b) =>
+      a.languageCode == b.languageCode && (b.countryCode ?? '') == (a.countryCode ?? '');
+}
+
+class _LocaleChip extends StatelessWidget {
+  final Locale locale;
+  final bool selected;
+  final VoidCallback onTap;
+  const _LocaleChip({required this.locale, required this.selected, required this.onTap});
+
+  String get _label {
+    final lc = locale.languageCode;
+    switch (lc) {
+      case 'de':
+        return 'Deutsch';
+      case 'en':
+        return 'English';
+      case 'fr':
+        return 'Français';
+      case 'it':
+        return 'Italiano';
+      default:
+        return lc.toUpperCase();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bg = selected
+        ? zs.ZenColors.deepSage.withValues(alpha: .16)
+        : Colors.white.withValues(alpha: .10);
+    final border = selected
+        ? zs.ZenColors.deepSage.withValues(alpha: .42)
+        : Colors.black.withValues(alpha: .12);
+    final fg = selected ? zs.ZenColors.deepSage : Colors.black87;
+
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: border),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (selected) ...[
+              const Icon(Icons.check_rounded, size: 14, color: zs.ZenColors.deepSage),
+              const SizedBox(width: 5),
+            ],
+            Text(
+              _label,
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 12.8,
+                color: fg,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ---------- Widgets: Misc ----------------------------------------------------
 
 class _EmptyRowHint extends StatelessWidget {
   final IconData icon;
@@ -760,7 +1352,7 @@ class _ZenMoodBarSeries extends StatelessWidget {
   }
 }
 
-// MoodGraph (fl_chart) – Provider-Serie (−2 … +2) in Glas-Bubble, klare Linien
+// MoodGraph (fl_chart) – Provider-Serie (−2 … +2) in Glas-Bubble
 class ZenMoodGraphSeries extends StatelessWidget {
   final List<double> series; // −2 … +2; ältestes → neuestes
   const ZenMoodGraphSeries({super.key, required this.series});
@@ -770,7 +1362,7 @@ class ZenMoodGraphSeries extends StatelessWidget {
     final data = series.takeLast(90);
     if (data.isEmpty) return const SizedBox(height: 124);
 
-    // Glatte Tageslinie (leicht geglättet) + 7-Tage-Average
+    // Glatte Tageslinie + 7-Tage-Average
     final smoothed = _smooth(data, strength: 0.35);
     final avg7 = _movingAverage(data, 7);
 
@@ -784,9 +1376,10 @@ class ZenMoodGraphSeries extends StatelessWidget {
             show: true,
             drawHorizontalLine: true,
             drawVerticalLine: false,
+            checkToShowHorizontalLine: (value) =>
+                value == -1 || value == 0 || value == 1,
             horizontalInterval: 1,
             getDrawingHorizontalLine: (value) {
-              // Referenzlinien −1 / 0 / +1 dezent, 0 etwas sichtbarer
               final isZero = value.abs() < 0.001;
               return FlLine(
                 color: isZero
@@ -813,7 +1406,6 @@ class ZenMoodGraphSeries extends StatelessWidget {
             ),
           ),
           lineBarsData: [
-            // Sekundär: 7-Tage-Durchschnitt (Jade)
             LineChartBarData(
               spots: List.generate(avg7.length, (i) => FlSpot(i.toDouble(), avg7[i])),
               isCurved: true,
@@ -823,7 +1415,6 @@ class ZenMoodGraphSeries extends StatelessWidget {
               dotData: const FlDotData(show: false),
               belowBarData: BarAreaData(show: false),
             ),
-            // Primär: geglättete Tageslinie (DeepSage)
             LineChartBarData(
               spots: List.generate(smoothed.length, (i) => FlSpot(i.toDouble(), smoothed[i])),
               isCurved: true,
@@ -839,7 +1430,6 @@ class ZenMoodGraphSeries extends StatelessWidget {
     );
   }
 
-  // Leichte Glättung (Exponentiell geglättet, Stärke 0..1)
   static List<double> _smooth(List<double> d, {double strength = 0.3}) {
     if (d.isEmpty) return const [];
     final s = <double>[];
@@ -851,7 +1441,6 @@ class ZenMoodGraphSeries extends StatelessWidget {
     return s;
   }
 
-  // Einfache gleitende Mittelwerte
   static List<double> _movingAverage(List<double> d, int window) {
     if (d.isEmpty || window <= 1) return List<double>.from(d);
     final out = <double>[];
@@ -982,7 +1571,6 @@ extension ListTakeLast<T> on List<T> {
 // ---- Helper zur Provider-Analyse -------------------------------------------
 
 const Map<String, double> _moodScoreMap = {
-  // Label → Score (−2 … +2)
   'glücklich': 2.0,
   'ruhig': 1.0,
   'neutral': 0.0,
@@ -992,7 +1580,6 @@ const Map<String, double> _moodScoreMap = {
 };
 
 double? _scoreFromTags(List<String> tags) {
-  // 1) moodScore:<0..4> → −2..+2
   for (final t in tags) {
     final s = t.trim();
     if (s.startsWith('moodScore:')) {
@@ -1000,7 +1587,6 @@ double? _scoreFromTags(List<String> tags) {
       if (n != null) return (n.clamp(0, 4) * 1.0) - 2.0;
     }
   }
-  // 2) mood:<Label> → Map
   for (final t in tags) {
     final s = t.trim();
     if (s.startsWith('mood:')) {

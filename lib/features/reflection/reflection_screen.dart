@@ -1,16 +1,21 @@
 // lib/features/reflection/reflection_screen.dart
 //
-// ReflectionScreen — Panda v3.23.1 (Oxford level; CH risk actions; no auto-nav)
+// ReflectionScreen — Panda v3.24.0 (Oxford level; CH risk actions; no auto-nav)
 // -----------------------------------------------------------------------------
-// Änderungen in diesem Build:
-// • Intro-Bubble ist jetzt "pinned" und bleibt immer sichtbar.
-// • Memory-Bridge (Recall-Bubble) wird NICHT mehr angezeigt.
-// • Save-Hinweis erscheint, sobald Speichern möglich ist (nach 2 Runden):
-//   „Lies die Frage kurz, antworte in 1–2 Sätzen, speichere bitte deine Session …“
-// • Antwort-Chips: Minimum 2 — bei nur 1 Worker-Chip ergänzt der Screen sanft einen zweiten.
-// • Bestehende Guarantees bleiben: deterministischer Save→Mood Flow, keine Auto-Navigation,
-//   CH-Safety-Hinweise & Hotlines, Enter-/Shift+Enter-Handling.
-// • Kleinfix: expliziter Import der Whisper-Engine.
+// In diesem Build:
+// • Meta-Ebene: Alle Worker-Calls (start/next/closure) bekommen ein `meta`-Objekt
+//   mitgegeben (Memory-Bridge/Recall, UI/Session/Safety/Telemetry).
+// • **Memory-Integration (Phase 1):**
+//   – Vor jedem Call wird best-effort `MemoryStore.pickFor(userInput)` (oder
+//     Fallback via MemoryService) aufgerufen und als `memories` + `memoryConsent`
+//     an den Worker durchgereicht (snake_case).
+//   – Nach dem Turn wird – **nur bei Themen-Overlap** und **nur bei Einsicht** –
+//     `recordAcknowledge()` (best-effort) getriggert, um kein Memory-Spam zu erzeugen.
+//   – Keine PII im Logging/Meta (nur anonyme Zähler / Flags).
+// • Fallbacks bleiben erhalten: Wenn die API keine `meta`/`memories`/`memoryConsent`
+//   kennt, wird automatisch auf die alte Signatur zurückgefallen (NoSuchMethodError).
+// • Intro-Bubble "pinned", Save→Mood-Flow deterministisch, min. 2 Antwortchips,
+//   CH-Hotlines, Enter-/Shift+Enter-Handling, kein Auto-Navigate.
 // -----------------------------------------------------------------------------
 library reflection_screen;
 
@@ -54,8 +59,9 @@ import '../../services/speech_service.dart';
 import '../../services/whisper_service.dart'; // STT-Engine
 import '../../services/core/api_service.dart'; // Mood speichern
 
-// NEU: Memory-Layer (Recall / Bridge)
+// Memory-Layer
 import '../../core/memory/memory_service.dart';
+import '../../core/memory/memory_store.dart' show MemoryStore; // pickFor()/enabled (dyn tolerant)
 
 // CH Hotlines (Call-Buttons) + Launcher-Utilities
 import '../../widgets/hotline_widget.dart'; // SwissHotlineCard / Section
@@ -89,6 +95,20 @@ typedef AddToGedankenbuch = void Function(
 
 // ---------------- Interner UI-State ------------------------------------------
 enum _ChipMode { starter, answer, none }
+
+// ---------------- Intern: Picked Memories ------------------------------------
+class _PickedMem {
+  final dynamic payload; // beliebig; wird 1:1 an Worker gegeben
+  final bool consent;
+  final List<String> keys; // extrahierte Facetten/Tags (lowercased) für Overlap
+  final Map<String, dynamic> metaSafe; // nur anonyme Zähler fürs Meta
+  const _PickedMem({
+    required this.payload,
+    required this.consent,
+    required this.keys,
+    required this.metaSafe,
+  });
+}
 
 // ---------------- Screen ------------------------------------------------------
 class ReflectionScreen extends StatefulWidget {
@@ -157,10 +177,11 @@ class _ReflectionScreenState extends State<ReflectionScreen>
           defaultTargetPlatform == TargetPlatform.windows ||
           defaultTargetPlatform == TargetPlatform.macOS);
 
-  // ---------------- NEW: Memory Recall / Bridge ------------------------------
-  String? _bridgeText; // (nicht mehr angezeigt; nur für Worker-Kontext)
-  // ignore: unused_element
-  bool get _hasBridge => (_bridgeText != null && _bridgeText!.trim().isNotEmpty);
+  // ---------------- Memory Recall / Bridge (visuell unsichtbar) --------------
+  String? _bridgeText; // (nicht angezeigt; nur für Worker-Kontext)
+
+  // Track: bereits acknowledged pro Runde → kein Doppel-Ack
+  final Set<String> _ackRounds = <String>{};
 
   Future<void> _prefetchRecall() async {
     // Best-effort: Recall laden, UI bleibt nie blockiert.
@@ -213,6 +234,72 @@ class _ReflectionScreenState extends State<ReflectionScreen>
         ? 'Ich erinnere mich an **$t1**.'
         : 'Ich erinnere mich an **$t1** und **$t2**.';
     return '$body Falls das heute noch mitschwingt – magst du dort anknüpfen?';
+  }
+
+  // ---------------- META: Builder --------------------------------------------
+  /// Sammelt Meta-Infos für den Worker. Wird an alle Calls (start/next/closure) angehängt,
+  /// sofern die jeweilige API die Named-Param `meta` akzeptiert.
+  Map<String, dynamic> _buildMeta({
+    String? userText,
+    String? userAnswer,
+    String? mode,
+    bool isStart = false,
+    bool isClosure = false,
+    Map<String, dynamic>? memorySummary, // nur anonyme Zähler/Flags
+  }) {
+    return {
+      'ui': {
+        'screen': 'reflection',
+        'version': '3.24.0',
+        'platform': kIsWeb ? 'web' : 'flutter',
+        'is_desktop': _isDesktop,
+        'chip_mode': _chipMode.name,
+        'answer_chips_min': 2,
+        'save_hint_after_rounds': 2,
+      },
+      'session': {
+        'thread_id': _session?.threadId,
+        'turn_index': _session?.turnIndex,
+        'rounds': _rounds.length,
+        'has_mood': _current?.hasMood ?? false,
+        'allow_closure': _current?.allowClosure ?? false,
+        'did_prompt_mood': _didPromptMood,
+        'is_start': isStart,
+        'is_closure': isClosure,
+      },
+      'memory': {
+        'bridge': _bridgeText,
+        if (memorySummary != null) ...{
+          'injected': {
+            'present': true,
+            ...memorySummary, // z. B. {facets_count, tags_count, consent}
+          }
+        } else
+          'injected': {'present': false},
+      },
+      'input': {
+        if (userText != null) 'user_text': userText,
+        if (userAnswer != null) 'user_answer': userAnswer,
+        if (mode != null) 'mode': mode,
+        'initial_seed_present': (widget.initialUserText ?? '').trim().isNotEmpty,
+      },
+      'safety': {
+        'region': 'CH',
+        'hotlines_card': true,
+      },
+      'privacy': {
+        'pii': false,
+      },
+      'tz': 'Europe/Zurich',
+      'timestamp': DateTime.now().toUtc().toIso8601String(),
+      'telemetry': {
+        'feature_flags': {
+          'reflection.meta': true,
+          'chips.min2': true,
+          'memory.inject': true,
+        },
+      },
+    };
   }
 
   void _attachSttEngine() {
@@ -421,6 +508,178 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     );
   }
 
+  // --- Memory Picking ---------------------------------------------------------
+  Future<_PickedMem?> _pickMemoriesFor(String userText) async {
+    final input = (userText).trim();
+    if (input.isEmpty) return null;
+
+    // 1) Primär: MemoryStore.pickFor(userText) – dyn tolerant
+    try {
+      await MemoryStore.instance.init();
+      final bool consent = MemoryStore.instance.isEnabled;
+      final dyn = MemoryStore.instance as dynamic;
+      final dynamic res = await dyn.pickFor?.call(input);
+      if (res != null) {
+        final keys = _extractFacetKeys(res);
+        final metaSafe = {
+          'facets_count': keys.length,
+          'consent': consent,
+        };
+        return _PickedMem(payload: res, consent: consent, keys: keys, metaSafe: metaSafe);
+      }
+    } catch (_) {
+      // ignore
+    }
+
+    // 2) Fallback: kompakter Kontext-Hint aus MemoryService
+    try {
+      final hint = MemoryService.instance.buildContextHint(
+        maxFacets: 3,
+        maxTags: 5,
+        maxAgeDays: 14,
+      );
+      if (hint != null) {
+        final payload = <String, dynamic>{
+          if ((hint.facets as List?)?.isNotEmpty ?? false)
+            'recent_facets': List<String>.from((hint.facets as List).map((e) => e.toString())),
+          if ((hint.tags as List?)?.isNotEmpty ?? false)
+            'recent_tags': List<String>.from((hint.tags as List).map((e) => e.toString())),
+          if ((hint.topics as List?)?.isNotEmpty ?? false)
+            'last_themes': List<String>.from((hint.topics as List).map((e) => e.toString())),
+        };
+        final keys = _extractFacetKeys(payload);
+        return _PickedMem(
+          payload: payload,
+          consent: true,
+          keys: keys,
+          metaSafe: {'facets_count': keys.length, 'consent': true},
+        );
+      }
+    } catch (_) {
+      // ignore
+    }
+
+    return null;
+  }
+
+  List<String> _extractFacetKeys(dynamic src) {
+    final out = <String>{};
+
+    void addStr(String? s) {
+      final t = (s ?? '').trim();
+      if (t.isEmpty) return;
+      out.add(t.toLowerCase());
+    }
+
+    void addList(dynamic v) {
+      if (v is List) {
+        for (final e in v) {
+          if (e is Map) {
+            addStr((e['label'] ?? e['key'] ?? e['topic'] ?? e['tag'] ?? '').toString());
+          } else {
+            addStr(e?.toString());
+          }
+        }
+      }
+    }
+
+    if (src is Map) {
+      // v2 camelCase Objects
+      addList(src['contextFacets']);   // [{label,...}]
+      addList(src['facets']);          // [String]
+      // snake_case Context-Hint
+      addList(src['context_facets']);  // [{label,...}] or [String]
+      addList(src['recent_facets']);   // [String]
+      addList(src['recent_tags']);     // [String]
+      addList(src['last_themes']);     // [String]
+      addList(src['recent_topics']);   // [String]
+    }
+
+    return out.toList(growable: false);
+  }
+
+  bool _hasTopicOverlap(_PickedMem pick, dynamic turn) {
+    if (pick.keys.isEmpty) return false;
+
+    final mem = pick.keys.toSet();
+
+    final tags = _safeStringList(turn, ['tags']).map((e) => e.toLowerCase());
+    final ctx = _safeStringList(turn, ['context']).map((e) => e.toLowerCase());
+    final facs = _safeStringList(turn, ['understanding', 'facets'])
+        .map((e) => e.toLowerCase()); // normalized UI-Facetten
+
+    final q = _coerceQuestion(turn).toLowerCase();
+    final qTokens = q.split(RegExp(r'[^a-zäöüß0-9]+')).where((w) => w.length >= 3);
+
+    final set = {...tags, ...ctx, ...facs, ...qTokens};
+    return set.any(mem.contains);
+  }
+
+  bool _hasInsight(dynamic turn) {
+    // a) normalized: top-level insight_score
+    final double? sTop = _safeNum(turn, ['insight_score']);
+    if (sTop != null && sTop >= 0.5) return true;
+
+    // b) older/worker: flow.insight_score
+    final double? sFlow = _safeNum(turn, ['flow', 'insight_score']);
+    if (sFlow != null && sFlow >= 0.5) return true;
+
+    // c) typed DTO: TurnAnalysis.insightScore
+    try {
+      if (turn is ReflectionTurn) {
+        final v = turn.analysis?.insightScore;
+        if (v != null && v >= 0.5) return true;
+      }
+    } catch (_) {/* tolerant */}
+
+    // d) heuristischer Fallback
+    final hasMirror = _coerceMirror(turn).trim().isNotEmpty;
+    final hasQ = _coerceQuestion(turn).trim().isNotEmpty;
+    return hasMirror && hasQ;
+  }
+
+  Future<void> _acknowledgeIfInsight({
+    required ReflectionRound round,
+    required dynamic turn,
+    _PickedMem? picked,
+  }) async {
+    if (picked == null) return;
+    if (_ackRounds.contains(round.id)) return; // pro Runde nur ein Ack
+    if (!_hasInsight(turn)) return;
+    if (!_hasTopicOverlap(picked, turn)) return;
+
+    final double? score =
+        _safeNum(turn, ['insight_score']) ??
+        _safeNum(turn, ['flow', 'insight_score']) ??
+        (() {
+          try {
+            if (turn is ReflectionTurn) return turn.analysis?.insightScore;
+          } catch (_) {}
+          return null;
+        }());
+
+    final ack = {
+      'round_id': round.id,
+      'session_id': _session?.threadId,
+      'insight_score': score,
+      'ts': DateTime.now().toUtc().toIso8601String(),
+      'facets_keys': picked.keys.take(6).toList(), // klein halten
+    };
+
+    try {
+      // bevorzugt Service (dyn tolerant)
+      final dyn = MemoryService.instance as dynamic;
+      await dyn.recordAcknowledge?.call(ack);
+    } catch (_) {
+      try {
+        final dynStore = MemoryStore.instance as dynamic;
+        await dynStore.recordAcknowledge?.call(ack);
+      } catch (_) {/* ignore */}
+    }
+
+    _ackRounds.add(round.id);
+  }
+
   // --- Start: neue Reflexion -------------------------------------------------
   Future<void> _startNewReflection({
     required String userText,
@@ -432,6 +691,9 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       _didPromptMood = false;
       _isMoodOpen = false;
     });
+
+    // NEU: Memories picken (best-effort)
+    final _PickedMem? picked = await _pickMemoriesFor(userText);
 
     try {
       final round = ReflectionRound(
@@ -449,17 +711,42 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       _scrollToBottom();
 
       dynamic turn;
+      final meta = _buildMeta(
+        userText: userText,
+        mode: mode,
+        isStart: true,
+        memorySummary: picked?.metaSafe,
+      );
+
       try {
-        turn = await GuidanceService.instance
-            .startSessionFull(text: userText, locale: 'de', tz: 'Europe/Zurich')
+        // 1) Neuer Endpunkt mit Meta + Memories (dyn tolerant)
+        turn = await (GuidanceService.instance as dynamic)
+            .startSessionFull(
+              text: userText,
+              locale: 'de',
+              tz: 'Europe/Zurich',
+              meta: meta,
+              memories: picked?.payload,
+              memoryConsent: picked?.consent ?? false,
+            )
             .timeout(_netTimeout);
       } on NoSuchMethodError {
         try {
-          turn = await GuidanceService.instance
-              .startSession(text: userText, locale: 'de', tz: 'Europe/Zurich')
+          // 2) Alter Endpunkt ohne Meta, aber evtl. Memories
+          turn = await (GuidanceService.instance as dynamic)
+              .startSessionFull(
+                text: userText,
+                locale: 'de',
+                tz: 'Europe/Zurich',
+                memories: picked?.payload,
+                memoryConsent: picked?.consent ?? false,
+              )
               .timeout(_netTimeout);
-        } catch (_) {
-          rethrow;
+        } on NoSuchMethodError {
+          // 3) Ganz alter Fallback → ohne Extras
+          turn = await GuidanceService.instance
+              .startSessionFull(text: userText, locale: 'de', tz: 'Europe/Zurich')
+              .timeout(_netTimeout);
         }
       } on TimeoutException {
         if (!mounted) return;
@@ -497,6 +784,9 @@ class _ReflectionScreenState extends State<ReflectionScreen>
             (step.expectsAnswer || hasHelpers) ? _ChipMode.answer : _ChipMode.none;
       });
 
+      // NEU: bei Einsicht + Overlap → Acknowledge
+      unawaited(_acknowledgeIfInsight(round: round, turn: turn, picked: picked));
+
       _fadeSlideCtrl.forward(from: 0);
       _scrollToBottom();
       _focusInput();
@@ -526,28 +816,43 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     setState(() => loading = true);
     _scrollToBottom();
 
+    // NEU: Memories picken für die Antwort (aktualisierte Achse)
+    final _PickedMem? picked = await _pickMemoriesFor(userAnswer);
+
     dynamic turn;
+    final meta = _buildMeta(userAnswer: userAnswer, memorySummary: picked?.metaSafe);
+
     try {
       if (_session != null) {
         try {
-          turn = await GuidanceService.instance
+          // 1) Neuer Endpunkt (nextTurnFull) mit Meta + Memories
+          turn = await (GuidanceService.instance as dynamic)
               .nextTurnFull(
                 session: _session!,
                 text: userAnswer,
                 locale: 'de',
                 tz: 'Europe/Zurich',
+                meta: meta,
+                memories: picked?.payload,
+                memoryConsent: picked?.consent ?? false,
               )
               .timeout(_netTimeout);
         } on NoSuchMethodError {
           try {
+            // 2) Älterer Name (reflectFull) mit Meta + Memories (dyn)
             turn = await (GuidanceService.instance as dynamic)
                 .reflectFull(
-                    session: _session!,
-                    text: userAnswer,
-                    locale: 'de',
-                    tz: 'Europe/Zurich')
+                  session: _session!,
+                  text: userAnswer,
+                  locale: 'de',
+                  tz: 'Europe/Zurich',
+                  meta: meta,
+                  memories: picked?.payload,
+                  memoryConsent: picked?.consent ?? false,
+                )
                 .timeout(_netTimeout);
           } on NoSuchMethodError {
+            // 3) Fallback ohne Meta/Memories
             turn = await GuidanceService.instance
                 .startSessionFull(
                   text: userAnswer,
@@ -559,13 +864,27 @@ class _ReflectionScreenState extends State<ReflectionScreen>
           }
         }
       } else {
-        turn = await GuidanceService.instance
-            .startSessionFull(
-              text: userAnswer,
-              locale: 'de',
-              tz: 'Europe/Zurich',
-            )
-            .timeout(_netTimeout);
+        // Keine Session bekannt → (re)start
+        try {
+          turn = await (GuidanceService.instance as dynamic)
+              .startSessionFull(
+                text: userAnswer,
+                locale: 'de',
+                tz: 'Europe/Zurich',
+                meta: meta,
+                memories: picked?.payload,
+                memoryConsent: picked?.consent ?? false,
+              )
+              .timeout(_netTimeout);
+        } on NoSuchMethodError {
+          turn = await GuidanceService.instance
+              .startSessionFull(
+                text: userAnswer,
+                locale: 'de',
+                tz: 'Europe/Zurich',
+              )
+              .timeout(_netTimeout);
+        }
       }
     } on TimeoutException {
       if (!mounted) return;
@@ -607,6 +926,9 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       _chipMode =
           (step.expectsAnswer || hasHelpers) ? _ChipMode.answer : _ChipMode.none;
     });
+
+    // NEU: bei Einsicht + Overlap → Acknowledge
+    unawaited(_acknowledgeIfInsight(round: round, turn: turn, picked: picked));
 
     _fadeSlideCtrl.forward(from: 0);
     _scrollToBottom();
@@ -809,18 +1131,35 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     _scrollToBottom();
 
     dynamic res;
+    final meta = _buildMeta(userAnswer: userAnswer, isClosure: true);
+
     try {
-      res = await GuidanceService.instance
+      // 1) Neuer Closure-Endpunkt mit Meta
+      res = await (GuidanceService.instance as dynamic)
           .closureFull(
             session: _session,
             answer: userAnswer,
             locale: 'de',
             tz: 'Europe/Zurich',
+            meta: meta,
           )
           .timeout(_netTimeout);
     } on NoSuchMethodError {
-      if (mounted) setState(() => loading = false);
-      return;
+      try {
+        // 2) Fallback ohne Meta
+        res = await GuidanceService.instance
+            .closureFull(
+              session: _session,
+              answer: userAnswer,
+              locale: 'de',
+              tz: 'Europe/Zurich',
+            )
+            .timeout(_netTimeout);
+      } on NoSuchMethodError {
+        // Ältestes System: kein closure-Support → einfach aussteigen
+        if (mounted) setState(() => loading = false);
+        return;
+      }
     } on TimeoutException {
       if (mounted) setState(() => loading = false);
       return;
@@ -1009,6 +1348,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     var s = raw.toString().trim();
     if (s.isEmpty) return '';
     s = s.replaceAll(RegExp(r'^[„“"»«]+|[„“"»«]+$'), '');
+    s = s.replaceAll(RegExp(r'\s*[:：]\s*$'), ''); // trailing ':' entfernen
     s = s.replaceAll(RegExp(r'[?？]+$'), '');
     s = s.replaceAll(RegExp(r'\s+'), ' ').trim();
     if (s.length > 72) s = '${s.substring(0, 72).trimRight()}…';
@@ -1257,8 +1597,10 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     final List<String> answerTemplates =
         _ensureMinTwoChips(answerTemplatesRefined, lastQ, lastA);
 
+    // Save-Hinweis soll explizit erst NACH 2 Runden erscheinen
     final bool canPermanentSave =
         r != null && r.answered && (r.entryId == null);
+    final bool showSaveHint = canPermanentSave && _rounds.length >= 2;
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: overlay,
@@ -1436,14 +1778,14 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                                 ),
                               ),
 
-                              // NEU: Save-Hinweis, sobald Speichern möglich
+                              // NEU: Save-Hinweis, sobald Speichern möglich **und nach 2 Runden**
                               AnimatedSize(
                                 duration: _animShort,
                                 curve: Curves.easeOut,
                                 child: AnimatedOpacity(
                                   duration: _animShort,
-                                  opacity: canPermanentSave ? 1 : 0,
-                                  child: canPermanentSave
+                                  opacity: showSaveHint ? 1 : 0,
+                                  child: showSaveHint
                                       ? Padding(
                                           padding: const EdgeInsets.only(
                                               top: 0, bottom: 8),
@@ -1465,8 +1807,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                                                   SizedBox(width: 6),
                                                   Expanded(
                                                     child: Text(
-                                                      'Speichere bitte deine Session, damit du sie später nochmal lesen kannst '
-                                                      'oder damit der Panda sich an dich erinnert.',
+                                                      'Lies die Frage kurz, antworte in 1–2 Sätzen, speichere bitte deine Session …',
                                                       style: TextStyle(
                                                         color: Colors.black54,
                                                       ),
@@ -1787,6 +2128,17 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       return s == 'true' || s == '1' || s == 'yes' || s == 'y';
     }
     return false;
+  }
+
+  double? _safeNum(dynamic obj, List<String> path) {
+    final v = _getPath(obj, path);
+    if (v is num) return v.toDouble();
+    if (v is String) {
+      final s = v.trim().replaceAll(',', '.');
+      final n = double.tryParse(s);
+      return n;
+    }
+    return null;
   }
 
   List<String> _safeStringList(dynamic obj, List<String> path) {

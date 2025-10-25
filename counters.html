@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="de">
+<meta charset="utf-8" />
+<title>Community Counter</title>
+<style>body{font:16px system-ui,Arial;margin:2rem} button{margin-left:.5rem}</style>
+
+<div>Geholfen: <span id="help">–</span> <button onclick="ackHelp()">+1</button></div>
+<div>Gespräche: <span id="conv">–</span> <button onclick="ackTalk()">+1</button></div>
+
+<script>
+const HOST = "https://nameless-breeze-87fb.edcvaultcom.workers.dev";
+
+async function loadCounters(){
+  const h = await fetch(`${HOST}/v1/community/help-total`).then(r=>r.json());
+  const c = await fetch(`${HOST}/v1/community/conversations-total`).then(r=>r.json());
+  document.getElementById('help').textContent = h.help_total;
+  document.getElementById('conv').textContent = c.conversations_total;
+}
+
+async function ackHelp(){
+  const r = await fetch(`${HOST}/v1/community/help-ack`, {method:'POST'}).then(r=>r.json());
+  document.getElementById('help').textContent = r.help_total;
+}
+
+async function ackTalk(){
+  const r = await fetch(`${HOST}/v1/community/talk-ack`, {method:'POST'}).then(r=>r.json());
+  document.getElementById('conv').textContent = r.conversations_total;
+}
+
+loadCounters();
+</script>
+</html>
