@@ -28,6 +28,13 @@
 // await queue.flush(); // z. B. an App-Resume oder beim Schließen.
 //
 // -----------------------------------------------------------------------------
+//
+// Hinweis: Diese Datei importiert 'dart:io' für die File-Variante. Für Web
+// sollte nur InMemoryOfflineStorage verwendet werden.
+//
+// Lint-Ausnahme: In diesem Modul sind interne Typen (_QueueItem) Teil der
+// Storage-Schnittstelle. Wir unterdrücken den Hinweis gezielt.
+// ignore_for_file: library_private_types_in_public_api
 
 import 'dart:async';
 import 'dart:convert';
@@ -80,6 +87,9 @@ class InMemoryOfflineStorage implements OfflineStorage {
   Future<void> save(List<_QueueItem> all) async {
     _items = List<_QueueItem>.from(all);
   }
+
+  @override
+  Future<int> length() async => _items.length;
 }
 
 /// Datei-basierte Persistenz (JSON); Pfad muss beschreibbar sein.
@@ -99,7 +109,9 @@ class FileOfflineStorage implements OfflineStorage {
       if (txt.trim().isEmpty) return <_QueueItem>[];
       final raw = jsonDecode(txt);
       if (raw is! List) return <_QueueItem>[];
-      return raw.map<_QueueItem>((e) => _QueueItem.fromJson(e as JsonMap)).toList()
+      return raw
+          .map<_QueueItem>((e) => _QueueItem.fromJson(e as JsonMap))
+          .toList()
         ..sort((a, b) => a.enqueuedAt.compareTo(b.enqueuedAt));
     } catch (_) {
       // Korrupt? Vorsichtig leeren (keine Exceptions nach außen).
@@ -114,6 +126,20 @@ class FileOfflineStorage implements OfflineStorage {
       await _file.writeAsString(jsonEncode(data), flush: true);
     } catch (_) {
       // Falls Schreiben scheitert: still (Events bleiben im Speicher des Aufrufers).
+    }
+  }
+
+  @override
+  Future<int> length() async {
+    try {
+      if (!await _file.exists()) return 0;
+      final txt = await _file.readAsString();
+      if (txt.trim().isEmpty) return 0;
+      final raw = jsonDecode(txt);
+      if (raw is List) return raw.length;
+      return 0;
+    } catch (_) {
+      return 0;
     }
   }
 }

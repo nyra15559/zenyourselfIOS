@@ -56,7 +56,7 @@ import '../../providers/journal_entries_provider.dart';
 // Services
 import '../../services/guidance_service.dart';
 import '../../services/speech_service.dart';
-import '../../services/whisper_service.dart'; // STT-Engine
+// (entfernt) import '../../services/whisper_service.dart'; // STT-Engine
 import '../../services/core/api_service.dart'; // Mood speichern
 
 // Memory-Layer
@@ -1489,66 +1489,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     await Future.delayed(const Duration(milliseconds: 1500));
     if (!mounted) return;
     setState(() => _showConfirmBanner = false);
-  }
-
-  Future<void> _showPostSheet() async {
-    if (!mounted) return;
-    await showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
-      ),
-      builder: (ctx) {
-        return SafeArea(
-          top: false,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 10, 12, 18),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 40,
-                  height: 4,
-                  margin: const EdgeInsets.only(bottom: 12),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: .12),
-                    borderRadius: BorderRadius.circular(99),
-                  ),
-                ),
-                ListTile(
-                  leading: const Icon(Icons.chat_bubble_outline_rounded),
-                  title: const Text('Weiter reflektieren'),
-                  onTap: () => Navigator.of(ctx).pop(),
-                ),
-                ListTile(
-                  leading: const Icon(Icons.apps_rounded),
-                  title: const Text('Hauptmenü'),
-                  onTap: () {
-                    Navigator.of(ctx).pop();
-                    if (widget.onGoHome != null) {
-                      widget.onGoHome!();
-                    } else {
-                      Navigator.of(context).maybePop();
-                    }
-                  },
-                ),
-                ListTile(
-                  leading: const Icon(Icons.book_rounded),
-                  title: const Text('Gedankenbuch öffnen'),
-                  onTap: () {
-                    Navigator.of(ctx).pop();
-                    if (widget.onOpenJournal != null) {
-                      widget.onOpenJournal!();
-                    }
-                  },
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
   }
 
   // ---------------- Build -----------------------------------------------------

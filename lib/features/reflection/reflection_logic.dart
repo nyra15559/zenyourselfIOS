@@ -23,11 +23,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../../services/guidance/dtos.dart'
-    show
-        ReflectionTurn,
-        ReflectionSession,
-        UserAction,
-        IfEmptyX; // kleine String-Ext.
+    show ReflectionTurn, ReflectionSession, UserAction;
 
 import '../../services/guidance_service.dart';
 import '../../core/memory/memory_service.dart';
@@ -90,7 +86,6 @@ class ReflectionController extends ChangeNotifier {
 
   bool _loading = false;
   ReflectionSession? _session;
-  ReflectionTurn? _lastTurn;
   ReflectionVM? _vm;
   String? _bridgeText;
 
@@ -152,7 +147,6 @@ class ReflectionController extends ChangeNotifier {
           .timeout(_kNetTimeout);
 
       _session = _coerceSession(turn);
-      _lastTurn = turn;
       _vm = _buildVM(turn);
       _actionUsedInThisSession = false; // neue Session ⇒ Action-Rate-Limit reset
     } catch (_) {
@@ -208,7 +202,6 @@ class ReflectionController extends ChangeNotifier {
           .timeout(_kNetTimeout);
 
       _session = _coerceSession(turn);
-      _lastTurn = turn;
       _vm = _buildVM(turn);
     } catch (_) {/* ignore, keep old vm */}
     finally {
@@ -275,7 +268,6 @@ class ReflectionController extends ChangeNotifier {
       }
 
       _session = _coerceSession(turn);
-      _lastTurn = turn;
       _vm = _buildVM(turn);
       _actionUsedInThisSession = true;
     } catch (_) {/* ignore */}
@@ -307,11 +299,15 @@ class ReflectionController extends ChangeNotifier {
   ReflectionVM _buildVM(ReflectionTurn t) {
     final mirror = _cap((t.mirror ?? '').trim(), 640);
     final q = (t.primaryQuestion ?? '').trim();
-    final talk = t.talk.take(2).map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+    final talk =
+        t.talk.take(2).map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
 
     // answerChips (aus Worker), sanft normalisieren + mind. 2 Chips sicherstellen
-    final baseChips =
-        t.answerHelpers.map(_sanitizeHelper).where((s) => s.isNotEmpty).take(3).toList();
+    final baseChips = t.answerHelpers
+        .map(_sanitizeHelper)
+        .where((s) => s.isNotEmpty)
+        .take(3)
+        .toList();
     final chips = _ensureMinTwoChips(baseChips, q: q);
 
     final helperSuggestion = (t.helperSuggestion ?? '').trim().isEmpty
@@ -406,9 +402,8 @@ class ReflectionController extends ChangeNotifier {
     if (chips.length >= 2) return chips.take(3).toList();
     final List<String> out = List<String>.from(chips);
     // Neutraler, universeller Zusatz-Starter basierend auf der Leitfrage
-    final fallback = (q.trim().isNotEmpty)
-        ? 'Wichtig ist mir außerdem … '
-        : 'Noch etwas dazu … ';
+    final fallback =
+        (q.trim().isNotEmpty) ? 'Wichtig ist mir außerdem … ' : 'Noch etwas dazu … ';
     out.add(fallback);
     return out.take(3).toList();
   }
@@ -416,14 +411,16 @@ class ReflectionController extends ChangeNotifier {
   bool _isSubsequence(String a, String b) {
     final aa = a.toLowerCase();
     final bb = b.toLowerCase();
-    return bb.contains(aa) || aa.split(RegExp(r'\s+')).every((w) => w.isEmpty || bb.contains(w));
+    return bb.contains(aa) ||
+        aa.split(RegExp(r'\s+')).every((w) => w.isEmpty || bb.contains(w));
   }
 
   String _cap(String s, int maxChars) {
     if (s.length <= maxChars) return s;
     final cut = s.substring(0, maxChars);
     final lastSpace = cut.lastIndexOf(' ');
-    return (lastSpace >= 40 ? cut.substring(0, lastSpace) : cut).trimRight() + '…';
+    final base = (lastSpace >= 40 ? cut.substring(0, lastSpace) : cut).trimRight();
+    return '$base…';
   }
 
   String? _composeBridgeText(dynamic recall) {
@@ -443,10 +440,9 @@ class ReflectionController extends ChangeNotifier {
           addToken(it);
         } else if (it is Map) {
           addToken((it['topic'] ?? it['tag'] ?? '').toString());
-          final facets = (it['facets'] as List?)
-                  ?.map((e) => e?.toString() ?? '')
-                  .toList() ??
-              const [];
+          final facets =
+              (it['facets'] as List?)?.map((e) => e?.toString() ?? '').toList() ??
+                  const [];
           if (facets.isNotEmpty) addToken(facets.first);
           final line = (it['line'] ?? it['hint'] ?? '').toString();
           if (line.isNotEmpty && tokens.length < 2) addToken(line);
@@ -458,9 +454,8 @@ class ReflectionController extends ChangeNotifier {
     final t1 = tokens[0];
     final t2 = tokens.length >= 2 ? tokens[1] : null;
 
-    final body = t2 == null
-        ? 'Ich erinnere mich an **$t1**.'
-        : 'Ich erinnere mich an **$t1** und **$t2**.';
+    final body =
+        t2 == null ? 'Ich erinnere mich an **$t1**.' : 'Ich erinnere mich an **$t1** und **$t2**.';
     return '$body Falls das heute noch mitschwingt – magst du dort anknüpfen?';
   }
 

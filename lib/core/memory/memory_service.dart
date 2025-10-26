@@ -102,10 +102,10 @@ class MemoryService {
     try {
       await init();
       // kleine, häufig benutzte Reads anstoßen (aber nicht kritisch)
-      await Future.wait([
-        topFacets(limit: 8),
-        latestTopics(limit: 6),
-      ]).catchError((_) {});
+      try {
+        await topFacets(limit: 8);
+        await latestTopics(limit: 6);
+      } catch (_) {/* ignore */}
     } catch (_) {/* ignore */}
   }
 

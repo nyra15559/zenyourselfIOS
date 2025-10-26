@@ -28,7 +28,7 @@ class AnalyticsEvent {
   const AnalyticsEvent({
     required this.name,
     required this.ts,
-    this.props = const {},
+    this.props = const <String, Object?>{},
   });
 
   Map<String, dynamic> toJson() => {
@@ -41,7 +41,9 @@ class AnalyticsEvent {
     final name = (j['name'] ?? 'event.unknown').toString();
     final tsRaw = (j['ts'] ?? DateTime.now().toUtc().toIso8601String()).toString();
     final DateTime ts = DateTime.tryParse(tsRaw)?.toUtc() ?? DateTime.now().toUtc();
-    final props = (j['props'] is Map) ? Map<String, Object?>.from(j['props'] as Map) : const {};
+    final props = (j['props'] is Map)
+        ? Map<String, Object?>.from(j['props'] as Map)
+        : const <String, Object?>{};
     return AnalyticsEvent(name: name, ts: ts, props: props);
   }
 }
@@ -58,7 +60,7 @@ class AnalyticsService with ChangeNotifier {
   void trackAppStart({String? source, String? version, String? platform}) {
     logEvent(
       'app.start',
-      props: {
+      props: <String, Object?>{
         if (source != null) 'source': source,
         if (version != null) 'version': version,
         if (platform != null) 'platform': platform,
@@ -75,7 +77,7 @@ class AnalyticsService with ChangeNotifier {
   }) {
     logEvent(
       'reflection.answer',
-      props: {
+      props: <String, Object?>{
         if (id != null) 'id': id,
         if (moodScore != null) 'moodScore': moodScore,
         if (textChars != null) 'textChars': textChars,
@@ -92,7 +94,7 @@ class AnalyticsService with ChangeNotifier {
   }) {
     logEvent(
       'entry.save',
-      props: {
+      props: <String, Object?>{
         'kind': kind,
         if (textChars != null) 'textChars': textChars,
         if (moodLabel != null && moodLabel.trim().isNotEmpty) 'moodLabel': moodLabel.trim(),
@@ -104,7 +106,7 @@ class AnalyticsService with ChangeNotifier {
   void trackMoodSet({required int moodScore, String? moodLabel}) {
     logEvent(
       'mood.set',
-      props: {
+      props: <String, Object?>{
         'moodScore': moodScore,
         if (moodLabel != null && moodLabel.trim().isNotEmpty) 'moodLabel': moodLabel.trim(),
       },
@@ -112,7 +114,7 @@ class AnalyticsService with ChangeNotifier {
   }
 
   /// Low-level Event Logger (ASC einsortiert).
-  void logEvent(String name, {Map<String, Object?> props = const {}, DateTime? when, bool notify = true}) {
+  void logEvent(String name, {Map<String, Object?> props = const <String, Object?>{}, DateTime? when, bool notify = true}) {
     final ev = AnalyticsEvent(name: name, ts: (when ?? DateTime.now().toUtc()), props: props);
     _insertSortedEvent(ev);
     if (notify) notifyListeners();
@@ -136,13 +138,22 @@ class AnalyticsService with ChangeNotifier {
   void addReflection(ReflectionEntry entry, {bool notify = true, bool trackEvent = true}) {
     _insertSortedReflection(entry);
     if (trackEvent) {
+      final ui = _getUserInput(entry);
+      final ur = _getUserResponse(entry);
+      final tags = _getTags(entry).toList();
+
       trackReflectionAnswer(
         id: entry.id,
         moodScore: entry.moodScore,
-        textChars: (entry.userInput ?? '').length + (entry.userResponse ?? '').length,
-        tags: _safeTags(entry.tags),
+        textChars: ui.length + ur.length,
+        tags: tags,
       );
-      trackEntrySave(kind: 'reflection', textChars: (entry.userInput ?? '').length, moodLabel: entry.moodLabel);
+
+      trackEntrySave(
+        kind: 'reflection',
+        textChars: ui.length,
+        moodLabel: _getMoodLabel(entry),
+      );
     }
     if (notify) notifyListeners();
   }
@@ -347,7 +358,7 @@ class AnalyticsService with ChangeNotifier {
   /// Mood Scores der letzten [n] Einträge.
   List<int> getRecentMoodScores(int n) {
     if (n <= 0) return const [];
-    final int start = (moodCount - n).clamp(0, moodCount);
+    final start = (moodCount - n).clamp(0, moodCount) as int;
     return _moodEntries.sublist(start).map((e) => e.moodScore).toList();
   }
 
@@ -424,7 +435,7 @@ class AnalyticsService with ChangeNotifier {
   Map<String, int> topReflectionTags({int top = 3}) {
     final counts = <String, int>{};
     for (final r in _reflections) {
-      final Iterable<String> tags = _safeTags(r.tags);
+      final Iterable<String> tags = _getTags(r);
       for (final t in tags) {
         counts[t] = (counts[t] ?? 0) + 1;
       }
@@ -461,7 +472,7 @@ class AnalyticsService with ChangeNotifier {
             'id': r.id,
             'ts': r.timestamp.toUtc().toIso8601String(),
             'moodScore': r.moodScore,
-            'tags': _safeTags(r.tags).toList(),
+            'tags': _getTags(r).toList(),
           };
           map.removeWhere((_, v) => v == null);
           return map;
@@ -558,8 +569,74 @@ class AnalyticsService with ChangeNotifier {
 
   Iterable<String> _safeTags(dynamic maybeTags) {
     if (maybeTags is Iterable) {
-      return maybeTags.whereType<String>();
+      return maybeTags.whereType<String>().map((e) => e.trim()).where((e) => e.isNotEmpty);
     }
     return const <String>[];
+  }
+
+  // ---- ReflectionEntry-Kompatibilität (robuste Fallbacks) -------------------
+
+  String _getUserInput(ReflectionEntry r) {
+    final dyn = r as dynamic;
+    String? pick;
+
+    T? _try<T>(T Function() f) { try { final v = f(); return v is T ? v : null; } catch (_) { return null; } }
+
+    pick = _try<String>(() => dyn.userInput) ??
+           _try<String>(() => dyn.prompt) ??
+           _try<String>(() => dyn.question) ??
+           _try<String>(() => dyn.input) ??
+           _try<String>(() => dyn.text) ??
+           _try<String>(() => dyn.content) ??
+           _try<String>(() => dyn.userText);
+
+    pick = (pick ?? '').trim();
+    return pick!;
+  }
+
+  String _getUserResponse(ReflectionEntry r) {
+    final dyn = r as dynamic;
+    String? pick;
+
+    T? _try<T>(T Function() f) { try { final v = f(); return v is T ? v : null; } catch (_) { return null; } }
+
+    pick = _try<String>(() => dyn.userResponse) ??
+           _try<String>(() => dyn.response) ??
+           _try<String>(() => dyn.answer) ??
+           _try<String>(() => dyn.reply) ??
+           _try<String>(() => dyn.output) ??
+           _try<String>(() => dyn.textAnswer);
+
+    pick = (pick ?? '').trim();
+    return pick!;
+  }
+
+  String? _getMoodLabel(ReflectionEntry r) {
+    final dyn = r as dynamic;
+    String? pick;
+
+    T? _try<T>(T Function() f) { try { final v = f(); return v is T ? v : null; } catch (_) { return null; } }
+
+    pick = _try<String>(() => dyn.moodLabel) ??
+           _try<String>(() => dyn.mood) ??
+           _try<String>(() => dyn.mood_text) ??
+           _try<String>(() => dyn.moodName);
+
+    pick = (pick ?? '').trim();
+    return (pick!.isEmpty) ? null : pick;
+  }
+
+  Iterable<String> _getTags(ReflectionEntry r) {
+    final dyn = r as dynamic;
+    dynamic raw;
+
+    T? _try<T>(T Function() f) { try { final v = f(); return v is T ? v : null; } catch (_) { return null; } }
+
+    raw = _try<Iterable>(() => dyn.tags) ??
+          _try<Iterable>(() => dyn.topics) ??
+          _try<Iterable>(() => dyn.labels) ??
+          _try<Iterable>(() => dyn.categories);
+
+    return _safeTags(raw);
   }
 }

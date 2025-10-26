@@ -15,12 +15,11 @@
 import 'package:flutter/material.dart';
 
 // Zen-UI Widgets (wie im Projekt genutzt)
-import '../../shared/zen_style.dart'
-    hide ZenBackdrop, ZenGlassCard, ZenAppBar, ZenGlassInput;
+// (zen_style.dart entfernt – war ungenutzt)
 import '../../shared/ui/zen_widgets.dart'
-    show ZenBackdrop, ZenGlassCard, PandaHeader, ZenChipGhost;
-// Risk/Hotline
-import '../../widgets/hotline_widget.dart';
+    show ZenBackdrop, ZenGlassCard, ZenChipGhost;
+// Risk/Hotline: Wir verwenden eine lokale, leichte Karte (_SafetyHotlineCard)
+// import '../../widgets/hotline_widget.dart';  // entfällt (API-Divergenz)
 
 class ReflectionViewProps {
   // Header / dekorativ
@@ -196,9 +195,9 @@ class ReflectionView extends StatelessWidget {
                                 child: _QuestionCard(
                                   question: props.question!.trim(),
                                   helperSuggestion:
-                                      (props.helperSuggestion ?? '').trim().isEmpty
-                                          ? null
-                                          : props.helperSuggestion!.trim(),
+                                      (props.helperSuggestion ?? '').trim().isNotEmpty
+                                          ? props.helperSuggestion!.trim()
+                                          : null,
                                   talkLines: props.talkLines.take(2).toList(),
                                 ),
                               ),
@@ -313,14 +312,14 @@ class ReflectionView extends StatelessWidget {
                             ),
                           ),
 
-                        // Risk/Hotline-Banner (CH)
+                        // Risk/Hotline-Banner (leichtgewichtig, lokal)
                         if (props.risk)
                           Padding(
                             padding: const EdgeInsets.only(top: 10),
                             child: Center(
                               child: ConstrainedBox(
                                 constraints: BoxConstraints(maxWidth: cardMaxW),
-                                child: const HotlineWidget(),
+                                child: const _SafetyHotlineCard(),
                               ),
                             ),
                           ),
@@ -444,14 +443,52 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Center(
       child: ConstrainedBox(
         constraints: BoxConstraints(maxWidth: maxWidth),
-        child: PandaHeader(
-          title: title,
-          subtitle: subtitle ?? '',
-          pandaAsset: pandaAsset,
-          pandaSize: pandaSize,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              // Textblock links
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title,
+                        style: theme.textTheme.headlineSmall?.copyWith(
+                          height: 1.15,
+                        )),
+                    if ((subtitle ?? '').trim().isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          subtitle!.trim(),
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            height: 1.28,
+                            color: Colors.black.withValues(alpha: .72),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              // Panda rechts
+              ClipRRect(
+                borderRadius: BorderRadius.circular(20),
+                child: Image.asset(
+                  pandaAsset,
+                  width: pandaSize,
+                  height: pandaSize,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -480,6 +517,7 @@ class _QuestionCard extends StatelessWidget {
         children: [
           Text(
             question,
+            // Entfernt: theme.textWidgetTheme?.style (existiert nicht in ThemeData)
             style: theme.textTheme.titleMedium?.copyWith(height: 1.28),
           ),
           if ((helperSuggestion ?? '').trim().isNotEmpty) ...[
@@ -683,6 +721,36 @@ class _Markdownish extends StatelessWidget {
       text: TextSpan(
         style: DefaultTextStyle.of(context).style.copyWith(height: 1.35),
         children: spans,
+      ),
+    );
+  }
+}
+
+// --------------------------- Safety Hotline (lokal) ---------------------------
+
+class _SafetyHotlineCard extends StatelessWidget {
+  const _SafetyHotlineCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return ZenGlassCard(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Wenn es dir nicht gut geht',
+              style: theme.textTheme.titleSmall?.copyWith(height: 1.25)),
+          const SizedBox(height: 6),
+          Text(
+            'Du bist nicht allein. In akuten Krisen wende dich bitte an lokale Notfallnummern '
+            'oder vertraute Menschen in deiner Nähe.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              height: 1.28,
+              color: Colors.black.withValues(alpha: .72),
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -171,13 +171,18 @@ class _PandaStep {
     final risk = (rl == 'high' || rl == 'mild') || _asBool(m['risk']);
 
     // Helper-Satz: 'helper_suggestion' (oder Aliase), ggf. aus flow/ui verschachtelt.
+    final Map<String, dynamic>? flowMap =
+        (m['flow'] is Map) ? Map<String, dynamic>.from(m['flow']) : null;
+    final Map<String, dynamic>? uiMap =
+        (m['ui'] is Map) ? Map<String, dynamic>.from(m['ui']) : null;
+
     final hs = _pickFirstNonEmptyString([
       m['helper_suggestion'],
       m['helperSuggestion'],
-      if (m['flow'] is Map) (m['flow'] as Map)['helper_suggestion'],
-      if (m['flow'] is Map) (m['flow'] as Map)['helperSuggestion'],
-      if (m['ui'] is Map) (m['ui'] as Map)['helper_suggestion'],
-      if (m['ui'] is Map) (m['ui'] as Map)['helperSuggestion'],
+      flowMap?['helper_suggestion'],
+      flowMap?['helperSuggestion'],
+      uiMap?['helper_suggestion'],
+      uiMap?['helperSuggestion'],
     ]);
 
     return _PandaStep(
@@ -288,8 +293,10 @@ class _PandaStep {
       ...asList(m['options']),
     ];
 
-    final flow = (m['flow'] is Map) ? Map<String, dynamic>.from(m['flow'] as Map) : const {};
-    final ui   = (m['ui']   is Map) ? Map<String, dynamic>.from(m['ui']   as Map) : const {};
+    final Map<String, dynamic> flow =
+        (m['flow'] is Map) ? Map<String, dynamic>.from(m['flow']) : const <String, dynamic>{};
+    final Map<String, dynamic> ui =
+        (m['ui'] is Map) ? Map<String, dynamic>.from(m['ui']) : const <String, dynamic>{};
 
     final nested = <String>[
       ...asList(flow['answer_helpers']),
@@ -688,7 +695,7 @@ class TurnProbe {
     }
 
     final map =
-        (s is Map) ? Map<String, dynamic>.from(s as Map) : <String, dynamic>{};
+        (s is Map) ? Map<String, dynamic>.from(s) : <String, dynamic>{};
 
     final threadId = _pickFirstNonEmptyString([
           map['thread_id'],
@@ -709,16 +716,16 @@ class TurnProbe {
   /// Normalisiert Flow-Flags auf den Kanon:
   /// {mood_prompt, recommend_end, [question], [insight_score]}
   static JsonMap coerceFlow(dynamic turnOrFlow) {
-    Map<String, dynamic> f = const {};
+    Map<String, dynamic> f = const <String, dynamic>{};
     if (turnOrFlow is Map && turnOrFlow['flow'] is Map) {
-      f = Map<String, dynamic>.from(turnOrFlow['flow'] as Map);
+      f = Map<String, dynamic>.from(turnOrFlow['flow']);
     } else if (turnOrFlow is Map) {
       f = Map<String, dynamic>.from(turnOrFlow);
     } else {
       try {
         final j = (turnOrFlow as dynamic).toJson?.call();
         if (j is Map && j['flow'] is Map) {
-          f = Map<String, dynamic>.from(j['flow'] as Map);
+          f = Map<String, dynamic>.from(j['flow']);
         }
       } catch (_) {}
     }

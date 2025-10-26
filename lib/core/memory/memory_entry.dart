@@ -73,7 +73,7 @@ class MemoryEntry {
     if (x is num) return x.clamp(0, 4).toInt();
     final s = _asString(x).trim();
     final n = int.tryParse(s);
-    return (n == null) ? fallback : n.clamp(0, 4);
+    return (n == null) ? fallback : n.clamp(0, 4).toInt();
   }
 
   static DateTime _asDateTimeUtc(dynamic x) {
@@ -175,16 +175,17 @@ class MemoryEntry {
       MemoryEntry.fromMap(jsonDecode(json) as Map<String, dynamic>);
 
   @override
-  bool operator ==(Object o) =>
-      identical(this, o) ||
-      (o is MemoryEntry &&
-          o.sessionId == sessionId &&
-          o.createdAt == createdAt &&
-          listEquals(o.contextFacets, contextFacets) &&
-          o.insightScore == insightScore &&
-          o.mood == mood &&
-          o.summary == summary &&
-          o.nextHint == nextHint);
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is MemoryEntry &&
+        other.sessionId == sessionId &&
+        other.createdAt == createdAt &&
+        listEquals(other.contextFacets, contextFacets) &&
+        other.insightScore == insightScore &&
+        other.mood == mood &&
+        other.summary == summary &&
+        other.nextHint == nextHint;
+  }
 
   @override
   int get hashCode => Object.hash(

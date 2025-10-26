@@ -13,18 +13,7 @@
 // • Themen-Overlap: vermeidet Memory-Spam (nur bei Schnittmenge)
 // • Akzeptiert *jede* Turn-Form (Map oder typed), liest robust verschachtelte Felder
 //
-// Einbindung (Beispiel):
-// -----------------------------------------------------------------------------
-//   final turn = await GuidanceService.instance.nextTurnFull(...);
-//   await SaveFromWorkerHook.processTurn(
-//     turn: turn,
-//     userInput: userText,                   // optional, verbessert Topic-Overlap
-//     debug: kDebugMode,                     // optional: Dev-Log
-//   );
-//
-// Optional: Closure-Response (gleicher Shape wie Turn):
-//   await SaveFromWorkerHook.processTurn(turn: closureRes, userInput: lastAnswer);
-// -----------------------------------------------------------------------------
+// Einbindung (Beispiel): … (gekürzt)
 
 library save_from_worker_hook;
 
@@ -37,11 +26,6 @@ import 'memory_service.dart' as mem;
 class SaveFromWorkerHook {
   SaveFromWorkerHook._();
 
-  /// Hauptmethode: verarbeitet einen Worker-Turn (oder eine Closure-Response)
-  /// und delegiert an MemoryStore.mergeFacts/recordAcknowledge.
-  ///
-  /// [turn] kann ein `Map<String,dynamic>` oder ein typed Objekt (mit `toJson()`)
-  /// sein. [userInput] verbessert die Topic-Overlap-Heuristik.
   static Future<void> processTurn({
     required dynamic turn,
     String? userInput,
@@ -49,31 +33,25 @@ class SaveFromWorkerHook {
   }) async {
     if (turn == null) return;
 
-    // 1) Rohdaten besorgen (Map-Ansicht)
     final Map<String, dynamic> m = _coerceMap(turn);
 
-    // 2) Session/Flow/Risk normalisieren (nur Metadaten)
     final session = _coerceSession(m);
     final flow    = _coerceFlow(m);
     final risk    = _riskLevel(m); // 'high' | 'mild' | 'none'
 
-    // 3) Inhalte/Fakten/Themen extrahieren
-    final facts   = _extractFacts(m);      // List<String> (bereits getrimmt)
-    final topicsW = _extractWorkerTopics(m); // Themen vom Worker
+    final facts   = _extractFacts(m);
+    final topicsW = _extractWorkerTopics(m);
     final score   = flow['insight_score'] is num ? (flow['insight_score'] as num).toDouble() : null;
     final bool insightFlag =
         _asBool(m['insight']) ||
         _asBool(_path(m, const ['understanding', 'insight'])) ||
         (score != null && score >= 0.60);
 
-    // 4) User-seitige Topics (für Overlap)
     final topicsU = await _topicsFromUserInput(userInput) ?? const <String>[];
 
-    // 5) Overlap-Check (Spam-Schutz)
     final overlap = _overlap(topicsU, topicsW);
     final hasOverlap = overlap.isNotEmpty;
 
-    // 6) Merge-Facts (nur wenn wir substanziell etwas tragen)
     if (facts.isNotEmpty && hasOverlap) {
       await _callMergeFacts(
         facts: facts,
@@ -87,7 +65,6 @@ class SaveFromWorkerHook {
           '(facts=${facts.length}, overlap=$hasOverlap)');
     }
 
-    // 7) Acknowledge (bei Einsicht + Overlap)
     if (insightFlag && hasOverlap) {
       await _callRecordAcknowledge(
         topics: overlap,
@@ -100,9 +77,7 @@ class SaveFromWorkerHook {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Interna: Calls (tolerant, ohne harte Abhängigkeit auf Signaturen)
-  // ---------------------------------------------------------------------------
+  // -------- Interna: Calls (tolerant) ---------------------------------------
 
   static Future<void> _callMergeFacts({
     required List<String> facts,
@@ -115,7 +90,6 @@ class SaveFromWorkerHook {
       final svc = mem.MemoryService.instance;
       final storeDyn = (svc as dynamic).store ?? svc;
 
-      // Primär: named 'facts'
       try {
         await storeDyn.mergeFacts?.call(
           facts: facts,
@@ -129,7 +103,6 @@ class SaveFromWorkerHook {
         }
         return;
       } catch (_) {
-        // Fallback: named 'items'
         await storeDyn.mergeFacts?.call(
           items: facts,
           topics: topics,
@@ -156,7 +129,6 @@ class SaveFromWorkerHook {
       final svc = mem.MemoryService.instance;
       final storeDyn = (svc as dynamic).store ?? svc;
 
-      // Versuche mit Themen + Session (reichhaltiger)
       try {
         await storeDyn.recordAcknowledge?.call(
           topics: topics,
@@ -168,7 +140,6 @@ class SaveFromWorkerHook {
         }
         return;
       } catch (_) {
-        // Minimalistisch: ohne Args
         await storeDyn.recordAcknowledge?.call();
         if (debug && kDebugMode) {
           debugPrint('[SaveFromWorkerHook] recordAcknowledge() ✓ (fallback)');
@@ -181,9 +152,7 @@ class SaveFromWorkerHook {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Interna: Extractors / Coercers
-  // ---------------------------------------------------------------------------
+  // -------- Extractors / Coercers -------------------------------------------
 
   static Map<String, dynamic> _coerceMap(dynamic any) {
     if (any is Map<String, dynamic>) return any;
@@ -197,11 +166,7 @@ class SaveFromWorkerHook {
 
   static Map<String, dynamic> _coerceSession(Map<String, dynamic> m) {
     final raw = (m['session'] is Map) ? Map<String, dynamic>.from(m['session']) : <String, dynamic>{};
-    final threadId = _firstNonEmpty([
-      raw['thread_id'],
-      raw['id'],
-      raw['threadId'],
-    ]);
+    final threadId = _firstNonEmpty([raw['thread_id'], raw['id'], raw['threadId']]);
     final turnIdx = _coerceInt(raw['turn_index'] ?? raw['turn'] ?? raw['turnIndex']) ?? 0;
     final maxTurns = _coerceInt(raw['max_turns'] ?? raw['maxTurns']) ?? 3;
     return {
@@ -236,15 +201,9 @@ class SaveFromWorkerHook {
     if (legacy == 'high' || legacy == 'mild') return legacy;
     final flag = _asBool(m['risk']);
     return flag ? 'mild' : 'none';
-    // (bool 'risk' wird konservativ als 'mild' interpretiert)
   }
 
   static List<String> _extractFacts(Map<String, dynamic> m) {
-    // Bekannte Kandidaten/Strukturen:
-    //  - memories:            [ "…" | {text:"…",topic:"…"} ]
-    //  - memory.facts:        [ ... ]
-    //  - facts / insights:    [ ... ]
-    //  - understanding.lines  [ ... ] (kurze Stichpunkte)
     final out = <String>[];
 
     void addAll(dynamic v) {
@@ -270,13 +229,12 @@ class SaveFromWorkerHook {
     addAll(m['insights']);
     addAll(_path(m, const ['understanding', 'lines']));
 
-    // Dedup, weich
     final seen = <String>{};
     final dedup = <String>[];
     for (final s in out) {
       final k = s.toLowerCase();
       if (seen.add(k)) dedup.add(s);
-      if (dedup.length >= 10) break; // hard cap
+      if (dedup.length >= 10) break;
     }
     return dedup;
   }
@@ -293,7 +251,6 @@ class SaveFromWorkerHook {
       ..._asStringList(m['last_themes']),
     ].map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
 
-    // Dedup, leicht normalisiert
     final seen = <String>{};
     final dedup = <String>[];
     for (final t in out) {
@@ -307,18 +264,17 @@ class SaveFromWorkerHook {
   static Future<List<String>?> _topicsFromUserInput(String? userInput) async {
     final seed = (userInput ?? '').trim();
     if (seed.isEmpty) {
-      // evtl. jüngste Facetten aus dem Memory-Context-Hint
       try {
         final hint = mem.MemoryService.instance.buildContextHint(
           maxFacets: 3, maxTags: 5, maxAgeDays: 14,
         );
         if (hint != null) {
-          final facets = (hint as dynamic).facets;
-          if (facets is List) {
-            return facets.map((e) => e?.toString() ?? '')
-                .where((s) => s.trim().isNotEmpty)
-                .cast<String>()
-                .toList();
+          final facetsDyn = (hint as dynamic).facets;
+          if (facetsDyn is List) {
+            return facetsDyn
+                .map((e) => (e == null ? '' : e.toString()).trim())
+                .where((s) => s.isNotEmpty)
+                .toList(growable: false);
           }
         }
       } catch (_) {}
@@ -330,7 +286,6 @@ class SaveFromWorkerHook {
       final storeDyn = (mem.MemoryService.instance as dynamic).store ??
           mem.MemoryService.instance;
       final pick = await storeDyn.pickFor?.call(seed);
-      // Diverse mögliche Formen tolerieren:
       final topics = <String>[
         ..._asStringList(_asMap(pick)['topics']),
         ..._asStringList(_asMap(pick)['facets']),
@@ -341,7 +296,6 @@ class SaveFromWorkerHook {
       if (topics.isNotEmpty) return topics;
     } catch (_) {}
 
-    // Minimal-Fallback: grobe Tokenisierung (nur längere Wörter)
     final tokens = seed
         .toLowerCase()
         .split(RegExp(r'[^a-zäöüß0-9]+'))
@@ -352,9 +306,7 @@ class SaveFromWorkerHook {
     return tokens;
   }
 
-  // ---------------------------------------------------------------------------
-  // Utilities
-  // ---------------------------------------------------------------------------
+  // -------- Utilities --------------------------------------------------------
 
   static dynamic _path(Map<String, dynamic> m, List<String> p) {
     dynamic cur = m;
@@ -452,4 +404,6 @@ class SaveFromWorkerHook {
     if (v is Map) return Map<String, dynamic>.from(v);
     return <String, dynamic>{};
   }
+
+  static String? _firstOfList(List<String> xs) => xs.isEmpty ? null : xs.first;
 }

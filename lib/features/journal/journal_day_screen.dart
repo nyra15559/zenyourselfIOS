@@ -81,7 +81,7 @@ class _JournalDayScreenState extends State<JournalDayScreen>
               onPressed: () async {
                 final text = _shareTextForDay(widget.dayLocal, entries, metrics);
                 await Clipboard.setData(ClipboardData(text: text));
-                if (!mounted) return;
+                if (!context.mounted) return; // FIX: use_build_context_synchronously
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Tageszusammenfassung kopiert')),
                 );
@@ -693,7 +693,7 @@ class _DayMetrics {
     int m = 0;
     for (final e in entries) {
       final label = e.moodLabel; // vom Model aus Tags abgeleitet
-      final score = _moodMap[label ?? ''];
+      final score = _moodMap[label]; // FIX: dead_null_aware_expression
       if (score != null) {
         sum += score;
         m++;
@@ -808,7 +808,7 @@ class _EntryBottomSheet extends StatelessWidget {
               Row(
                 children: [
                   Text(
-                    (entry.moodLabel ?? '').isNotEmpty ? (entry.moodLabel ?? '') : '—',
+                    entry.moodLabel.isNotEmpty ? entry.moodLabel : '—', // FIX: dead_null_aware_expression (2x)
                     style: ZenTextStyles.caption.copyWith(color: ZenColors.ink),
                   ),
                   const Spacer(),

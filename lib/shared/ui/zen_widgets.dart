@@ -143,7 +143,7 @@ class ZenAppScaffold extends StatelessWidget {
               saturation: (backdropSaturation ?? .95),
               glow: (backdropGlow ?? .28),
               vignette: (backdropVignette ?? .12),
-              milk: ((backdropMilk ?? .10).clamp(0.0, 1.0) as double),
+              milk: (backdropMilk ?? .10).clamp(0.0, 1.0),
             )
           else
             const DecoratedBox(decoration: BoxDecoration(color: ZenColors.bg)),
@@ -554,7 +554,7 @@ class ZenBackdrop extends StatelessWidget {
         // Bild mit Sättigungsfilter
         Positioned.fill(
           child: ColorFiltered(
-            colorFilter: _saturationFilter((saturation.clamp(0.0, 1.0) as double)),
+            colorFilter: _saturationFilter(saturation.clamp(0.0, 1.0)),
             child: ZenSafeImage.asset(
               asset,
               fit: BoxFit.cover,
@@ -566,7 +566,7 @@ class ZenBackdrop extends StatelessWidget {
         // Wash (Weißschleier)
         if (wash > 0)
           Positioned.fill(
-            child: Container(color: Colors.white.withValues(alpha: (wash.clamp(0.0, 1.0) as double))),
+            child: Container(color: Colors.white.withValues(alpha: wash.clamp(0.0, 1.0))),
           ),
 
         // Milk (zusätzliche, weiche „Milchigkeit“)
@@ -593,7 +593,7 @@ class ZenBackdrop extends StatelessWidget {
                     center: alignment,
                     radius: 1.0,
                     colors: [
-                      Colors.white.withValues(alpha: ((glow.clamp(0.0, 1.0) as double) * .55)),
+                      Colors.white.withValues(alpha: (glow.clamp(0.0, 1.0) * .55)),
                       Colors.transparent,
                     ],
                     stops: const [0.0, 1.0],
@@ -615,7 +615,7 @@ class ZenBackdrop extends StatelessWidget {
                       radius: 1.1,
                       colors: [
                         Colors.transparent,
-                        Colors.black.withValues(alpha: (vignette.clamp(0.0, 1.0) as double)),
+                        Colors.black.withValues(alpha: vignette.clamp(0.0, 1.0)),
                       ],
                       stops: const [0.65, 1.0],
                     ),
@@ -631,7 +631,7 @@ class ZenBackdrop extends StatelessWidget {
             child: BackdropFilter(
               filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
               child: Container(
-                color: Colors.white.withValues(alpha: (hazeStrength.clamp(0.0, 1.0) as double)),
+                color: Colors.white.withValues(alpha: hazeStrength.clamp(0.0, 1.0)),
               ),
             ),
           ),
@@ -1047,9 +1047,9 @@ class ZenGhostButtonDanger extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         shape: const StadiumBorder(),
       ),
-      child: Row(
+      child: const Row(
         mainAxisSize: MainAxisSize.min,
-        children: const [
+        children: [
           Icon(Icons.delete_outline, size: 18, color: Colors.redAccent),
           SizedBox(width: 10),
           Text(

@@ -186,6 +186,7 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
       }
       if (mounted) setState(() {});
     } catch (_) {
+      if (!mounted) return; // Guard context after async gap
       zw.ZenToast.show(context, 'Mikrofon nicht verfügbar. Erlaube bitte den Zugriff.');
     }
   }
@@ -319,7 +320,7 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
         ? SystemUiOverlayStyle.light
         : SystemUiOverlayStyle.dark;
 
-    final isMobile = MediaQuery.of(context).size.width < 560;
+    final isMobile = MediaQuery.of(context).size.width < 560; // ← wird wieder verwendet
     final pandaSize = MediaQuery.of(context).size.width < 470 ? 88.0 : 112.0;
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
@@ -355,7 +356,7 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
                       padding: EdgeInsets.only(
                         left: zs.ZenSpacing.m,
                         right: zs.ZenSpacing.m,
-                        top: isMobile ? 16 : 20,
+                        top: isMobile ? 16 : 20, // ← nutzt isMobile, um Warnung zu vermeiden
                         bottom: 10,
                       ),
                       child: zw.PandaHeader(
@@ -369,6 +370,7 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
                     // Inhalt
                     Expanded(
                       child: FadeTransition(
+                        // Entfernt 'const' vor Tween, um const_with_non_const zu beheben
                         opacity: _fadeCtrl.drive(Tween(begin: 0.0, end: 1.0)),
                         child: ListView(
                           controller: _scroll,
@@ -389,6 +391,7 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
                                 focusNode: _titleFocus,
                                 textInputAction: TextInputAction.next,
                                 onSubmitted: (_) => _editorFocus.requestFocus(),
+                                // prefer_const_constructors
                                 spellCheckConfiguration: const SpellCheckConfiguration.disabled(),
                                 autocorrect: false,
                                 enableSuggestions: true,
@@ -425,6 +428,7 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
                                     textInputAction: TextInputAction.newline,
                                     autocorrect: true,
                                     enableSuggestions: true,
+                                    // prefer_const_constructors
                                     spellCheckConfiguration: const SpellCheckConfiguration.disabled(),
                                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                                       color: zs.ZenColors.jade,
@@ -501,7 +505,11 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
                                   child: ElevatedButton.icon(
                                     onPressed: _saving ? null : () => _save(asReflection: false),
                                     icon: _saving
-                                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                                        ? const SizedBox(
+                                            width: 18,
+                                            height: 18,
+                                            child: CircularProgressIndicator(strokeWidth: 2),
+                                          )
                                         : const Icon(Icons.check_circle_rounded),
                                     label: Text(_saving ? 'Speichern …' : 'Speichern'),
                                     style: ElevatedButton.styleFrom(
@@ -662,6 +670,7 @@ class _QuickAppendBar extends StatelessWidget {
             keyboardType: TextInputType.multiline,
             autocorrect: false,
             enableSuggestions: true,
+            // prefer_const_constructors
             spellCheckConfiguration: const SpellCheckConfiguration.disabled(),
             style: baseText.copyWith(color: jade, fontWeight: FontWeight.w600),
             cursorColor: jade,

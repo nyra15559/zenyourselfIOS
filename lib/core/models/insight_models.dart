@@ -86,9 +86,13 @@ class Facet {
   String toString() => 'Facet(key:$key, label:$label, hits:$hits)';
 
   @override
-  bool operator ==(Object o) =>
-      identical(this, o) ||
-      (o is Facet && o.key == key && o.label == label && o.hits == hits);
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is Facet &&
+        other.key == key &&
+        other.label == label &&
+        other.hits == hits;
+  }
 
   @override
   int get hashCode => Object.hash(key, label, hits);
@@ -165,9 +169,12 @@ class MoodPair {
   String toString() => 'MoodPair(mental:$mental, physical:$physical)';
 
   @override
-  bool operator ==(Object o) =>
-      identical(this, o) ||
-      (o is MoodPair && o.mental == mental && o.physical == physical);
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is MoodPair &&
+        other.mental == mental &&
+        other.physical == physical;
+  }
 
   @override
   int get hashCode => Object.hash(mental, physical);
@@ -249,9 +256,12 @@ class InsightScore {
   String toString() => 'InsightScore(value:$value, baseline:${baseline ?? '∅'})';
 
   @override
-  bool operator ==(Object o) =>
-      identical(this, o) ||
-      (o is InsightScore && o.value == value && o.baseline == baseline);
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is InsightScore &&
+        other.value == value &&
+        other.baseline == baseline;
+  }
 
   @override
   int get hashCode => Object.hash(value, baseline);

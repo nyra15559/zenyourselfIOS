@@ -14,6 +14,7 @@
 // • Header-Abstände geprüft (ruhig, konsistent).
 // • Textfeld-Fokus: Keyboard-Dismiss on drag (keine Funktionsänderung).
 // • SafeArea unten: Keyboard-Insets bevorzugt, sonst Safe-Padding.
+// • Lints: prefer_const_constructors (u. a. AppBar) & dynamisches Badge-Label.
 
 import 'package:flutter/material.dart';
 
@@ -120,8 +121,7 @@ class JournalEntryView extends StatelessWidget {
       extendBodyBehindAppBar: true,
       extendBody: true,
       backgroundColor: Colors.transparent,
-      // Hinweis: KEIN const gemäß Implementationshinweis
-      appBar: zw.ZenAppBar(title: null, showBack: true),
+      appBar: const zw.ZenAppBar(title: null, showBack: true),
       body: Stack(
         fit: StackFit.expand,
         children: [
@@ -131,8 +131,8 @@ class JournalEntryView extends StatelessWidget {
               color: Theme.of(context).scaffoldBackgroundColor,
             ),
           ),
-          // „Milky“ Backdrop — KEIN const (vgl. Hinweis)
-          Positioned.fill(
+          // „Milky“ Backdrop
+          const Positioned.fill(
             child: zw.ZenBackdrop(
               asset: 'assets/schoen.png',
               glow: .28,
@@ -228,9 +228,9 @@ class JournalEntryView extends StatelessWidget {
                   children: [
                     Icon(typeIcon, color: zs.ZenColors.jadeMid, size: 18),
                     const SizedBox(width: 6),
-                    const Text(
-                      'Tagebuch', // wird gleich überschrieben
-                      style: TextStyle(
+                    Text(
+                      typeLabel,
+                      style: const TextStyle(
                         fontWeight: FontWeight.w700,
                         fontSize: 14.5,
                         color: zs.ZenColors.jade,
@@ -239,14 +239,6 @@ class JournalEntryView extends StatelessWidget {
                   ],
                 ),
               ),
-            ),
-
-            // Überschreibe Badge-Label mit typeLabel (visuell identisch)
-            // (kleine, nicht-funktionale Korrektur: vermeidet doppeltes Layout)
-            Builder(
-              builder: (ctx) {
-                return const SizedBox.shrink();
-              },
             ),
 
             // Inhalt

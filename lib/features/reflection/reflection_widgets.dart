@@ -45,8 +45,10 @@ bool get _isDesktop {
 class _ZenAppear extends StatefulWidget {
   final Widget child;
   final Duration? delay;
+
   /// Von -> nach; Standard: leicht von unten (zartes Auftauchen).
   final Offset slide;
+
   /// Start-Skalierung für minimalen „Pop“.
   final double beginScale;
 
@@ -54,7 +56,7 @@ class _ZenAppear extends StatefulWidget {
     required this.child,
     this.delay,
     this.slide = const Offset(0, 0.02), // ✅ Default
-    this.beginScale = 0.98,              // ✅ Default
+    this.beginScale = 0.98, // ✅ Default
   });
 
   @override
@@ -126,6 +128,9 @@ class _ReflectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _ZenAppear(
+      // explizit setzen ⇒ vermeidet "optional parameter ... isn't ever given"
+      slide: const Offset(0, 0.02),
+      beginScale: 0.98,
       child: PandaHeader(
         title: title,
         caption: subtitle.trim().isEmpty ? null : subtitle,
@@ -286,13 +291,13 @@ class _RoundThread extends StatelessWidget {
   Widget _buildPandaStepCard(
     BuildContext context,
     _PandaStep s, {
-    required bool showTyping, // ✅ kein Unterstrich mehr
+    required bool showTyping, // ✅ wird bewusst als Trigger behalten
     bool suppressQuestion = false,
     Duration appearDelay = Duration.zero,
   }) {
-    // Referenz, damit der Analyzer keinen unused_element_parameter meldet.
+    // bewusstes no-op, damit Analyzer keinen unused_element_parameter meldet
     if (showTyping) {
-      // no-op: Typing-Indicator wird an anderer Stelle gehandhabt.
+      // Typing-Indicator wird an anderer Stelle gehandhabt.
     }
 
     final tooltip =
@@ -345,8 +350,10 @@ class _RoundThread extends StatelessWidget {
     final children = <Widget>[];
 
     // Abschluss-Phase aktiv? -> suppressQuestion für die letzte Panda-Karte setzen
-    final bool closureActive =
-        round.answered && round.allowClosure && !round.hasPendingQuestion && !round.hasMood;
+    final bool closureActive = round.answered &&
+        round.allowClosure &&
+        !round.hasPendingQuestion &&
+        !round.hasMood;
 
     // Benutzer-Gedanke
     final userText = round.userInput.trim();
@@ -369,7 +376,7 @@ class _RoundThread extends StatelessWidget {
           child: _buildPandaStepCard(
             context,
             s,
-            showTyping: isLast && isTyping && isLastStep, // ✅ umbenannter Arg
+            showTyping: isLast && isTyping && isLastStep,
             suppressQuestion: closureActive && isLastStep,
             appearDelay: stagger,
           ),
@@ -434,7 +441,10 @@ class _RoundThread extends StatelessWidget {
         ..add(
           _ZenAppear(
             delay: const Duration(milliseconds: 140),
-            child: _MoodChooserInline(onSelected: onSelectMood, maxWidth: maxWidth),
+            child: _MoodChooserInline(
+              onSelected: onSelectMood,
+              maxWidth: maxWidth,
+            ),
           ),
         )
         ..add(const SizedBox(height: 10));
@@ -741,8 +751,8 @@ class _InputBar extends StatelessWidget {
                     cursorColor: _kJade,
                     decoration: InputDecoration(
                       hintText: hint,
-                      hintStyle:
-                          tt.bodyMedium!.copyWith(color: _kInk.withValues(alpha: .55)),
+                      hintStyle: tt.bodyMedium!
+                          .copyWith(color: _kInk.withValues(alpha: .55)),
                       border: InputBorder.none,
                       isCollapsed: true,
                       suffixIconConstraints:
@@ -769,9 +779,8 @@ class _InputBar extends StatelessWidget {
                             ),
                           ),
                           IconButton(
-                            tooltip: isRecording
-                                ? 'Aufnahme stoppen'
-                                : 'Sprechen',
+                            tooltip:
+                                isRecording ? 'Aufnahme stoppen' : 'Sprechen',
                             onPressed: onMicTap,
                             icon: Icon(
                               isRecording
@@ -782,8 +791,9 @@ class _InputBar extends StatelessWidget {
                           ),
                           IconButton(
                             tooltip: 'Senden (Enter)',
-                            onPressed:
-                                (hasText && canSend && onSend != null) ? onSend : null,
+                            onPressed: (hasText && canSend && onSend != null)
+                                ? onSend
+                                : null,
                             icon: Icon(
                               Icons.send_rounded,
                               color: (hasText && canSend && onSend != null)
@@ -897,7 +907,6 @@ class _MoodIntroBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final tt = Theme.of(context).textTheme;
     return Center(
       child: ConstrainedBox(
         constraints: BoxConstraints(maxWidth: maxWidth),
@@ -1059,7 +1068,8 @@ class _PandaCardInner extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const ExcludeSemantics(
-              child: Icon(Icons.tips_and_updates_rounded, size: 18, color: _kInk),
+              child:
+                  Icon(Icons.tips_and_updates_rounded, size: 18, color: _kInk),
             ),
             const SizedBox(width: 8),
             Expanded(
@@ -1108,8 +1118,8 @@ class _PandaCardInner extends StatelessWidget {
     // Timestamp + (nur Debug) kleiner Dev-Indikator
     children.add(const SizedBox(height: 6));
     children.add(
-      Row(
-        children: const [
+     const Row(
+        children: [
           _DevIndicator(), // zeigt in Release NICHTS
           Spacer(),
           ExcludeSemantics(
@@ -1337,6 +1347,7 @@ class _RecentTopicsChips extends StatelessWidget {
   const _RecentTopicsChips({
     required this.topics,
     required this.maxWidth,
+    // ignore: unused_element_parameter
     this.onPick,
   });
 
@@ -1395,12 +1406,13 @@ class _RecentTopicsChips extends StatelessWidget {
 /// Chips: „Antwort-Chips“ (answer_helpers vom Worker)
 // ignore: unused_element
 class _AnswerHelperChips extends StatelessWidget {
-  final List<String> helpers;         // max. 3
+  final List<String> helpers; // max. 3
   final void Function(String text)? onPick;
   final double maxWidth;
   const _AnswerHelperChips({
     required this.helpers,
     required this.maxWidth,
+    // ignore: unused_element_parameter
     this.onPick,
   });
 
@@ -1473,7 +1485,7 @@ class _MoodIntroScope extends InheritedWidget {
   });
 
   static _MoodIntroScope? maybeOf(BuildContext context) =>
-    context.dependOnInheritedWidgetOfExactType<_MoodIntroScope>();
+      context.dependOnInheritedWidgetOfExactType<_MoodIntroScope>();
 
   @override
   bool updateShouldNotify(_MoodIntroScope oldWidget) => oldWidget.text != text;
@@ -1487,7 +1499,7 @@ class _SafetyScope extends InheritedWidget {
   });
 
   static _SafetyScope? maybeOf(BuildContext context) =>
-    context.dependOnInheritedWidgetOfExactType<_SafetyScope>();
+      context.dependOnInheritedWidgetOfExactType<_SafetyScope>();
 
   @override
   bool updateShouldNotify(_SafetyScope oldWidget) => oldWidget.text != text;
