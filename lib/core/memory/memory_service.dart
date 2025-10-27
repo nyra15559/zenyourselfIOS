@@ -53,6 +53,7 @@ class MemoryService {
   static const _hintTtlDays = 14;
   static const _topicsTtlSec = 30;
   static const _facetsTtlSec = 30;
+  static const _transcriptMaxRounds = 12;
 
   Future<void> init() async {
     await _store.init();
@@ -306,6 +307,109 @@ class MemoryService {
       return MemoryContextHint(facets: facets, tags: tags, topics: topics);
     } catch (_) {
       return null;
+    }
+  }
+
+  // ---------------- Reflection Transcript -----------------------------------
+
+  Future<void> saveReflectionTranscript({
+    required List<Map<String, dynamic>> rounds,
+    Map<String, dynamic>? session,
+  }) async {
+    if (!_enabled) return;
+    try {
+      if (rounds.isEmpty) {
+        await _store.clearReflectionTranscript();
+        return;
+      }
+
+      final start = rounds.length > _transcriptMaxRounds
+          ? rounds.length - _transcriptMaxRounds
+          : 0;
+      final sliced = rounds.sublist(start);
+
+      final seenIds = <String>{};
+      final normalized = <Map<String, dynamic>>[];
+      for (final raw in sliced) {
+        final map = Map<String, dynamic>.from(raw);
+        final id = (map['id'] ?? '').toString();
+        if (id.isNotEmpty && !seenIds.add(id)) {
+          continue;
+        }
+        final userInput = (map['userInput'] ?? '').toString().trim();
+        final stepsRaw = (map['steps'] is List)
+            ? List<dynamic>.from(map['steps'] as List)
+            : const <dynamic>[];
+        if (userInput.isEmpty && stepsRaw.isEmpty) {
+          continue;
+        }
+        map['steps'] = stepsRaw
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList(growable: false);
+        normalized.add(map);
+      }
+
+      if (normalized.isEmpty) {
+        await _store.clearReflectionTranscript();
+        return;
+      }
+
+      final payload = <String, dynamic>{
+        'version': 1,
+        'updatedAt': DateTime.now().toUtc().toIso8601String(),
+        'rounds': normalized,
+        if (session != null && session.isNotEmpty) 'session': session,
+      };
+
+      await _store.saveReflectionTranscript(payload);
+    } catch (_) {
+      // Memory darf niemals die Hauptlogik stören
+    }
+  }
+
+  Future<Map<String, dynamic>> loadReflectionTranscript() async {
+    try {
+      if (!_enabled) return const {};
+      final raw = await _store.loadReflectionTranscript();
+      if (raw.isEmpty) return const {};
+
+      final roundsRaw = raw['rounds'];
+      final rounds = <Map<String, dynamic>>[];
+      if (roundsRaw is List) {
+        for (final r in roundsRaw) {
+          if (r is Map) {
+            rounds.add(Map<String, dynamic>.from(r));
+          }
+        }
+      }
+
+      final sessionRaw = raw['session'];
+      Map<String, dynamic>? session;
+      if (sessionRaw is Map) {
+        session = Map<String, dynamic>.from(sessionRaw);
+      }
+
+      final updatedAtRaw = raw['updatedAt'] ?? raw['updated_at'];
+      final updatedAt = updatedAtRaw is String ? updatedAtRaw : null;
+
+      return <String, dynamic>{
+        if (rounds.isNotEmpty) 'rounds': rounds,
+        if (session != null) 'session': session,
+        if (updatedAt != null && updatedAt.trim().isNotEmpty)
+          'updatedAt': updatedAt,
+        if (raw['version'] is int) 'version': raw['version'],
+      };
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  Future<void> clearReflectionTranscript() async {
+    try {
+      await _store.clearReflectionTranscript();
+    } catch (_) {
+      // still
     }
   }
 }

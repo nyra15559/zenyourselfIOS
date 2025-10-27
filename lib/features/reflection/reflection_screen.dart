@@ -113,6 +113,8 @@ class ReflectionScreen extends StatefulWidget {
 
 class _ReflectionScreenState extends State<ReflectionScreen>
     with SingleTickerProviderStateMixin {
+  static const int _maxHistoryMessages = 80;
+
   // Controllers / Focus / Animation
   final TextEditingController _controller = TextEditingController();
   final FocusNode _inputFocus = FocusNode();
@@ -131,6 +133,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
   final List<ReflectionRound> _rounds = <ReflectionRound>[];
   ReflectionRound? get _current => _rounds.isEmpty ? null : _rounds.last;
   ReflectionSession? _session;
+  Future<void>? _restoreTranscriptFuture;
 
   // Flags
   bool loading = false;
@@ -226,6 +229,66 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     });
   }
 
+  Future<void> _restoreTranscript() async {
+    try {
+      final raw = await MemoryService.instance.loadReflectionTranscript();
+      if (!mounted) return;
+      final list = raw['rounds'];
+      if (list is! List) return;
+
+      final restored = <ReflectionRound>[];
+      for (final entry in list) {
+        if (entry is Map) {
+          try {
+            restored.add(
+              ReflectionRound.fromMap(Map<String, dynamic>.from(entry)),
+            );
+          } catch (_) {}
+        }
+      }
+
+      if (restored.isEmpty) return;
+
+      setState(() {
+        _rounds
+          ..clear()
+          ..addAll(restored);
+        _chipMode = _deriveChipModeFromCurrent();
+      });
+
+      await Future<void>.delayed(Duration.zero);
+      if (!mounted) return;
+      _scrollToBottom();
+    } catch (_) {
+      // Memory darf niemals den Screen blockieren
+    }
+  }
+
+  Future<void> _persistTranscript() async {
+    try {
+      final rounds =
+          _rounds.map((r) => r.toMap()).toList(growable: false);
+      await MemoryService.instance.saveReflectionTranscript(
+        rounds: rounds,
+        session: _session?.toJson(),
+      );
+    } catch (_) {
+      // Memory darf niemals den Screen blockieren
+    }
+  }
+
+  _ChipMode _deriveChipModeFromCurrent() {
+    final round = _current;
+    if (round == null) {
+      return _rounds.isEmpty ? _ChipMode.starter : _ChipMode.none;
+    }
+    if (round.hasPendingQuestion) return _ChipMode.answer;
+    if (round.steps.isNotEmpty && round.steps.last.followups.isNotEmpty) {
+      return _ChipMode.answer;
+    }
+    return _ChipMode.none;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -234,6 +297,9 @@ class _ReflectionScreenState extends State<ReflectionScreen>
         AnimationController(vsync: this, duration: _animShort)..value = 1.0;
 
     _attachSttEngine();
+
+    _restoreTranscriptFuture = _restoreTranscript();
+    unawaited(_restoreTranscriptFuture);
 
     // Memory-Recall vorab laden (nur für Worker-Kontext; UI zeigt nichts an)
     unawaited(_prefetchRecall());
@@ -260,7 +326,10 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     final seed = (widget.initialUserText ?? '').trim();
     if (seed.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) async {
-        if (!mounted) return;
+        try {
+          await _restoreTranscriptFuture;
+        } catch (_) {}
+        if (!mounted || _rounds.isNotEmpty) return;
         await _startNewReflection(userText: seed, mode: 'text');
       });
     }
@@ -359,6 +428,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
         _controller.clear();
         _chipMode = _ChipMode.none;
       });
+      unawaited(_persistTranscript());
       _scrollToBottom();
       _focusInput();
       HapticFeedback.lightImpact();
@@ -421,6 +491,78 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     );
   }
 
+  String _composeAssistantMessage(_PandaStep step) {
+    final parts = <String>[];
+
+    final mirror = step.mirror.trim();
+    if (mirror.isNotEmpty) parts.add(mirror);
+
+    final question = step.question.trim();
+    if (question.isNotEmpty) parts.add(question);
+
+    for (final talk in step.talkLines) {
+      final t = talk.trim();
+      if (t.isNotEmpty) parts.add(t);
+    }
+
+    final helper = (step.helperSuggestion ?? '').trim();
+    if (helper.isNotEmpty) parts.add(helper);
+
+    final helpers = step.followups
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList(growable: false);
+    if (helpers.isNotEmpty) {
+      parts.add('Antwortideen: ${helpers.join(' · ')}');
+    }
+
+    return parts.join('\n\n').trim();
+  }
+
+  List<Map<String, String>> _buildHistoryForWorker({bool excludeLatestUser = false}) {
+    final messages = <Map<String, String>>[];
+
+    for (final round in _rounds) {
+      final seed = round.userInput.trim();
+      if (seed.isNotEmpty) {
+        messages.add({'role': 'user', 'content': seed});
+      }
+
+      for (final step in round.steps) {
+        final panda = _composeAssistantMessage(step);
+        if (panda.isNotEmpty) {
+          messages.add({'role': 'assistant', 'content': panda});
+        }
+
+        final answer = (step.answer ?? '').trim();
+        if (answer.isNotEmpty) {
+          messages.add({'role': 'user', 'content': answer});
+        }
+      }
+
+      final intro = (round.moodIntro ?? '').trim();
+      if (intro.isNotEmpty) {
+        messages.add({'role': 'assistant', 'content': intro});
+      }
+    }
+
+    if (excludeLatestUser) {
+      for (int i = messages.length - 1; i >= 0; i--) {
+        if ((messages[i]['role'] ?? '') == 'user') {
+          messages.removeAt(i);
+          break;
+        }
+      }
+    }
+
+    if (messages.length > _maxHistoryMessages) {
+      final start = messages.length - _maxHistoryMessages;
+      return messages.sublist(start);
+    }
+
+    return messages;
+  }
+
   // --- Start: neue Reflexion -------------------------------------------------
   Future<void> _startNewReflection({
     required String userText,
@@ -446,17 +588,27 @@ class _ReflectionScreenState extends State<ReflectionScreen>
         _rounds.add(round);
         _controller.clear();
       });
+      unawaited(_persistTranscript());
       _scrollToBottom();
 
+      final history = _buildHistoryForWorker(excludeLatestUser: true);
       dynamic turn;
       try {
         turn = await GuidanceService.instance
-            .startSessionFull(text: userText, locale: 'de', tz: 'Europe/Zurich')
+            .startSessionFull(
+                text: userText,
+                locale: 'de',
+                tz: 'Europe/Zurich',
+                history: history)
             .timeout(_netTimeout);
       } on NoSuchMethodError {
         try {
           turn = await GuidanceService.instance
-              .startSession(text: userText, locale: 'de', tz: 'Europe/Zurich')
+              .startSession(
+                  text: userText,
+                  locale: 'de',
+                  tz: 'Europe/Zurich',
+                  history: history)
               .timeout(_netTimeout);
         } catch (_) {
           rethrow;
@@ -496,6 +648,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
         _chipMode =
             (step.expectsAnswer || hasHelpers) ? _ChipMode.answer : _ChipMode.none;
       });
+      unawaited(_persistTranscript());
 
       _fadeSlideCtrl.forward(from: 0);
       _scrollToBottom();
@@ -526,6 +679,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     setState(() => loading = true);
     _scrollToBottom();
 
+    final history = _buildHistoryForWorker(excludeLatestUser: true);
     dynamic turn;
     try {
       if (_session != null) {
@@ -536,6 +690,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                 text: userAnswer,
                 locale: 'de',
                 tz: 'Europe/Zurich',
+                history: history,
               )
               .timeout(_netTimeout);
         } on NoSuchMethodError {
@@ -554,6 +709,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                   locale: 'de',
                   tz: 'Europe/Zurich',
                   session: _session!,
+                  history: history,
                 )
                 .timeout(_netTimeout);
           }
@@ -564,6 +720,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
               text: userAnswer,
               locale: 'de',
               tz: 'Europe/Zurich',
+              history: history,
             )
             .timeout(_netTimeout);
       }
@@ -608,6 +765,8 @@ class _ReflectionScreenState extends State<ReflectionScreen>
           (step.expectsAnswer || hasHelpers) ? _ChipMode.answer : _ChipMode.none;
     });
 
+    unawaited(_persistTranscript());
+
     _fadeSlideCtrl.forward(from: 0);
     _scrollToBottom();
     _focusInput();
@@ -644,6 +803,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     });
     _fadeSlideCtrl.forward(from: 0);
     _scrollToBottom();
+    unawaited(_persistTranscript());
   }
 
   // ---------------- Turn → Step ----------------------------------------------
@@ -786,6 +946,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     );
 
     _appendThankYouAfterSave(r);
+    unawaited(_persistTranscript());
   }
 
   // ---------------- Delete ----------------------------------------------------
@@ -797,6 +958,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       _chipMode = _rounds.isEmpty ? _ChipMode.starter : _ChipMode.none;
     });
     _toast('Gelöscht.');
+    unawaited(_persistTranscript());
   }
 
   // ---------------- Abschluss/Mood-Einleitung (Worker-kompatibel) -----------
@@ -842,6 +1004,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       setState(() {
         round.allowClosure = true;
       });
+      unawaited(_persistTranscript());
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         _maybeAskMood(context,
@@ -861,6 +1024,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
         }
       }
     });
+    unawaited(_persistTranscript());
     _fadeSlideCtrl.forward(from: 0);
     _scrollToBottom();
 

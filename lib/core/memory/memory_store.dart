@@ -18,6 +18,7 @@ class MemoryStore {
 
   static const _kEnabled = 'memory.enabled';
   static const _kEntries = 'memory.entries.json'; // Kompat-Key (v1)
+  static const _kReflectionTranscript = 'memory.reflection.transcript.v1';
   static const _kMax = 200;
 
   SharedPreferences? _prefs;
@@ -40,6 +41,7 @@ class MemoryStore {
   Future<void> clearAll() async {
     await init();
     await _prefs!.remove(_kEntries);
+    await _prefs!.remove(_kReflectionTranscript);
   }
 
   Future<List<MemoryEntry>> all() async {
@@ -123,5 +125,44 @@ class MemoryStore {
     final sorted = hist.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
     return sorted.take(take).map((e) => e.key).toList(growable: false);
+  }
+
+  Future<Map<String, dynamic>> loadReflectionTranscript() async {
+    await init();
+    final raw = _prefs!.getString(_kReflectionTranscript);
+    if (raw == null || raw.trim().isEmpty) return const {};
+
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map<String, dynamic>) {
+        return decoded;
+      }
+      if (decoded is Map) {
+        return Map<String, dynamic>.from(decoded);
+      }
+      if (decoded is List) {
+        final rounds = decoded
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList(growable: false);
+        return <String, dynamic>{'rounds': rounds};
+      }
+      return const {};
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  Future<void> saveReflectionTranscript(Map<String, dynamic> transcript) async {
+    await init();
+    await _prefs!.setString(
+      _kReflectionTranscript,
+      jsonEncode(transcript),
+    );
+  }
+
+  Future<void> clearReflectionTranscript() async {
+    await init();
+    await _prefs!.remove(_kReflectionTranscript);
   }
 }
