@@ -44,7 +44,8 @@ class MoodEntry {
   // JSON (tolerant & schlank)
   // -----------------------
   factory MoodEntry.fromJson(Map<String, dynamic> json) => MoodEntry(
-        timestamp: _parseDate(json['timestamp'] ?? json['ts'] ?? json['createdAt']),
+        timestamp:
+            _parseDate(json['timestamp'] ?? json['ts'] ?? json['createdAt']),
         moodScore: _toInt(json['moodScore']) ?? 2,
         note: json['note'] as String?,
         extra: json['extra'] as String?,
@@ -195,7 +196,8 @@ class MoodEntry {
       case 'leaf':
         return MoodEntry(timestamp: now, moodScore: 3, note: 'Gut (Demo)');
       case 'swirl':
-        return MoodEntry(timestamp: now, moodScore: 0, note: 'Sehr schlecht (Demo)');
+        return MoodEntry(
+            timestamp: now, moodScore: 0, note: 'Sehr schlecht (Demo)');
       default:
         return MoodEntry(timestamp: now, moodScore: 2, note: 'Demo');
     }

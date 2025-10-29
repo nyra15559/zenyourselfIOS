@@ -38,8 +38,8 @@ class TtsService {
 
   // Default-Parameter
   String _lang = 'de-DE';
-  double _rate = 0.5;   // 0.0..1.0 (plattformabhängig)
-  double _pitch = 1.0;  // 0.5..2.0
+  double _rate = 0.5; // 0.0..1.0 (plattformabhängig)
+  double _pitch = 1.0; // 0.5..2.0
   double _volume = 1.0; // 0.0..1.0
 
   // ---------- Init / Bridge ----------
@@ -114,7 +114,9 @@ class TtsService {
     if (ok) {
       try {
         speaking.value = true;
-        await _channel.invokeMethod('speak', args).timeout(const Duration(seconds: 5));
+        await _channel
+            .invokeMethod('speak', args)
+            .timeout(const Duration(seconds: 5));
         return true;
       } on PlatformException {
         // weiter unten: Simulation
@@ -148,7 +150,9 @@ class TtsService {
   Future<void> pause() async {
     if (await init()) {
       try {
-        await _channel.invokeMethod('pause').timeout(const Duration(seconds: 2));
+        await _channel
+            .invokeMethod('pause')
+            .timeout(const Duration(seconds: 2));
       } catch (_) {}
     }
   }
@@ -156,7 +160,9 @@ class TtsService {
   Future<void> resume() async {
     if (await init()) {
       try {
-        await _channel.invokeMethod('resume').timeout(const Duration(seconds: 2));
+        await _channel
+            .invokeMethod('resume')
+            .timeout(const Duration(seconds: 2));
       } catch (_) {}
     }
   }
@@ -168,8 +174,8 @@ class TtsService {
     if (!await init()) return;
     try {
       await _channel
-          .invokeMethod('setLanguage', <String, dynamic>{'lang': lang})
-          .timeout(const Duration(milliseconds: 800));
+          .invokeMethod('setLanguage', <String, dynamic>{'lang': lang}).timeout(
+              const Duration(milliseconds: 800));
     } catch (_) {}
   }
 
@@ -178,8 +184,8 @@ class TtsService {
     if (!await init()) return;
     try {
       await _channel
-          .invokeMethod('setRate', <String, dynamic>{'rate': _rate})
-          .timeout(const Duration(milliseconds: 800));
+          .invokeMethod('setRate', <String, dynamic>{'rate': _rate}).timeout(
+              const Duration(milliseconds: 800));
     } catch (_) {}
   }
 
@@ -188,8 +194,8 @@ class TtsService {
     if (!await init()) return;
     try {
       await _channel
-          .invokeMethod('setPitch', <String, dynamic>{'pitch': _pitch})
-          .timeout(const Duration(milliseconds: 800));
+          .invokeMethod('setPitch', <String, dynamic>{'pitch': _pitch}).timeout(
+              const Duration(milliseconds: 800));
     } catch (_) {}
   }
 
@@ -197,9 +203,9 @@ class TtsService {
     _volume = volume.clamp(0.0, 1.0);
     if (!await init()) return;
     try {
-      await _channel
-          .invokeMethod('setVolume', <String, dynamic>{'volume': _volume})
-          .timeout(const Duration(milliseconds: 800));
+      await _channel.invokeMethod('setVolume', <String, dynamic>{
+        'volume': _volume
+      }).timeout(const Duration(milliseconds: 800));
     } catch (_) {}
   }
 
@@ -260,8 +266,10 @@ class TsService {
   Future<void> pause() => TtsService.instance.pause();
   Future<void> resume() => TtsService.instance.resume();
 
-  Future<void> setLanguage(String lang) => TtsService.instance.setLanguage(lang);
+  Future<void> setLanguage(String lang) =>
+      TtsService.instance.setLanguage(lang);
   Future<void> setRate(double rate) => TtsService.instance.setRate(rate);
   Future<void> setPitch(double pitch) => TtsService.instance.setPitch(pitch);
-  Future<void> setVolume(double volume) => TtsService.instance.setVolume(volume);
+  Future<void> setVolume(double volume) =>
+      TtsService.instance.setVolume(volume);
 }

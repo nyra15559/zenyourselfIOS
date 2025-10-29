@@ -195,8 +195,11 @@ class AuthService {
     bool withAuth = true,
   }) async {
     final token = withAuth ? await getAuthToken() : null;
-    final uri = query == null ? _u(path) : _u(path).replace(queryParameters: query);
-    final res = await http.get(uri, headers: _jsonHeaders(token: token)).timeout(_defaultTimeout);
+    final uri =
+        query == null ? _u(path) : _u(path).replace(queryParameters: query);
+    final res = await http
+        .get(uri, headers: _jsonHeaders(token: token))
+        .timeout(_defaultTimeout);
     return res;
   }
 
@@ -229,12 +232,17 @@ class AuthService {
             data['jwt'] ??
             '')
         .toString();
-    final refresh =
-        (data['refresh_token'] ?? data['refreshToken'] ?? data['id_token'] ?? '').toString();
+    final refresh = (data['refresh_token'] ??
+            data['refreshToken'] ??
+            data['id_token'] ??
+            '')
+        .toString();
 
     // Optional: Expiry (Sekunden seit jetzt ODER ISO-8601/epoch)
-    final accessExp = _parseExpiry(data['access_expires'] ?? data['accessExpires']);
-    final refreshExp = _parseExpiry(data['refresh_expires'] ?? data['refreshExpires']);
+    final accessExp =
+        _parseExpiry(data['access_expires'] ?? data['accessExpires']);
+    final refreshExp =
+        _parseExpiry(data['refresh_expires'] ?? data['refreshExpires']);
 
     if (access.isEmpty) {
       _log('Warn: access token missing in response.');
@@ -263,7 +271,9 @@ class AuthService {
     if (ms == null) return false; // kein Expiry => nicht abgelaufen
     final exp = DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true);
     // 30s Sicherheits-Puffer
-    return DateTime.now().toUtc().isAfter(exp.subtract(const Duration(seconds: 30)));
+    return DateTime.now()
+        .toUtc()
+        .isAfter(exp.subtract(const Duration(seconds: 30)));
   }
 
   static Future<bool> _isRefreshExpired() async {
@@ -300,7 +310,8 @@ class AuthService {
       // Relativ-Format: +Sekunden
       if (s.startsWith('+')) {
         final secs = int.tryParse(s.substring(1));
-        if (secs != null) return DateTime.now().toUtc().add(Duration(seconds: secs));
+        if (secs != null)
+          return DateTime.now().toUtc().add(Duration(seconds: secs));
       }
 
       // Nur Ziffern? => epoch s/ms
@@ -356,9 +367,11 @@ class AuthService {
     String out = s;
     final patterns = <RegExp>[
       // "access_token":"...","accessToken":"..."
-      RegExp(r'("access[_A-Za-z]*token"\s*:\s*")([^"]+)(")', caseSensitive: false),
+      RegExp(r'("access[_A-Za-z]*token"\s*:\s*")([^"]+)(")',
+          caseSensitive: false),
       // "refresh_token":"..."
-      RegExp(r'("refresh[_A-Za-z]*token"\s*:\s*")([^"]+)(")', caseSensitive: false),
+      RegExp(r'("refresh[_A-Za-z]*token"\s*:\s*")([^"]+)(")',
+          caseSensitive: false),
       // Bearer token in plain
       RegExp(r'(Bearer\s+)[A-Za-z0-9\-\._~\+\/]+=*', caseSensitive: false),
     ];

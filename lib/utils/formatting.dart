@@ -125,8 +125,7 @@ String relativeTimeShort(DateTime when, {DateTime? reference}) {
   String past(String u, int n) => 'vor $n $u';
   String future(String u, int n) => 'in $n $u';
 
-  String fmt(String u, int n) =>
-      diff.isNegative ? past(u, n) : future(u, n);
+  String fmt(String u, int n) => diff.isNegative ? past(u, n) : future(u, n);
 
   if (abs.inMinutes < 60) {
     final n = abs.inMinutes == 0 ? 1 : abs.inMinutes;

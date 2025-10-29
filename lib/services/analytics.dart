@@ -39,8 +39,10 @@ class AnalyticsEvent {
 
   static AnalyticsEvent fromJson(Map<String, dynamic> j) {
     final name = (j['name'] ?? 'event.unknown').toString();
-    final tsRaw = (j['ts'] ?? DateTime.now().toUtc().toIso8601String()).toString();
-    final DateTime ts = DateTime.tryParse(tsRaw)?.toUtc() ?? DateTime.now().toUtc();
+    final tsRaw =
+        (j['ts'] ?? DateTime.now().toUtc().toIso8601String()).toString();
+    final DateTime ts =
+        DateTime.tryParse(tsRaw)?.toUtc() ?? DateTime.now().toUtc();
     final props = (j['props'] is Map)
         ? Map<String, Object?>.from(j['props'] as Map)
         : const <String, Object?>{};
@@ -97,7 +99,8 @@ class AnalyticsService with ChangeNotifier {
       props: <String, Object?>{
         'kind': kind,
         if (textChars != null) 'textChars': textChars,
-        if (moodLabel != null && moodLabel.trim().isNotEmpty) 'moodLabel': moodLabel.trim(),
+        if (moodLabel != null && moodLabel.trim().isNotEmpty)
+          'moodLabel': moodLabel.trim(),
       },
     );
   }
@@ -108,14 +111,19 @@ class AnalyticsService with ChangeNotifier {
       'mood.set',
       props: <String, Object?>{
         'moodScore': moodScore,
-        if (moodLabel != null && moodLabel.trim().isNotEmpty) 'moodLabel': moodLabel.trim(),
+        if (moodLabel != null && moodLabel.trim().isNotEmpty)
+          'moodLabel': moodLabel.trim(),
       },
     );
   }
 
   /// Low-level Event Logger (ASC einsortiert).
-  void logEvent(String name, {Map<String, Object?> props = const <String, Object?>{}, DateTime? when, bool notify = true}) {
-    final ev = AnalyticsEvent(name: name, ts: (when ?? DateTime.now().toUtc()), props: props);
+  void logEvent(String name,
+      {Map<String, Object?> props = const <String, Object?>{},
+      DateTime? when,
+      bool notify = true}) {
+    final ev = AnalyticsEvent(
+        name: name, ts: (when ?? DateTime.now().toUtc()), props: props);
     _insertSortedEvent(ev);
     if (notify) notifyListeners();
   }
@@ -125,7 +133,8 @@ class AnalyticsService with ChangeNotifier {
   // ===========
   /// Mood-Eintrag hinzufügen (hält Timeline sortiert, ASC).
   /// trackEvent: ob automatisch ein mood.set Event geloggt wird.
-  void addMoodEntry(MoodEntry entry, {bool notify = true, bool trackEvent = true}) {
+  void addMoodEntry(MoodEntry entry,
+      {bool notify = true, bool trackEvent = true}) {
     _insertSortedMood(entry);
     if (trackEvent) {
       trackMoodSet(moodScore: entry.moodScore, moodLabel: entry.moodLabel);
@@ -135,7 +144,8 @@ class AnalyticsService with ChangeNotifier {
 
   /// Reflexion hinzufügen (hält Timeline sortiert, ASC).
   /// trackEvent: ob automatisch reflection.answer geloggt wird.
-  void addReflection(ReflectionEntry entry, {bool notify = true, bool trackEvent = true}) {
+  void addReflection(ReflectionEntry entry,
+      {bool notify = true, bool trackEvent = true}) {
     _insertSortedReflection(entry);
     if (trackEvent) {
       final ui = _getUserInput(entry);
@@ -466,18 +476,16 @@ class AnalyticsService with ChangeNotifier {
             })
         .toList();
 
-    final refl = _reflections
-        .map((r) {
-          final map = <String, dynamic>{
-            'id': r.id,
-            'ts': r.timestamp.toUtc().toIso8601String(),
-            'moodScore': r.moodScore,
-            'tags': _getTags(r).toList(),
-          };
-          map.removeWhere((_, v) => v == null);
-          return map;
-        })
-        .toList();
+    final refl = _reflections.map((r) {
+      final map = <String, dynamic>{
+        'id': r.id,
+        'ts': r.timestamp.toUtc().toIso8601String(),
+        'moodScore': r.moodScore,
+        'tags': _getTags(r).toList(),
+      };
+      map.removeWhere((_, v) => v == null);
+      return map;
+    }).toList();
 
     // Events können i. d. R. komplett übertragen werden (keine Freitexte).
     final evs = _events.map((e) => e.toJson()).toList();
@@ -569,7 +577,10 @@ class AnalyticsService with ChangeNotifier {
 
   Iterable<String> _safeTags(dynamic maybeTags) {
     if (maybeTags is Iterable) {
-      return maybeTags.whereType<String>().map((e) => e.trim()).where((e) => e.isNotEmpty);
+      return maybeTags
+          .whereType<String>()
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty);
     }
     return const <String>[];
   }
@@ -580,15 +591,22 @@ class AnalyticsService with ChangeNotifier {
     final dyn = r as dynamic;
     String? pick;
 
-    T? _try<T>(T Function() f) { try { final v = f(); return v is T ? v : null; } catch (_) { return null; } }
+    T? _try<T>(T Function() f) {
+      try {
+        final v = f();
+        return v is T ? v : null;
+      } catch (_) {
+        return null;
+      }
+    }
 
     pick = _try<String>(() => dyn.userInput) ??
-           _try<String>(() => dyn.prompt) ??
-           _try<String>(() => dyn.question) ??
-           _try<String>(() => dyn.input) ??
-           _try<String>(() => dyn.text) ??
-           _try<String>(() => dyn.content) ??
-           _try<String>(() => dyn.userText);
+        _try<String>(() => dyn.prompt) ??
+        _try<String>(() => dyn.question) ??
+        _try<String>(() => dyn.input) ??
+        _try<String>(() => dyn.text) ??
+        _try<String>(() => dyn.content) ??
+        _try<String>(() => dyn.userText);
 
     pick = (pick ?? '').trim();
     return pick!;
@@ -598,14 +616,21 @@ class AnalyticsService with ChangeNotifier {
     final dyn = r as dynamic;
     String? pick;
 
-    T? _try<T>(T Function() f) { try { final v = f(); return v is T ? v : null; } catch (_) { return null; } }
+    T? _try<T>(T Function() f) {
+      try {
+        final v = f();
+        return v is T ? v : null;
+      } catch (_) {
+        return null;
+      }
+    }
 
     pick = _try<String>(() => dyn.userResponse) ??
-           _try<String>(() => dyn.response) ??
-           _try<String>(() => dyn.answer) ??
-           _try<String>(() => dyn.reply) ??
-           _try<String>(() => dyn.output) ??
-           _try<String>(() => dyn.textAnswer);
+        _try<String>(() => dyn.response) ??
+        _try<String>(() => dyn.answer) ??
+        _try<String>(() => dyn.reply) ??
+        _try<String>(() => dyn.output) ??
+        _try<String>(() => dyn.textAnswer);
 
     pick = (pick ?? '').trim();
     return pick!;
@@ -615,12 +640,19 @@ class AnalyticsService with ChangeNotifier {
     final dyn = r as dynamic;
     String? pick;
 
-    T? _try<T>(T Function() f) { try { final v = f(); return v is T ? v : null; } catch (_) { return null; } }
+    T? _try<T>(T Function() f) {
+      try {
+        final v = f();
+        return v is T ? v : null;
+      } catch (_) {
+        return null;
+      }
+    }
 
     pick = _try<String>(() => dyn.moodLabel) ??
-           _try<String>(() => dyn.mood) ??
-           _try<String>(() => dyn.mood_text) ??
-           _try<String>(() => dyn.moodName);
+        _try<String>(() => dyn.mood) ??
+        _try<String>(() => dyn.mood_text) ??
+        _try<String>(() => dyn.moodName);
 
     pick = (pick ?? '').trim();
     return (pick!.isEmpty) ? null : pick;
@@ -630,12 +662,19 @@ class AnalyticsService with ChangeNotifier {
     final dyn = r as dynamic;
     dynamic raw;
 
-    T? _try<T>(T Function() f) { try { final v = f(); return v is T ? v : null; } catch (_) { return null; } }
+    T? _try<T>(T Function() f) {
+      try {
+        final v = f();
+        return v is T ? v : null;
+      } catch (_) {
+        return null;
+      }
+    }
 
     raw = _try<Iterable>(() => dyn.tags) ??
-          _try<Iterable>(() => dyn.topics) ??
-          _try<Iterable>(() => dyn.labels) ??
-          _try<Iterable>(() => dyn.categories);
+        _try<Iterable>(() => dyn.topics) ??
+        _try<Iterable>(() => dyn.labels) ??
+        _try<Iterable>(() => dyn.categories);
 
     return _safeTags(raw);
   }

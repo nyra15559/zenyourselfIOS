@@ -20,7 +20,8 @@ import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:just_audio/just_audio.dart' show AudioPlayer;
 
-import '../../shared/zen_style.dart' as zs hide ZenGlassCard; // ← Konflikt vermeiden
+import '../../shared/zen_style.dart' as zs
+    hide ZenGlassCard; // ← Konflikt vermeiden
 import '../../shared/ui/zen_widgets.dart'
     show ZenBackdrop, ZenGlassCard, ZenAppBar, ZenToast;
 import '../../audio/soundscape_manager.dart';
@@ -74,7 +75,8 @@ class BreathPattern {
         cycles: cycles,
       );
 
-  static BreathPattern equal({int seconds = 5, int cycles = 5}) => BreathPattern(
+  static BreathPattern equal({int seconds = 5, int cycles = 5}) =>
+      BreathPattern(
         phases: [
           _Phase('Einatmen', seconds),
           _Phase('Ausatmen', seconds),
@@ -246,7 +248,8 @@ class _ImpulseScreenState extends State<ImpulseScreen>
         actions: [
           IconButton(
             tooltip: 'Soundscape',
-            icon: const Icon(Icons.library_music_rounded, color: zs.ZenColors.jade),
+            icon: const Icon(Icons.library_music_rounded,
+                color: zs.ZenColors.jade),
             onPressed: () {
               final ssm = _maybeRead<SoundscapeManager>(context);
               ssm?.toggle();
@@ -330,8 +333,7 @@ class _ImpulseScreenState extends State<ImpulseScreen>
                             side: const BorderSide(
                                 color: zs.ZenColors.jade, width: 1.1),
                             shape: const RoundedRectangleBorder(
-                              borderRadius:
-                                  BorderRadius.all(zs.ZenRadii.m),
+                              borderRadius: BorderRadius.all(zs.ZenRadii.m),
                             ),
                             minimumSize: const Size(0, 44),
                           ),
@@ -346,8 +348,7 @@ class _ImpulseScreenState extends State<ImpulseScreen>
                           style: ElevatedButton.styleFrom(
                             minimumSize: const Size(0, 44),
                             shape: const RoundedRectangleBorder(
-                              borderRadius:
-                                  BorderRadius.all(zs.ZenRadii.m),
+                              borderRadius: BorderRadius.all(zs.ZenRadii.m),
                             ),
                           ),
                         ),
@@ -386,8 +387,7 @@ class _FilterChips extends StatelessWidget {
             children: [
               Icon(icon,
                   size: 16,
-                  color:
-                      selected ? zs.ZenColors.jade : zs.ZenColors.jadeMid),
+                  color: selected ? zs.ZenColors.jade : zs.ZenColors.jadeMid),
               const SizedBox(width: 6),
               Text(label),
             ],
@@ -636,8 +636,8 @@ class _BreathCoachState extends State<_BreathCoach>
         ),
         const SizedBox(height: 10),
         Text('Zyklus ${_cycle + 1} / ${widget.pattern.cycles}',
-            style:
-                zs.ZenTextStyles.caption.copyWith(color: zs.ZenColors.inkSubtle)),
+            style: zs.ZenTextStyles.caption
+                .copyWith(color: zs.ZenColors.inkSubtle)),
         const SizedBox(height: 10),
         Wrap(
           spacing: 8,
@@ -705,8 +705,7 @@ class _CirclePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _CirclePainter old) =>
-      old.progress != progress;
+  bool shouldRepaint(covariant _CirclePainter old) => old.progress != progress;
 }
 
 class _Dots extends StatelessWidget {

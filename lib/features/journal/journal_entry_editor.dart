@@ -21,10 +21,12 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/scheduler.dart' show Ticker, TickerProvider, TickerCallback;
+import 'package:flutter/scheduler.dart'
+    show Ticker, TickerProvider, TickerCallback;
 import 'package:provider/provider.dart';
 
-import '../../shared/zen_style.dart' as zs hide ZenBackdrop, ZenGlassCard, ZenAppBar;
+import '../../shared/zen_style.dart' as zs
+    hide ZenBackdrop, ZenGlassCard, ZenAppBar;
 import '../../shared/ui/zen_widgets.dart' as zw
     show ZenBackdrop, ZenGlassCard, ZenAppBar, PandaHeader, ZenToast;
 
@@ -62,14 +64,14 @@ class JournalEntryEditor extends StatefulWidget {
 class _JournalEntryEditorState extends State<JournalEntryEditor> {
   static const Duration _animShort = Duration(milliseconds: 200);
 
-  final TextEditingController _titleCtrl  = TextEditingController();
+  final TextEditingController _titleCtrl = TextEditingController();
   final TextEditingController _editorCtrl = TextEditingController();
-  final TextEditingController _quickCtrl  = TextEditingController();
+  final TextEditingController _quickCtrl = TextEditingController();
 
-  final FocusNode _titleFocus  = FocusNode();
+  final FocusNode _titleFocus = FocusNode();
   final FocusNode _editorFocus = FocusNode();
-  final FocusNode _quickFocus  = FocusNode();
-  final FocusNode _pageFocus   = FocusNode();
+  final FocusNode _quickFocus = FocusNode();
+  final FocusNode _pageFocus = FocusNode();
 
   final ScrollController _scroll = ScrollController();
   late final AnimationController _fadeCtrl;
@@ -83,20 +85,23 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
   @override
   void initState() {
     super.initState();
-    _fadeCtrl = AnimationController(vsync: _TickerProvider(), duration: _animShort);
+    _fadeCtrl =
+        AnimationController(vsync: _TickerProvider(), duration: _animShort);
 
     // Seed aus existing / Props
     final ex = widget.existing;
     if (ex != null && ex.kind == jm.EntryKind.journal) {
       _editorCtrl.text = (ex.thoughtText ?? '').trim();
-      _titleCtrl.text  = ''; // Titel wird als Teil des Texts geführt
+      _titleCtrl.text = ''; // Titel wird als Teil des Texts geführt
       final m = ex.moodLabel.trim();
       _mood = m.isNotEmpty ? m : 'Neutral';
     } else {
       _editorCtrl.text = (widget.initialText ?? '').trim();
-      _titleCtrl.text  = (widget.initialTitle ?? '').trim();
+      _titleCtrl.text = (widget.initialTitle ?? '').trim();
       _mood = (widget.initialMood ??
-          (_editorCtrl.text.isEmpty && _titleCtrl.text.isEmpty ? 'Neutral' : 'Ruhig'));
+          (_editorCtrl.text.isEmpty && _titleCtrl.text.isEmpty
+              ? 'Neutral'
+              : 'Ruhig'));
     }
 
     // Mic → Quick-Input
@@ -187,13 +192,14 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
       if (mounted) setState(() {});
     } catch (_) {
       if (!mounted) return; // Guard context after async gap
-      zw.ZenToast.show(context, 'Mikrofon nicht verfügbar. Erlaube bitte den Zugriff.');
+      zw.ZenToast.show(
+          context, 'Mikrofon nicht verfügbar. Erlaube bitte den Zugriff.');
     }
   }
 
   void _autoClean() {
     final before = _editorCtrl.text;
-    final after  = _autoCleanPipeline(before);
+    final after = _autoCleanPipeline(before);
     if (after != before) {
       setState(() => _editorCtrl.text = after);
       _editorCtrl.selection = TextSelection.fromPosition(
@@ -207,7 +213,7 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
   Future<void> _save({required bool asReflection}) async {
     if (_saving) return;
 
-    final bodyRaw  = _editorCtrl.text.trim();
+    final bodyRaw = _editorCtrl.text.trim();
     final titleRaw = _titleCtrl.text.trim();
 
     if (bodyRaw.isEmpty && titleRaw.isEmpty) {
@@ -219,7 +225,7 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
     setState(() => _saving = true);
     try {
       final cleaned = _autoCleanPipeline(bodyRaw);
-      final merged  = titleRaw.isEmpty ? cleaned : '$titleRaw\n\n$cleaned';
+      final merged = titleRaw.isEmpty ? cleaned : '$titleRaw\n\n$cleaned';
 
       final prov = context.read<jp.JournalEntriesProvider>();
 
@@ -231,7 +237,8 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
         if (ex != null) {
           // Tags: mood:* / moodScore:* ersetzen
           final nextTags = <String>[
-            ...ex.tags.where((t) => !t.startsWith('mood:') && !t.startsWith('moodScore:')),
+            ...ex.tags.where(
+                (t) => !t.startsWith('mood:') && !t.startsWith('moodScore:')),
             if (_mood.trim().isNotEmpty) 'mood:${_mood.trim()}',
           ];
           prov.updateById(
@@ -246,7 +253,8 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
         }
       }
 
-      zw.ZenToast.show(context, asReflection ? 'Reflexion gespeichert' : 'Eintrag gespeichert');
+      zw.ZenToast.show(context,
+          asReflection ? 'Reflexion gespeichert' : 'Eintrag gespeichert');
       widget.onSaved?.call();
       if (mounted) Navigator.of(context).maybePop();
     } finally {
@@ -263,7 +271,10 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
     s = s.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
 
     // Trailing-Whitespace je Zeile entfernen
-    s = s.split('\n').map((l) => l.replaceAll(RegExp(r'[ \t]+$'), '')).join('\n');
+    s = s
+        .split('\n')
+        .map((l) => l.replaceAll(RegExp(r'[ \t]+$'), ''))
+        .join('\n');
 
     // Mehrfach-Leerzeilen → max. 2
     s = s.replaceAll(RegExp(r'\n{3,}'), '\n\n');
@@ -275,7 +286,8 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
     s = s.replaceAll(RegExp(r'\s+([,.;:!?])'), r'$1');
 
     // Space nach Satzzeichen ergänzen (falls Zeichen folgt)
-    s = s.replaceAllMapped(RegExp(r'([,.!?;:])(?!\s|\n|$)'), (m) => '${m.group(1)} ');
+    s = s.replaceAllMapped(
+        RegExp(r'([,.!?;:])(?!\s|\n|$)'), (m) => '${m.group(1)} ');
 
     // Ellipsen
     s = s.replaceAll(RegExp(r'\.{3,}'), '…').replaceAll(RegExp(r'…{2,}'), '…');
@@ -301,7 +313,9 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
       s = s.replaceAllMapped(rx, (m) {
         final g = m.group(0) ?? '';
         if (g.isNotEmpty && g[0].toUpperCase() == g[0]) {
-          return repl.isEmpty ? repl : '${repl[0].toUpperCase()}${repl.substring(1)}';
+          return repl.isEmpty
+              ? repl
+              : '${repl[0].toUpperCase()}${repl.substring(1)}';
         }
         return repl;
       });
@@ -320,7 +334,8 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
         ? SystemUiOverlayStyle.light
         : SystemUiOverlayStyle.dark;
 
-    final isMobile = MediaQuery.of(context).size.width < 560; // ← wird wieder verwendet
+    final isMobile =
+        MediaQuery.of(context).size.width < 560; // ← wird wieder verwendet
     final pandaSize = MediaQuery.of(context).size.width < 470 ? 88.0 : 112.0;
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
@@ -356,11 +371,15 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
                       padding: EdgeInsets.only(
                         left: zs.ZenSpacing.m,
                         right: zs.ZenSpacing.m,
-                        top: isMobile ? 16 : 20, // ← nutzt isMobile, um Warnung zu vermeiden
+                        top: isMobile
+                            ? 16
+                            : 20, // ← nutzt isMobile, um Warnung zu vermeiden
                         bottom: 10,
                       ),
                       child: zw.PandaHeader(
-                        title: widget.existing == null ? 'Neuer Eintrag' : 'Eintrag bearbeiten',
+                        title: widget.existing == null
+                            ? 'Neuer Eintrag'
+                            : 'Eintrag bearbeiten',
                         caption: 'Schreibe in Ruhe. Ich bin hier.',
                         pandaSize: pandaSize,
                         strongTitleGreen: true,
@@ -376,13 +395,18 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
                           controller: _scroll,
                           physics: const BouncingScrollPhysics(),
                           padding: const EdgeInsets.fromLTRB(
-                            zs.ZenSpacing.m, 0, zs.ZenSpacing.m, zs.ZenSpacing.s,
+                            zs.ZenSpacing.m,
+                            0,
+                            zs.ZenSpacing.m,
+                            zs.ZenSpacing.s,
                           ),
                           children: [
                             // Titel
                             zw.ZenGlassCard(
-                              padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
-                              borderRadius: const BorderRadius.all(zs.ZenRadii.xl),
+                              padding:
+                                  const EdgeInsets.fromLTRB(16, 12, 16, 10),
+                              borderRadius:
+                                  const BorderRadius.all(zs.ZenRadii.xl),
                               topOpacity: .30,
                               bottomOpacity: .14,
                               borderOpacity: .18,
@@ -392,7 +416,8 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
                                 textInputAction: TextInputAction.next,
                                 onSubmitted: (_) => _editorFocus.requestFocus(),
                                 // prefer_const_constructors
-                                spellCheckConfiguration: const SpellCheckConfiguration.disabled(),
+                                spellCheckConfiguration:
+                                    const SpellCheckConfiguration.disabled(),
                                 autocorrect: false,
                                 enableSuggestions: true,
                                 decoration: const InputDecoration(
@@ -400,19 +425,24 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
                                   border: InputBorder.none,
                                   isCollapsed: true,
                                 ),
-                                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                  color: zs.ZenColors.jade,
-                                  fontWeight: FontWeight.w800,
-                                  height: 1.22,
-                                ),
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .titleMedium
+                                    ?.copyWith(
+                                      color: zs.ZenColors.jade,
+                                      fontWeight: FontWeight.w800,
+                                      height: 1.22,
+                                    ),
                               ),
                             ),
                             const SizedBox(height: 10),
 
                             // Haupt-Editor
                             zw.ZenGlassCard(
-                              padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-                              borderRadius: const BorderRadius.all(zs.ZenRadii.xl),
+                              padding:
+                                  const EdgeInsets.fromLTRB(16, 14, 16, 14),
+                              borderRadius:
+                                  const BorderRadius.all(zs.ZenRadii.xl),
                               topOpacity: .30,
                               bottomOpacity: .14,
                               borderOpacity: .18,
@@ -429,19 +459,29 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
                                     autocorrect: true,
                                     enableSuggestions: true,
                                     // prefer_const_constructors
-                                    spellCheckConfiguration: const SpellCheckConfiguration.disabled(),
-                                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                      color: zs.ZenColors.jade,
-                                      height: 1.35,
-                                      fontWeight: FontWeight.w600,
-                                    ),
+                                    spellCheckConfiguration:
+                                        const SpellCheckConfiguration
+                                            .disabled(),
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodyMedium
+                                        ?.copyWith(
+                                          color: zs.ZenColors.jade,
+                                          height: 1.35,
+                                          fontWeight: FontWeight.w600,
+                                        ),
                                     cursorColor: zs.ZenColors.jade,
                                     decoration: InputDecoration(
-                                      hintText: 'Schreib, was du festhalten möchtest …',
-                                      hintStyle: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                        color: zs.ZenColors.jade.withValues(alpha: .55),
-                                        fontWeight: FontWeight.w500,
-                                      ),
+                                      hintText:
+                                          'Schreib, was du festhalten möchtest …',
+                                      hintStyle: Theme.of(context)
+                                          .textTheme
+                                          .bodyMedium
+                                          ?.copyWith(
+                                            color: zs.ZenColors.jade
+                                                .withValue(alpha: .55),
+                                            fontWeight: FontWeight.w500,
+                                          ),
                                       border: InputBorder.none,
                                       isCollapsed: true,
                                     ),
@@ -457,16 +497,20 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
                                         style: OutlinedButton.styleFrom(
                                           minimumSize: const Size(0, 42),
                                           shape: const RoundedRectangleBorder(
-                                            borderRadius: BorderRadius.all(zs.ZenRadii.m),
+                                            borderRadius:
+                                                BorderRadius.all(zs.ZenRadii.m),
                                           ),
                                         ),
                                       ),
                                       const Spacer(),
                                       Text(
                                         '${_editorCtrl.text.trim().length} Zeichen',
-                                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                                          color: zs.ZenColors.inkSubtle,
-                                        ),
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .labelSmall
+                                            ?.copyWith(
+                                              color: zs.ZenColors.inkSubtle,
+                                            ),
                                       ),
                                     ],
                                   ),
@@ -487,9 +531,12 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
                               alignment: Alignment.center,
                               child: Text(
                                 'Bleibt lokal. Teilen ist optional.',
-                                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                                  color: zs.ZenColors.inkSubtle,
-                                ),
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .labelSmall
+                                    ?.copyWith(
+                                      color: zs.ZenColors.inkSubtle,
+                                    ),
                               ),
                             ),
                             const SizedBox(height: 12),
@@ -503,19 +550,25 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
                                 SizedBox(
                                   width: 280,
                                   child: ElevatedButton.icon(
-                                    onPressed: _saving ? null : () => _save(asReflection: false),
+                                    onPressed: _saving
+                                        ? null
+                                        : () => _save(asReflection: false),
                                     icon: _saving
                                         ? const SizedBox(
                                             width: 18,
                                             height: 18,
-                                            child: CircularProgressIndicator(strokeWidth: 2),
+                                            child: CircularProgressIndicator(
+                                                strokeWidth: 2),
                                           )
-                                        : const Icon(Icons.check_circle_rounded),
-                                    label: Text(_saving ? 'Speichern …' : 'Speichern'),
+                                        : const Icon(
+                                            Icons.check_circle_rounded),
+                                    label: Text(
+                                        _saving ? 'Speichern …' : 'Speichern'),
                                     style: ElevatedButton.styleFrom(
                                       minimumSize: const Size(0, 48),
                                       shape: const RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.all(zs.ZenRadii.m),
+                                        borderRadius:
+                                            BorderRadius.all(zs.ZenRadii.m),
                                       ),
                                     ),
                                   ),
@@ -523,13 +576,18 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
                                 SizedBox(
                                   width: 280,
                                   child: OutlinedButton.icon(
-                                    onPressed: _saving ? null : () => _save(asReflection: true),
-                                    icon: const Icon(Icons.psychology_alt_rounded),
-                                    label: const Text('Als Reflexion speichern'),
+                                    onPressed: _saving
+                                        ? null
+                                        : () => _save(asReflection: true),
+                                    icon: const Icon(
+                                        Icons.psychology_alt_rounded),
+                                    label:
+                                        const Text('Als Reflexion speichern'),
                                     style: OutlinedButton.styleFrom(
                                       minimumSize: const Size(0, 48),
                                       shape: const RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.all(zs.ZenRadii.m),
+                                        borderRadius:
+                                            BorderRadius.all(zs.ZenRadii.m),
                                       ),
                                     ),
                                   ),
@@ -545,7 +603,10 @@ class _JournalEntryEditorState extends State<JournalEntryEditor> {
                     // Bottom Quick-Append
                     Padding(
                       padding: const EdgeInsets.fromLTRB(
-                        zs.ZenSpacing.m, 0, zs.ZenSpacing.m, zs.ZenSpacing.s,
+                        zs.ZenSpacing.m,
+                        0,
+                        zs.ZenSpacing.m,
+                        zs.ZenSpacing.s,
                       ),
                       child: _QuickAppendBar(
                         controller: _quickCtrl,
@@ -589,7 +650,12 @@ class _MoodRow extends StatelessWidget {
   });
 
   static const List<String> _moods = <String>[
-    'Glücklich', 'Ruhig', 'Neutral', 'Traurig', 'Gestresst', 'Wütend',
+    'Glücklich',
+    'Ruhig',
+    'Neutral',
+    'Traurig',
+    'Gestresst',
+    'Wütend',
   ];
 
   @override
@@ -606,11 +672,11 @@ class _MoodRow extends StatelessWidget {
           onSelected: (_) => onSelect(m),
           visualDensity: VisualDensity.compact,
           materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          selectedColor: zs.ZenColors.jade.withValues(alpha: .10),
+          selectedColor: zs.ZenColors.jade.withValue(alpha: .10),
           side: BorderSide(
             color: isSel
-                ? zs.ZenColors.jade.withValues(alpha: .55)
-                : zs.ZenColors.jade.withValues(alpha: .22),
+                ? zs.ZenColors.jade.withValue(alpha: .55)
+                : zs.ZenColors.jade.withValue(alpha: .22),
           ),
           shape: const StadiumBorder(),
         );
@@ -638,22 +704,29 @@ class _QuickAppendBar extends StatelessWidget {
   Widget build(BuildContext context) {
     const jade = zs.ZenColors.jade;
     final baseText = Theme.of(context).textTheme.bodyMedium!;
-    final hintStyle = baseText.copyWith(color: jade.withValues(alpha: 0.55));
+    final hintStyle = baseText.copyWith(color: jade.withValue(alpha: 0.55));
 
     final List<BoxShadow> pulse = isRecording
         ? [
-            BoxShadow(color: Colors.black.withValues(alpha: 0.10), blurRadius: 14, offset: const Offset(0, 4)),
-            BoxShadow(color: jade.withValues(alpha: 0.30), blurRadius: 22, spreadRadius: 1.2),
+            BoxShadow(
+                color: Colors.black.withValue(alpha: 0.10),
+                blurRadius: 14,
+                offset: const Offset(0, 4)),
+            BoxShadow(
+                color: jade.withValue(alpha: 0.30),
+                blurRadius: 22,
+                spreadRadius: 1.2),
           ]
         : [
-            const BoxShadow(color: Color(0x14000000), blurRadius: 18, offset: Offset(0, 6)),
+            const BoxShadow(
+                color: Color(0x14000000), blurRadius: 18, offset: Offset(0, 6)),
           ];
 
     return Container(
       decoration: BoxDecoration(
         color: zs.ZenColors.white,
         borderRadius: const BorderRadius.all(zs.ZenRadii.l),
-        border: Border.all(color: jade.withValues(alpha: 0.75), width: 2),
+        border: Border.all(color: jade.withValue(alpha: 0.75), width: 2),
         boxShadow: pulse,
       ),
       padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
@@ -680,7 +753,8 @@ class _QuickAppendBar extends StatelessWidget {
               hintStyle: hintStyle,
               border: InputBorder.none,
               isCollapsed: true,
-              suffixIconConstraints: const BoxConstraints.tightFor(width: 128, height: 40),
+              suffixIconConstraints:
+                  const BoxConstraints.tightFor(width: 128, height: 40),
               suffixIcon: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -689,7 +763,9 @@ class _QuickAppendBar extends StatelessWidget {
                     child: IconButton(
                       onPressed: onMicToggle,
                       icon: Icon(
-                        isRecording ? Icons.stop_circle_rounded : Icons.mic_rounded,
+                        isRecording
+                            ? Icons.stop_circle_rounded
+                            : Icons.mic_rounded,
                         color: jade,
                       ),
                     ),
@@ -700,7 +776,7 @@ class _QuickAppendBar extends StatelessWidget {
                       onPressed: hasText ? onSend : null,
                       icon: Icon(
                         Icons.keyboard_return_rounded,
-                        color: hasText ? jade : jade.withValues(alpha: .45),
+                        color: hasText ? jade : jade.withValue(alpha: .45),
                       ),
                     ),
                   ),

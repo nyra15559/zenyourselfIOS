@@ -323,7 +323,9 @@ class WhisperService implements SpeechTranscriber {
   }
 
   Future<void> _closeSafely(StreamController c) async {
-    try { await c.close(); } catch (_) {}
+    try {
+      await c.close();
+    } catch (_) {}
   }
 
   void _debug(Object msg) {

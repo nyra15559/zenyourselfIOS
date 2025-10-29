@@ -1,5 +1,22 @@
-//[BASELINE] lib/services/core/api_service.dart  (Stand: 28.10.)
-// lib/services/core/api_service.dart  
+// [BASELINE] lib/services/core/api_service.dart  (Stand: 29.10.)
+// lib/services/core/api_service.dart
+//
+// ZenYourself — Core ApiService (server+offline, Samfring optional)
+// -----------------------------------------------------------------------------
+// - Einheitlicher HTTP/Retries/Fallbacks (_tryEndpoints / _postMaybe)
+// - Zentrale Payload-Builder (_buildSessionMap / _basePayload)
+// - Memory-Hooks & Byte-Kontext (best-effort, ohne await)
+// - Light Contact-Tints (Header + Payload), Samfring=optional
+// - Out-Soft-Gate: kleiner Start-Blocker; blockiert NIE Offline-Flows
+// - v6.3.1:
+//     • reflectFull/nextTurnFull(..., memories, memoryConsent) → sendet
+//       context.memories{...} (snake_case) + memory_consent:true/false,
+//       tolerant gegen fehlende Memory-Typen (dynamic/toMap/toJson/Map)
+//     • Auto-Anreicherung von context.memories bei Consent im Worker-Invoker
+//       (falls Caller nichts gesetzt hat) – inkl. Legacy-Top-Level 'memories'
+//     • nextTurnAction(session, action, ...) → eigener Endpoint mit Fallback
+//     • Legacy-Fallback: insight_score aus Top-Level/flow → TurnAnalysis
+//
 
 import 'dart:async';
 import 'dart:convert';
@@ -81,7 +98,10 @@ class ApiService {
       final fn = (mem as dynamic).saveIdentityName;
       if (fn is Function) {
         // 1) häufigster Fall: nur (name)
-        try { fn(name); return; } catch (_) {}
+        try {
+          fn(name);
+          return;
+        } catch (_) {}
 
         // 2) benannter Parameter: greetByName
         try {
@@ -94,7 +114,10 @@ class ApiService {
         } catch (_) {}
 
         // 3) optional: zweites positions-Argument
-        try { fn(name, true); return; } catch (_) {}
+        try {
+          fn(name, true);
+          return;
+        } catch (_) {}
       }
     } catch (_) {/* swallow */}
   }
@@ -116,7 +139,8 @@ class ApiService {
       seg = seg.split(RegExp(r'[.,;:!?]')).first.trim();
       if (seg.isEmpty) return;
 
-      final parts = seg.split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
+      final parts =
+          seg.split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
       if (parts.isEmpty) return;
       var first = parts.first;
       if (['der', 'die', 'das'].contains(first)) {
@@ -125,28 +149,27 @@ class ApiService {
       }
       if (first.length < 2 || first.length > 28) return;
 
-      String cap(String s) => s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
+      String cap(String s) =>
+          s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
       final name = cap(first);
 
       final mem = MemoryService.instance;
       _invokeSaveIdentityName(mem, name);
-      // Optional: mini-Log zur Verifikation (kannst du rausnehmen)
-      // // print('[ApiService] learned name: $name');
     } catch (_) {/* never block */}
   }
 
   // ---------------- Config ----------------
 
-
-  void configureHttp({HttpInvoker? invoker, String? baseUrl, Duration? timeout}) {
+  void configureHttp(
+      {HttpInvoker? invoker, String? baseUrl, Duration? timeout}) {
     _http = invoker;
     if (baseUrl != null && baseUrl.trim().isNotEmpty) {
       _baseUrl = _normalizeBase(baseUrl);
     }
     if (timeout != null) _timeout = timeout;
 
-    _primeMemory();       // ohne await
-    _primeOutSoftGate();  // kleiner Start-Blocker (nicht-blockierend für Offline)
+    _primeMemory(); // ohne await
+    _primeOutSoftGate(); // kleiner Start-Blocker (nicht-blockierend für Offline)
   }
 
   void configureForWorker({
@@ -157,8 +180,8 @@ class ApiService {
     _baseUrl = _normalizeBase(baseUrl);
     _timeout = timeout;
 
-    _primeMemory();       // ohne await
-    _primeOutSoftGate();  // kleiner Start-Blocker
+    _primeMemory(); // ohne await
+    _primeOutSoftGate(); // kleiner Start-Blocker
 
     // HttpInvoker-Adapter (light headers + Payload-Anreicherung)
     _http = (String path, Map<String, dynamic> body) async {
@@ -179,35 +202,52 @@ class ApiService {
 
       // Payload sanft anreichern (falls Caller es nicht bereits gemacht hat)
       final enriched = Map<String, dynamic>.from(body);
-      enriched.putIfAbsent('contact_tins', () => {
-            'brand': _brand,
-            'channel': _channel,
-            'samfring': _samfring,
-            'locale': (body['locale'] ?? 'de').toString(),
-            'tz': (body['tz'] ?? 'Europe/Zurich').toString(),
-          });
+      enriched.putIfAbsent(
+          'contact_tins',
+          () => {
+                'brand': _brand,
+                'channel': _channel,
+                'samfring': _samfring,
+                'locale': (body['locale'] ?? 'de').toString(),
+                'tz': (body['tz'] ?? 'Europe/Zurich').toString(),
+              });
 
       // Byte-Kontext best-effort (ohne await)
       _appendByteContext(enriched);
 
-      // v6.4.0: **On-Device Memories automatisch anreichern**, falls Consent==true
+      // v6.3.1: **On-Device Memories automatisch anreichern**, falls Consent==true
       // und Caller noch KEINE context.memories gesetzt hat.
       try {
-        final bool consent =
-            (enriched['memory_consent'] == true) ||
+        final bool consent = (enriched['memory_consent'] == true) ||
             (((enriched['context'] as Map?)?['memory_consent']) == true);
         final hasCtx = (enriched['context'] is Map);
-        final Map<String, dynamic> ctx =
-            hasCtx ? Map<String, dynamic>.from(enriched['context'] as Map) : <String, dynamic>{};
-        final bool hasMemoriesAlready = (ctx['memories'] is Map) || (enriched['memories'] is Map);
+        final Map<String, dynamic> ctx = hasCtx
+            ? Map<String, dynamic>.from(enriched['context'] as Map)
+            : <String, dynamic>{};
+        final bool hasMemoriesAlready =
+            (ctx['memories'] is Map) || (enriched['memories'] is Map);
 
         if (consent && !hasMemoriesAlready) {
-          final mem = await MemoryService.instance.buildContextMemories(consent: true);
+          // dynamic API – tolerant, niemals blockieren
+          final memSvc = MemoryService.instance;
+          Map<String, dynamic> mem = const {};
+          try {
+            // bevorzugt: buildContextMemories(consent:true)
+            // ignore: avoid_dynamic_calls
+            final dyn = (memSvc as dynamic).buildContextMemories;
+            if (dyn is Function) {
+              final out =
+                  await Function.apply(dyn, const [], const {#consent: true});
+              if (out is Map) {
+                mem = out.map((k, v) => MapEntry(k.toString(), v));
+              }
+            }
+          } catch (_) {}
           if (mem.isNotEmpty) {
-            // in context.memories einhängen
             ctx['memories'] = {...mem};
             enriched['context'] = {
-              if (hasCtx) ...Map<String, dynamic>.from(enriched['context'] as Map),
+              if (hasCtx)
+                ...Map<String, dynamic>.from(enriched['context'] as Map),
               ...ctx,
             };
             // Legacy-Kompat: außerdem auf Top-Level spiegeln
@@ -224,8 +264,9 @@ class ApiService {
         await Future.delayed(Duration(milliseconds: jitter));
       }
 
-      final res =
-          await http.post(uri, headers: headers, body: jsonEncode(enriched)).timeout(_timeout);
+      final res = await http
+          .post(uri, headers: headers, body: jsonEncode(enriched))
+          .timeout(_timeout);
 
       if (res.statusCode >= 400) {
         throw Exception('Worker ${res.statusCode}: ${res.body}');
@@ -261,15 +302,11 @@ class ApiService {
   // Memory-Service sanft berühren (init ohne await; falls vorhanden)
   void _primeMemory() {
     try {
-      // Zugriff auf Singleton kann bereits initialisieren
-      final _ = MemoryService.instance;
+      final memSingleton = MemoryService.instance;
       // optional: vorhandene Warmup-Methoden nicht-blockierend aufrufen
-      // (alles dynamic + try/catch → niemals Build/Runtime blockieren)
-      // ignore: unused_local_variable
-      dynamic dyn = _;
+      dynamic dyn = memSingleton;
       unawaited(Future<void>(() async {
         try {
-          // gängige Namen – falls nicht vorhanden → NoSuchMethod -> ignored
           // ignore: avoid_dynamic_calls
           await (dyn.warmup?.call());
         } catch (_) {}
@@ -295,7 +332,8 @@ class ApiService {
   }
 
   static Uri _join(String base, String path) {
-    final p = path.trim().isEmpty ? '' : (path.startsWith('/') ? path : '/$path');
+    final p =
+        path.trim().isEmpty ? '' : (path.startsWith('/') ? path : '/$path');
     return Uri.parse('$base$p');
   }
 
@@ -342,8 +380,8 @@ class ApiService {
     String tz = 'Europe/Zurich',
     int maxTurns = 3,
     List<Map<String, String>>? history,
-    UserAction? userAction,                        // v6.2.2 (optional)
-    Map<String, dynamic>? clientContext,           // v6.2.2 (optional)
+    UserAction? userAction, // v6.2.2 (optional)
+    Map<String, dynamic>? clientContext, // v6.2.2 (optional)
   }) async {
     final input = (text ?? userText ?? '').trim();
     final session = ReflectionSession(
@@ -372,8 +410,8 @@ class ApiService {
     // NEU (optional): explizite Memories + Consent
     dynamic memories,
     bool memoryConsent = false,
-    UserAction? userAction,                        // v6.2.2 (optional)
-    Map<String, dynamic>? clientContext,           // v6.2.2 (optional)
+    UserAction? userAction, // v6.2.2 (optional)
+    Map<String, dynamic>? clientContext, // v6.2.2 (optional)
   }) async {
     final s = session ??
         ReflectionSession(
@@ -394,14 +432,14 @@ class ApiService {
     );
   }
 
-  /// NEU: Direkter Zugriff – schickt `context.memories{...}` + `memory_consent`.
+  /// Direkter Zugriff – schickt `context.memories{...}` + `memory_consent`.
   Future<ReflectionTurn> reflectFull({
     required String text,
     required ReflectionSession session,
     String locale = 'de',
     String tz = 'Europe/Zurich',
     List<Map<String, String>>? history,
-    dynamic memories,                  // akzeptiert Map | has toMap() | JSON-String
+    dynamic memories, // akzeptiert Map | has toMap() | JSON-String
     bool memoryConsent = false,
     UserAction? userAction,
     Map<String, dynamic>? clientContext,
@@ -436,8 +474,8 @@ class ApiService {
     String locale = 'de',
     String tz = 'Europe/Zurich',
     List<Map<String, String>>? history,
-    UserAction? userAction,                        // v6.2.2 (optional)
-    Map<String, dynamic>? clientContext,           // v6.2.2 (optional)
+    UserAction? userAction, // v6.2.2 (optional)
+    Map<String, dynamic>? clientContext, // v6.2.2 (optional)
   }) async {
     final input = (text ?? userText ?? '').trim();
     final next = session.copyWith(turnIndex: session.turnIndex + 1);
@@ -461,8 +499,8 @@ class ApiService {
     // optional: Mem-Weitergabe (z. B. wenn On-Device neu gesammelt)
     dynamic memories,
     bool? memoryConsent,
-    UserAction? userAction,                        // v6.2.2 (optional)
-    Map<String, dynamic>? clientContext,           // v6.2.2 (optional)
+    UserAction? userAction, // v6.2.2 (optional)
+    Map<String, dynamic>? clientContext, // v6.2.2 (optional)
   }) async {
     if (_http == null) return _errorTurn(session);
     final next = session.copyWith(turnIndex: session.turnIndex + 1);
@@ -492,7 +530,7 @@ class ApiService {
     return _turnFromReflectAny(json, next);
   }
 
-  /// NEU (v6.3.1): dedizierter Action-Pfad (falls Server ihn anbietet).
+  /// (v6.3.1) dedizierter Action-Pfad (falls Server ihn anbietet).
   Future<ReflectionTurn> nextTurnAction({
     required ReflectionSession session,
     required UserAction action,
@@ -532,8 +570,8 @@ class ApiService {
     String locale = 'de',
     String tz = 'Europe/Zurich',
     List<Map<String, String>>? history,
-    UserAction? userAction,                        // v6.2.2 (optional)
-    Map<String, dynamic>? clientContext,           // v6.2.2 (optional)
+    UserAction? userAction, // v6.2.2 (optional)
+    Map<String, dynamic>? clientContext, // v6.2.2 (optional)
   }) =>
       continueSession(
         session: session,
@@ -553,8 +591,8 @@ class ApiService {
     required String answer,
     String locale = 'de',
     String tz = 'Europe/Zurich',
-    UserAction? userAction,                  // optional – Konsistenz zu Turns
-    Map<String, dynamic>? clientContext,     // optional – Konsistenz zu Turns
+    UserAction? userAction, // optional – Konsistenz zu Turns
+    Map<String, dynamic>? clientContext, // optional – Konsistenz zu Turns
   }) async {
     if (_http == null) {
       return _closureFallback(session);
@@ -643,8 +681,8 @@ class ApiService {
     String tz = 'Europe/Zurich',
     String? userText,
     List<Map<String, String>>? history,
-    UserAction? userAction,                        // v6.2.2 (optional)
-    Map<String, dynamic>? clientContext,           // v6.2.2 (optional)
+    UserAction? userAction, // v6.2.2 (optional)
+    Map<String, dynamic>? clientContext, // v6.2.2 (optional)
   }) async {
     if (_http == null) {
       // Offline-Talk bleibt verfügbar (nicht blockieren)
@@ -766,8 +804,8 @@ class ApiService {
     _appendByteContext(payload);
 
     try {
-      final json =
-          await _postMaybe('/reflect_full', payload, saveSource: 'reflect_full');
+      final json = await _postMaybe('/reflect_full', payload,
+          saveSource: 'reflect_full');
       if (json == null) throw Exception('no json');
 
       final qsList = _parseStringList(
@@ -777,7 +815,8 @@ class ApiService {
       final rawPrimary = _extractPrimary(json).trim();
       final primary = joined.isNotEmpty ? joined : rawPrimary;
 
-      final riskLevel = ((json['risk_level'] ?? json['risk'] ?? 'none')).toString();
+      final riskLevel =
+          ((json['risk_level'] ?? json['risk'] ?? 'none')).toString();
       final mirrorRaw = (json['mirror'] ?? '').toString().trim();
       final String? mirror = mirrorRaw.isEmpty ? null : mirrorRaw;
 
@@ -946,17 +985,15 @@ class ApiService {
     if (_http != null && useServerIfAvailable) {
       try {
         final payload = <String, dynamic>{
-          'entries': entries
-              .map((e) {
-                final red = _redactPII(e.text);
-                final int end = red.length > 800 ? 800 : red.length;
-                return {
-                  'date': e.dateIso,
-                  'mood': e.moodLabel ?? '',
-                  'text': red.substring(0, end)
-                };
-              })
-              .toList(growable: false),
+          'entries': entries.map((e) {
+            final red = _redactPII(e.text);
+            final int end = red.length > 800 ? 800 : red.length;
+            return {
+              'date': e.dateIso,
+              'mood': e.moodLabel ?? '',
+              'text': red.substring(0, end)
+            };
+          }).toList(growable: false),
           'horizon': horizon,
         };
         _appendContactTints(payload, locale: 'de', tz: 'Europe/Zurich');
@@ -1037,7 +1074,8 @@ class ApiService {
         _appendContactTints(payload, locale: 'de', tz: 'Europe/Zurich');
         _appendByteContext(payload);
 
-        final json = await _postMaybe('/reflect_full', payload, saveSource: 'reflect_full')
+        final json = await _postMaybe('/reflect_full', payload,
+                saveSource: 'reflect_full')
             .timeout(_timeout);
 
         if (json != null) {
@@ -1141,7 +1179,8 @@ class ApiService {
     if (_any(t, ['stress', 'gestresst', 'nervös', 'überforder', 'panik'])) {
       return 'gestresst';
     }
-    if (_any(t, ['ruhig', 'entspannt', 'gelassen', 'friedlich'])) return 'ruhig';
+    if (_any(t, ['ruhig', 'entspannt', 'gelassen', 'friedlich']))
+      return 'ruhig';
     if (_any(t, ['glücklich', 'freu', 'dankbar', 'zufrieden', 'stolz'])) {
       return 'glücklich';
     }
@@ -1191,8 +1230,8 @@ class ApiService {
 
   String _redactPII(String input) {
     var s = input;
-    final email = RegExp(r'[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}',
-        caseSensitive: false);
+    final email =
+        RegExp(r'[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}', caseSensitive: false);
     s = s.replaceAll(email, '[E-Mail]');
     final phone = RegExp(r'(\+?\d[\d\s\-\(\)]{6,}\d)');
     s = s.replaceAll(phone, '[Telefon]');
@@ -1215,6 +1254,7 @@ class ApiService {
       } catch (_) {}
       return '';
     }
+
     return pick((x) => x.content)
         .ifEmpty(() => pick((x) => x.answer?.content))
         .ifEmpty(() => pick((x) => x.aiSummary))
@@ -1232,14 +1272,16 @@ class ApiService {
 
   String _pickLever(String text) {
     final t = text.toLowerCase();
-    if (_any(t, const ['gedanke', 'glaubens', 'sollte', 'muss'])) return 'Gedanken';
+    if (_any(t, const ['gedanke', 'glaubens', 'sollte', 'muss']))
+      return 'Gedanken';
     if (_any(t, const ['gefüh', 'angst', 'wut', 'traur', 'überforder'])) {
       return 'Gefühle';
     }
     if (_any(t, const ['körper', 'schlaf', 'angespannt', 'atem', 'müde'])) {
       return 'Körper';
     }
-    if (_any(t, const ['aufschieb', 'scroll', 'reaktion', 'streit', 'vermeid'])) {
+    if (_any(
+        t, const ['aufschieb', 'scroll', 'reaktion', 'streit', 'vermeid'])) {
       return 'Verhalten';
     }
     if (_any(t, const ['arbeit', 'chef', 'famil', 'uni', 'termin', 'druck'])) {
@@ -1250,7 +1292,8 @@ class ApiService {
 
   List<String> _bulletsFromText(String text, {int maxItems = 6}) {
     if (text.isEmpty) return const <String>[];
-    final raw = text.replaceAll('\r', ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
+    final raw =
+        text.replaceAll('\r', ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
     final parts = raw
         .split(RegExp(r'[\.!\?\n;:]+'))
         .map((s) => s.trim())
@@ -1300,6 +1343,7 @@ class ApiService {
       }
       return score;
     }
+
     bullets.sort((a, b) => scoreOf(b).compareTo(scoreOf(a)));
     return bullets.first;
   }
@@ -1372,7 +1416,8 @@ class ApiService {
 
     final primaryRaw = _extractPrimary(json).trim();
     final joinedQuestions = _normalizeQuestions(allQs);
-    final primaryDisplay = joinedQuestions.isNotEmpty ? joinedQuestions : primaryRaw;
+    final primaryDisplay =
+        joinedQuestions.isNotEmpty ? joinedQuestions : primaryRaw;
     final outputText = primaryDisplay.ifEmpty(() => errorHint);
 
     final firstQuestion = allQs.isNotEmpty
@@ -1411,7 +1456,8 @@ class ApiService {
     final talkLimited = talk.take(2).toList(growable: false);
 
     final flowJson = (json['flow'] as Map?) ?? const {};
-    final moodNested = _boolLike(((flowJson['mood'] as Map?) ?? const {})['prompt']);
+    final moodNested =
+        _boolLike(((flowJson['mood'] as Map?) ?? const {})['prompt']);
     final flowCompat = ReflectionFlow(
       recommendEnd:
           (flowJson['recommend_end'] == true) || (flowJson['end'] == true),
@@ -1432,9 +1478,13 @@ class ApiService {
 
     final sJson = (json['session'] as Map?) ?? const {};
     final s = session.copyWith(
-      threadId: (sJson['id'] ?? sJson['thread_id'] ?? session.threadId).toString(),
-      turnIndex: _asInt(sJson['turn'] ?? sJson['turn_index'] ?? session.turnIndex) ?? session.turnIndex,
-      maxTurns: _asInt(sJson['max_turns'] ?? session.maxTurns) ?? session.maxTurns,
+      threadId:
+          (sJson['id'] ?? sJson['thread_id'] ?? session.threadId).toString(),
+      turnIndex:
+          _asInt(sJson['turn'] ?? sJson['turn_index'] ?? session.turnIndex) ??
+              session.turnIndex,
+      maxTurns:
+          _asInt(sJson['max_turns'] ?? session.maxTurns) ?? session.maxTurns,
     );
 
     final schoolsDyn = (json['schools'] as List?) ??
@@ -1447,17 +1497,20 @@ class ApiService {
 
     final riskLevelRoot = (json['risk_level'] ??
             json['risk_flag'] ??
-            json['level'] ??          // v6.3.2: Legacy 'level'
+            json['level'] ?? // v6.3.2: Legacy 'level'
             json['risk'] ??
             'none')
         .toString()
         .trim()
         .toLowerCase();
-    final riskFlagCompat = (riskLevelRoot == 'high' || riskLevelRoot == 'crisis')
-        ? 'crisis'
-        : (riskLevelRoot == 'mild' || riskLevelRoot == 'support' || riskLevelRoot == 'true')
-            ? 'support'
-            : 'none';
+    final riskFlagCompat =
+        (riskLevelRoot == 'high' || riskLevelRoot == 'crisis')
+            ? 'crisis'
+            : (riskLevelRoot == 'mild' ||
+                    riskLevelRoot == 'support' ||
+                    riskLevelRoot == 'true')
+                ? 'support'
+                : 'none';
 
     // ---- helperSuggestion (robust, mehrere Pfade) ---------------------------
     final helperSuggestion = _extractHelperSuggestion(json);
@@ -1467,12 +1520,15 @@ class ApiService {
 
     // ---- Merge mit DTO-Basis (bevorzugt DTO, Kompat-Zusätze mergen) ---------
     final mergedFlow = ReflectionFlow(
-      recommendEnd: (dtoBase?.flow?.recommendEnd ?? false) || flowCompat.recommendEnd,
-      suggestBreak: (dtoBase?.flow?.suggestBreak ?? false) || flowCompat.suggestBreak,
+      recommendEnd:
+          (dtoBase?.flow?.recommendEnd ?? false) || flowCompat.recommendEnd,
+      suggestBreak:
+          (dtoBase?.flow?.suggestBreak ?? false) || flowCompat.suggestBreak,
       riskNotice: dtoBase?.flow?.riskNotice ?? flowCompat.riskNotice,
       sessionTurn: dtoBase?.flow?.sessionTurn ?? flowCompat.sessionTurn,
       talkOnly: (dtoBase?.flow?.talkOnly ?? false) || flowCompat.talkOnly,
-      allowReflect: (dtoBase?.flow?.allowReflect ?? true) && flowCompat.allowReflect,
+      allowReflect:
+          (dtoBase?.flow?.allowReflect ?? true) && flowCompat.allowReflect,
       moodPrompt: (dtoBase?.flow?.moodPrompt ?? false) || flowCompat.moodPrompt,
     );
 
@@ -1523,7 +1579,8 @@ class ApiService {
       riskFlag: dtoBase?.riskFlag ?? riskFlagCompat,
       questions: mergedQuestions,
       talk: mergedTalk,
-      analysis: dtoBase?.analysis ?? legacyAnalysis, // <-- Fallback für insight_score
+      analysis:
+          dtoBase?.analysis ?? legacyAnalysis, // <-- Fallback für insight_score
       topicSuggestions: dtoBase?.topicSuggestions ?? const <String>[],
     );
   }
@@ -1616,8 +1673,7 @@ class ApiService {
     final fromChoices = _contentFromChoices(json['choices']);
     final candidates = <String>[
       if (json['primary'] != null) json['primary'].toString(),
-      if (json['primary_question'] != null)
-        json['primary_question'].toString(),
+      if (json['primary_question'] != null) json['primary_question'].toString(),
       if (json['lead'] != null) json['lead'].toString(),
       if (json['lead_question'] != null) json['lead_question'].toString(),
       if (json['output_text'] != null) json['output_text'].toString(),
@@ -1626,10 +1682,7 @@ class ApiService {
         fromChoices.trim(),
       if (json['content'] != null) json['content'].toString(),
       if (json['raw'] != null) json['raw'].toString(),
-    ]
-        .map((s) => s.trim())
-        .where((s) => s.isNotEmpty)
-        .toList(growable: false);
+    ].map((s) => s.trim()).where((s) => s.isNotEmpty).toList(growable: false);
 
     if (candidates.isEmpty) return '';
     final first = candidates.first;
@@ -1651,7 +1704,8 @@ class ApiService {
             final c0 = content.first;
             if (c0 is Map) {
               final txt = c0['text'];
-              if (txt is Map && txt['value'] is String) return txt['value'] as String;
+              if (txt is Map && txt['value'] is String)
+                return txt['value'] as String;
               if (txt is String) return txt;
               // Fallback: alles stringifizieren
               final v = txt?.toString();
@@ -1769,7 +1823,9 @@ class ApiService {
         out.add(_schoolAliases[k]!);
         continue;
       }
-      if (k.contains('kvt') || k.contains('cognitive') || k.contains('behavior')) {
+      if (k.contains('kvt') ||
+          k.contains('cognitive') ||
+          k.contains('behavior')) {
         out.add('CBT/KVT');
       } else if (k.contains('act')) {
         out.add('ACT');
@@ -1999,8 +2055,6 @@ class ApiService {
   // Byte-Kontext (falls MemoryService das anbietet) → Base64, ohne await.
   void _appendByteContext(Map<String, dynamic> payload, {int maxBytes = 2048}) {
     try {
-      // dynamic, damit das Projekt kompiliert selbst wenn es diese API noch nicht hat.
-      // ignore: unused_local_variable
       final mem = MemoryService.instance;
       dynamic dyn = mem;
       List<int>? bytes;
@@ -2019,7 +2073,8 @@ class ApiService {
       } catch (_) {}
 
       if (bytes is List<int> && bytes.isNotEmpty) {
-        final capped = bytes.length > maxBytes ? bytes.sublist(0, maxBytes) : bytes;
+        final capped =
+            bytes.length > maxBytes ? bytes.sublist(0, maxBytes) : bytes;
         payload['context_bytes_b64'] = base64Encode(capped);
       }
     } catch (_) {
@@ -2042,8 +2097,8 @@ class ApiService {
     required ReflectionSession session,
     List<Map<String, String>> messages = const [],
     String? intent,
-    UserAction? userAction,                  // v6.2.2 optional
-    Map<String, dynamic>? clientContext,     // v6.2.2 optional
+    UserAction? userAction, // v6.2.2 optional
+    Map<String, dynamic>? clientContext, // v6.2.2 optional
   }) {
     // Best-effort: lokalen Turn speichern & Namen lernen
     _saveUserTurnBestEffort(text);
@@ -2127,7 +2182,8 @@ class ApiService {
     const bases = [420, 900, 1800];
     for (int i = 0; i < endpoints.length; i++) {
       final path = endpoints[i];
-      final json = await _postMaybe(path, payload, saveSource: path.replaceFirst('/', ''));
+      final json = await _postMaybe(path, payload,
+          saveSource: path.replaceFirst('/', ''));
       if (json != null) return json;
 
       // Wenn aktueller Endpoint failt, ggf. Backoff vor *nächster* Variante
@@ -2140,7 +2196,8 @@ class ApiService {
     return null;
   }
 
-  Map<String, dynamic> _closureFallback(ReflectionSession? session) => <String, dynamic>{
+  Map<String, dynamic> _closureFallback(ReflectionSession? session) =>
+      <String, dynamic>{
         'closure': {
           'mood_intro': {'text': ''},
         },
@@ -2154,7 +2211,7 @@ class ApiService {
         if (session != null) 'session': _buildSessionMap(session),
       };
 
-   // ---------------- kleine Parser-Helfer ----------------
+  // ---------------- kleine Parser-Helfer ----------------
 
   static int? _asInt(dynamic v) {
     if (v is num) return v.toInt();

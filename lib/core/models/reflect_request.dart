@@ -10,7 +10,7 @@
 //   final json = req.toJson(); // direkt an HTTP schicken
 
 class ReflectMessage {
-  final String role;    // "user" | "assistant" | "system"
+  final String role; // "user" | "assistant" | "system"
   final String content; // reiner Text
 
   const ReflectMessage({required this.role, required this.content});
@@ -32,13 +32,15 @@ class ReflectMessage {
 }
 
 class ReflectSession {
-  final String id;      // Thread-ID
-  final int turn;       // 0..n
-  final int maxTurns;   // 2..6 (empfohlen)
+  final String id; // Thread-ID
+  final int turn; // 0..n
+  final int maxTurns; // 2..6 (empfohlen)
 
-  const ReflectSession({required this.id, required this.turn, required this.maxTurns});
+  const ReflectSession(
+      {required this.id, required this.turn, required this.maxTurns});
 
-  ReflectSession copyWith({String? id, int? turn, int? maxTurns}) => ReflectSession(
+  ReflectSession copyWith({String? id, int? turn, int? maxTurns}) =>
+      ReflectSession(
         id: id ?? this.id,
         turn: turn ?? this.turn,
         maxTurns: maxTurns ?? this.maxTurns,
@@ -63,7 +65,7 @@ class ReflectRequest {
   final String text; // Eingabetext des Nutzers (kann leer sein für Follow-up)
   final List<ReflectMessage> messages; // Gesprächskontext (optional)
   final String locale; // z. B. "de"
-  final String tz;     // z. B. "Europe/Zurich"
+  final String tz; // z. B. "Europe/Zurich"
   final ReflectSession session;
 
   const ReflectRequest({
@@ -114,7 +116,8 @@ class ReflectRequest {
 
   Map<String, dynamic> toJson() => {
         'text': text,
-        if (messages.isNotEmpty) 'messages': messages.map((m) => m.toJson()).toList(),
+        if (messages.isNotEmpty)
+          'messages': messages.map((m) => m.toJson()).toList(),
         'locale': locale,
         'tz': tz,
         'session': session.toJson(), // v8-konform: {id, turn, max_turns}

@@ -8,7 +8,7 @@
 // • Preview: max. 3 Zeilen (Reflection: Frage kursiv, Antwort DeepSage).
 // • **Keine** Inline-CTA — Aktionen ausschließlich im …-Menü.
 // • **Keine** Abhängigkeiten von Model-Hilfsmethoden (withAutoTitle, badge etc.).
-// • Nur Color.withValues(alpha: …), keine withOpacity(..).
+// • Nur Color.withValue(alpha: …), keine withOpacity(..).
 //
 // Öffentliche API (non-breaking):
 //   JournalEntryCard({
@@ -63,9 +63,9 @@ class _JournalEntryCardState extends State<JournalEntryCard> {
   @override
   Widget build(BuildContext context) {
     final e = widget.entry;
-    final badge = _badgeFor(e.kind);                         // {label, icon}
-    final title = _computedTitle(e);                         // robuster, lokaler Titel
-    final meta  = '${formatDateTimeShort(e.createdAt)} — ${badge.label}';
+    final badge = _badgeFor(e.kind); // {label, icon}
+    final title = _computedTitle(e); // robuster, lokaler Titel
+    final meta = '${formatDateTimeShort(e.createdAt)} — ${badge.label}';
 
     return Semantics(
       container: true,
@@ -106,7 +106,8 @@ class _JournalEntryCardState extends State<JournalEntryCard> {
                           if (widget.trailing != null) widget.trailing!,
                           _MenuButton(
                             isReflection: _isReflection,
-                            onContinue: _isReflection ? widget.onContinue : null,
+                            onContinue:
+                                _isReflection ? widget.onContinue : null,
                             onEdit: widget.onEdit,
                             onHide: widget.onHide,
                             onDelete: widget.onDelete,
@@ -120,7 +121,8 @@ class _JournalEntryCardState extends State<JournalEntryCard> {
                       Text(
                         meta,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: zs.ZenColors.inkSubtle.withValues(alpha: .90),
+                              color:
+                                  zs.ZenColors.inkSubtle.withValue(alpha: .90),
                             ),
                       ),
 
@@ -163,7 +165,8 @@ class _JournalEntryCardState extends State<JournalEntryCard> {
       return '';
     }
 
-    final base = pickFirstNonEmpty([e.title, e.userAnswer, e.thoughtText, e.aiQuestion]);
+    final base =
+        pickFirstNonEmpty([e.title, e.userAnswer, e.thoughtText, e.aiQuestion]);
     if (base.isEmpty) {
       final d = e.createdAt.toLocal();
       final dd = d.day.toString().padLeft(2, '0');
@@ -171,15 +174,18 @@ class _JournalEntryCardState extends State<JournalEntryCard> {
       return 'Eintrag $dd.$mm.${d.year}';
     }
 
-    final words = base.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+    final words =
+        base.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
     return words.length <= 10 ? base : '${words.take(10).join(' ')}…';
   }
 
   // Plaintext-Vorschau für Nicht-Reflexionen
   String _plainPreview(JournalEntry e) {
-    final base = (e.thoughtText ?? e.userAnswer ?? e.title ?? e.aiQuestion ?? '').trim();
+    final base =
+        (e.thoughtText ?? e.userAnswer ?? e.title ?? e.aiQuestion ?? '').trim();
     if (base.isEmpty) return '—';
-    final words = base.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+    final words =
+        base.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
     return words.length <= 40 ? base : '${words.take(40).join(' ')}…';
   }
 
@@ -206,10 +212,21 @@ class _JournalEntryCardState extends State<JournalEntryCard> {
   List<Widget> _tagChips(List<String> tags) {
     if (tags.isEmpty) return const [];
     const bannedKeys = <String>{
-      'mood', 'moodscore', 'emotion', 'input', 'answer', 'user', 'ai',
-      'ai_question', 'question', 'type', 'kind', 'source', 'sourceref',
+      'mood',
+      'moodscore',
+      'emotion',
+      'input',
+      'answer',
+      'user',
+      'ai',
+      'ai_question',
+      'question',
+      'type',
+      'kind',
+      'source',
+      'sourceref',
     };
-    const bannedFlat = <String>{ 'reflection', 'reflexion', 'journal', 'story' };
+    const bannedFlat = <String>{'reflection', 'reflexion', 'journal', 'story'};
 
     final filtered = tags.where((t) {
       final s = t.trim();
@@ -258,9 +275,9 @@ class _TypeIcon extends StatelessWidget {
       height: 36,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(10),
-        color: c.withValues(alpha: 0.07),
+        color: c.withValue(alpha: 0.07),
       ),
-      child: Icon(icon, size: 20, color: c.withValues(alpha: 0.90)),
+      child: Icon(icon, size: 20, color: c.withValue(alpha: 0.90)),
     );
   }
 }
@@ -303,7 +320,7 @@ class _ExpandablePreview extends StatelessWidget {
   InlineSpan _buildSpan(BuildContext context) {
     final base = Theme.of(context).textTheme.bodyMedium ??
         const TextStyle(fontSize: 14.5);
-    final green = zs.ZenColors.deepSage.withValues(alpha: .95);
+    final green = zs.ZenColors.deepSage.withValue(alpha: .95);
     final textColor =
         Theme.of(context).textTheme.bodyMedium?.color ?? zs.ZenColors.ink;
 
@@ -327,7 +344,7 @@ class _ExpandablePreview extends StatelessWidget {
           text: '„$q“ ',
           style: base.copyWith(
             fontStyle: FontStyle.italic,
-            color: textColor.withValues(alpha: 0.75),
+            color: textColor.withValue(alpha: 0.75),
           ),
         ),
       if (a.isNotEmpty)
@@ -408,13 +425,13 @@ class _TagChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bg = Colors.black.withValues(alpha: .04);
+    final bg = Colors.black.withValue(alpha: .04);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: bg,
         borderRadius: const BorderRadius.all(zs.ZenRadii.s),
-        border: Border.all(color: Colors.black.withValues(alpha: .08), width: 1),
+        border: Border.all(color: Colors.black.withValue(alpha: .08), width: 1),
       ),
       child: Text(
         text,
@@ -444,8 +461,10 @@ class _MenuButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hasAny =
-        onContinue != null || onEdit != null || onHide != null || onDelete != null;
+    final hasAny = onContinue != null ||
+        onEdit != null ||
+        onHide != null ||
+        onDelete != null;
     if (!hasAny) return const SizedBox.shrink();
 
     return PopupMenuButton<_Action>(
@@ -501,7 +520,7 @@ class _MenuButton extends StatelessWidget {
         child: Icon(
           Icons.more_horiz,
           size: 22,
-          color: Theme.of(context).iconTheme.color?.withValues(alpha: .80),
+          color: Theme.of(context).iconTheme.color?.withValue(alpha: .80),
         ),
       ),
     );

@@ -1,19 +1,21 @@
-//[BASELINE] lib/core/memory/memory_store.dart  (Stand: 28.10.)
-// lib/core/memory/memory_store.dart
-//
-// MemoryStore v2.3 — SharedPreferences-Persistenz für MemoryEntry.
+// [BASELINE] lib/core/memory/memory_store.dart — v6.3.1 (Stand: 29.10.2025)
+// MemoryStore — SharedPreferences-Persistenz für MemoryEntry (lokal, Ghost-Mode)
 // -----------------------------------------------------------------------------
 // Eigenschaften:
-// • Key-Kompatibilität zu v1: 'memory.entries.json'
-// • Defensive Reader: akzeptiert List oder {entries:[...]}; ignoriert Müll sicher
-// • Speichert NUR snake_case-Maps (v2 Standard); stabiler FIFO-Prune
-// • Async-API, keine UI-Blocks; sanfte Deduplizierung via (sessionId|createdAt)
+// • Kompatibel zu v1-Key: 'memory.entries.json' (List) und v2: {entries:[...]}
+// • Defensive Reader: akzeptiert List ODER Map; ignoriert kaputte Elemente
+// • Speichert NUR snake_case-Maps (v2 Standard); stabiler FIFO-Prune (neueste → alt)
+// • Async-API, keine UI-Blocks; sanftes Dedupe via (session_id | created_at)
 // • Kleine Helfer: latest(), facetHistogram(), topFacets()
-// • Zusatz-Flags: share_enabled (best-effort; kompatibel zu MemoryService)
+// • Zusatz-Flags: memory.enabled, memory.share_enabled (best-effort)
+// • Reflektive Helfer-APIs für MemoryService (setOpt*/getOpt*/setKey/getKey/...)
+// • Generische Save-Varianten: saveUserLine/savePandaLine/appendLine/saveLine/recordAcknowledge
+//   sowie saveMap/save(dynamic) — kompatibel mit MemoryService-Dyn-Calls
 //
 // Hinweise:
-// • isEnabled default = true (Ghost-/Therapist-Modus steuert separat, falls vorhanden)
-// • facetHistogram berücksichtigt Facet.hits (falls 0/fehlend → 1)
+// • isEnabled default = true (Ghost-/Therapist-Modus steuert MemoryService separat)
+// • facetHistogram berücksichtigt Facet.hits (0/fehlend → 1)
+// -----------------------------------------------------------------------------
 
 import 'dart:convert';
 
@@ -27,7 +29,7 @@ class MemoryStore {
 
   static const String _kEnabled = 'memory.enabled';
   static const String _kShareEnabled = 'memory.share_enabled'; // optional
-  static const String _kEntries = 'memory.entries.json';       // v1 Kompat-Key
+  static const String _kEntries = 'memory.entries.json'; // v1/v2 Kompat-Key
   static const int _kMax = 200;
 
   SharedPreferences? _prefs;
@@ -78,7 +80,14 @@ class MemoryStore {
     await _prefs!.setBool(key, value);
   }
 
-  /// Generische Option (Fallback, lässt verschiedene Typen zu).
+  /// Generischer Flag-Getter (Fallback für dynamische Aufrufe).
+  Future<bool?> getFlag(String key) async {
+    await init();
+    return _prefs!.getBool(key);
+  }
+
+  // ---------- Generische Options/Key-APIs (dyn-kompatibel) -------------------
+
   Future<void> setOpt(String key, Object? value) async {
     await init();
     if (value is bool) {
@@ -99,6 +108,49 @@ class MemoryStore {
         // still – ignorieren
       }
     }
+  }
+
+  Future<void> setOptString(String key, String value) async {
+    await init();
+    await _prefs!.setString(key, value);
+  }
+
+  Future<void> setOptBool(String key, bool value) async {
+    await init();
+    await _prefs!.setBool(key, value);
+  }
+
+  /// Generischer Getter: Liefert rohe gespeicherte Werte (wenn möglich).
+  Future<Object?> getOpt(String key) async {
+    await init();
+    if (!_prefs!.containsKey(key)) return null;
+    // shared_prefs gibt typisiert zurück:
+    final obj = _prefs!.get(key);
+    if (obj == null) return null;
+    // Falls String JSON enthält, Original zurückgeben (MemoryService parst selbst bei Bedarf)
+    return obj;
+  }
+
+  Future<String?> getOptString(String key) async {
+    await init();
+    final v = _prefs!.getString(key);
+    return v;
+  }
+
+  Future<bool?> getOptBool(String key) async {
+    await init();
+    if (!_prefs!.containsKey(key)) return null;
+    return _prefs!.getBool(key);
+  }
+
+  /// „Key“-Alias (einige dyn-Caller erwarten diese Namen).
+  Future<void> setKey(String key, String value) => setOptString(key, value);
+  Future<String?> getKey(String key) => getOptString(key);
+
+  /// Entfernt eine gespeicherte Option (best-effort).
+  Future<void> removeOpt(String key) async {
+    await init();
+    await _prefs!.remove(key);
   }
 
   // ---------- CRUD ------------------------------------------------------------
@@ -162,7 +214,7 @@ class MemoryStore {
     // Neu vorne einfügen
     final updated = <MemoryEntry>[entry, ...existing];
 
-    // Sanftes Dedupe: Schlüssel = sessionId|createdAt(ISO-UTC)
+    // Sanftes Dedupe: Schlüssel = session_id | created_at (ISO-UTC)
     final seen = <String>{};
     final deduped = <MemoryEntry>[];
     for (final e in updated) {
@@ -183,6 +235,102 @@ class MemoryStore {
       // still – auf Persistenzfehler nicht hart reagieren
     }
   }
+
+  // ---------- Generische Save-/Bridge-APIs (für dyn-Calls) -------------------
+
+  /// Fügt eine generische „Zeile“ ein (role: 'user'|'panda'), meta optional.
+  Future<void> appendLine(
+      String role, String text, Map<String, dynamic>? meta) async {
+    // Map in MemoryEntry transformieren und speichern
+    final m = <String, dynamic>{
+      'kind': 'line',
+      'role': role,
+      'text': text,
+      'meta': meta ?? const <String, dynamic>{},
+      // Session aus meta, sonst 'local'
+      'session_id': (meta?['session_id'] as String?) ?? 'local',
+      'created_at': DateTime.now().toUtc().toIso8601String(),
+      // optionale leere Felder für Kompatibilität
+      'context_facets': const <dynamic>[],
+    };
+    await saveMap(m);
+  }
+
+  Future<void> saveLine(
+      {required String role,
+      required String text,
+      Map<String, dynamic>? meta}) {
+    return appendLine(role, text, meta);
+  }
+
+  Future<void> saveUserLine(String text, Map<String, dynamic>? meta) {
+    return appendLine('user', text, meta);
+  }
+
+  Future<void> savePandaLine(String text, Map<String, dynamic>? meta) {
+    return appendLine('panda', text, meta);
+  }
+
+  /// Acknowledge-Ereignis speichern (z. B. für Insight-Bestärkung).
+  Future<void> recordAcknowledge(Map<String, dynamic> ack) async {
+    final safe = Map<String, dynamic>.from(ack);
+    safe['kind'] = safe['kind'] ?? 'ack';
+    safe['created_at'] = (safe['created_at'] as String?) ??
+        DateTime.now().toUtc().toIso8601String();
+    safe['session_id'] = (safe['session_id'] as String?) ??
+        (safe['round_id'] as String?) ??
+        'local';
+    await saveMap(safe);
+  }
+
+  /// Universeller Map-Save: wandelt Map→MemoryEntry und speichert.
+  Future<void> saveMap(Map<String, dynamic> map) async {
+    try {
+      final entry = MemoryEntry.fromMap(map);
+      await save(entry);
+    } catch (_) {
+      // Falls Map nicht direkt parsebar ist, versuche defensive Normalisierung
+      try {
+        // Minimalfelder erzwingen
+        final safe = <String, dynamic>{
+          ...map,
+          'created_at':
+              map['created_at'] ?? DateTime.now().toUtc().toIso8601String(),
+          'session_id': map['session_id'] ?? 'local',
+        };
+        final entry = MemoryEntry.fromMap(safe);
+        await save(entry);
+      } catch (_) {
+        // still – ignorieren
+      }
+    }
+  }
+
+  /// Dynamischer Universal-Save (akzeptiert Map oder MemoryEntry).
+  Future<void> saveDynamic(dynamic value) async {
+    if (value is MemoryEntry) {
+      await save(value);
+    } else if (value is Map) {
+      await saveMap(Map<String, dynamic>.from(value));
+    } else {
+      // try JSON string?
+      if (value is String) {
+        try {
+          final decoded = jsonDecode(value);
+          if (decoded is Map) {
+            await saveMap(Map<String, dynamic>.from(decoded));
+          }
+        } catch (_) {/* ignore */}
+      }
+    }
+  }
+
+  // Alias für dyn-Caller
+  Future<void> save_(dynamic value) => saveDynamic(value);
+  Future<void> save$(dynamic value) => saveDynamic(value);
+  Future<void> saveCall(dynamic value) => saveDynamic(value);
+  Future<void> saveAny(dynamic value) => saveDynamic(value);
+  Future<void> saveObject(dynamic value) => saveDynamic(value);
 
   // ---------- Auswertungen / kleine Helfer -----------------------------------
 

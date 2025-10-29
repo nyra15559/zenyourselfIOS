@@ -1,28 +1,33 @@
 // lib/models/app_settings.dart
 //
-// AppSettings — Persistente App- & A11y-Einstellungen (Oxford-Zen v3.2)
-// ----------------------------------------------------------------------
+// AppSettings — Persistente App-, A11y- & Panda-Gedächtnis-Einstellungen (Oxford-Zen v3.3)
+// ----------------------------------------------------------------------------------------
 // ✓ ChangeNotifier mit Auto-Hydration aus LocalStorage
-// ✓ Persistente Flags: DarkMode, LargeText, ColorBlindMode
-// ✓ Lokalisierung: Locale speichern/laden ("de_DE", "en_US", …)
+// ✓ Persistente Flags: DarkMode, LargeText, ColorBlindMode, Locale
 // ✓ Therapeuten-Modus: therapistModeEnabled, therapistCode (secure), shareUntil (ISO)
-// ✓ Saubere Set-/Toggle-APIs (nur bei Änderungen notify + persist)
-// ✓ Backup/Restore: toJson/applyFromJson (inkl. Therapeuten-Felder)
+// ✓ Panda-Gedächtnis: memoryEnabled (on-device), memoryShareEnabled (kuratierter Kontext)
+// ✓ Bequeme Set-APIs & Modi-Shortcuts: setMemoryModeOff/Light/Full
+// ✓ Backup/Restore: toJson / applyFromJson (inkl. neuer Flags)
 
 import 'package:flutter/material.dart';
 import '../services/local_storage.dart';
 
 class AppSettings extends ChangeNotifier {
   // ---------------- Keys (namespace handled by LocalStorageService) -----------
-  static const _kDarkMode       = 'settings:dark_mode';
-  static const _kLargeText      = 'settings:large_text';
-  static const _kColorBlind     = 'settings:color_blind';
-  static const _kLocale         = 'settings:locale';         // "de_DE"
+  static const _kDarkMode = 'settings:dark_mode';
+  static const _kLargeText = 'settings:large_text';
+  static const _kColorBlind = 'settings:color_blind';
+  static const _kLocale = 'settings:locale'; // "de_DE"
 
   // Therapeuten-Modus
-  static const _kTherapistOn    = 'settings:therapist_mode';
-  static const _kTherapistCode  = 'settings:therapist_code'; // secure storage
-  static const _kShareUntil     = 'settings:share_until';    // ISO-8601 UTC
+  static const _kTherapistOn = 'settings:therapist_mode';
+  static const _kTherapistCode = 'settings:therapist_code'; // secure storage
+  static const _kShareUntil = 'settings:share_until'; // ISO-8601 UTC
+
+  // Panda-Gedächtnis
+  static const _kMemoryEnabled = 'settings:memory_enabled'; // on-device store
+  static const _kMemoryShareEnabled =
+      'settings:memory_share_enabled'; // curated context
 
   // ---------------- State -----------------------------------------------------
   bool darkMode = false;
@@ -32,11 +37,23 @@ class AppSettings extends ChangeNotifier {
 
   // Therapeuten-Modus
   bool therapistModeEnabled = false;
-  String? therapistCode;        // optionaler Code (secure)
-  DateTime? shareUntil;         // optionale Freigabe-Frist (UTC)
+  String? therapistCode; // optionaler Code (secure)
+  DateTime? shareUntil; // optionale Freigabe-Frist (UTC)
+
+  // Panda-Gedächtnis
+  bool memoryEnabled = false; // on-device Erinnerungen (Ghost-Default: false)
+  bool memoryShareEnabled = false; // kuratierter Kontext an Panda (opt-in)
 
   bool _hydrated = false;
   bool get isHydrated => _hydrated;
+
+  /// „Voll“-Einwilligung (für API-Brücke nützlich)
+  bool get memoryConsent => memoryEnabled && memoryShareEnabled;
+
+  /// Abgeleiteter Modus (für UI)
+  String get memoryMode => !memoryEnabled && !memoryShareEnabled
+      ? 'off'
+      : (memoryEnabled && !memoryShareEnabled ? 'light' : 'full');
 
   final LocalStorageService _storage;
 
@@ -72,8 +89,7 @@ class AppSettings extends ChangeNotifier {
   }
 
   Future<void> setLocale(Locale l, {bool persist = true}) async {
-    final same =
-        locale.languageCode == l.languageCode &&
+    final same = locale.languageCode == l.languageCode &&
         (locale.countryCode ?? '') == (l.countryCode ?? '');
     if (same) return;
 
@@ -82,13 +98,50 @@ class AppSettings extends ChangeNotifier {
     if (persist) await _storage.saveSetting<String>(_kLocale, _encodeLocale(l));
   }
 
+  // --- Panda-Gedächtnis ------------------------------------------------------
+
+  Future<void> setMemoryEnabled(bool value, {bool persist = true}) async {
+    if (memoryEnabled == value) return;
+    memoryEnabled = value;
+    notifyListeners();
+    if (persist)
+      await _storage.saveSetting<bool>(_kMemoryEnabled, memoryEnabled);
+  }
+
+  Future<void> setMemoryShareEnabled(bool value, {bool persist = true}) async {
+    if (memoryShareEnabled == value) return;
+    memoryShareEnabled = value;
+    notifyListeners();
+    if (persist)
+      await _storage.saveSetting<bool>(
+          _kMemoryShareEnabled, memoryShareEnabled);
+  }
+
+  /// Shortcuts für das Bottom-Sheet
+  Future<void> setMemoryModeOff({bool persist = true}) async {
+    await setMemoryEnabled(false, persist: persist);
+    await setMemoryShareEnabled(false, persist: persist);
+  }
+
+  Future<void> setMemoryModeLight({bool persist = true}) async {
+    await setMemoryEnabled(true, persist: persist);
+    await setMemoryShareEnabled(false, persist: persist);
+  }
+
+  Future<void> setMemoryModeFull({bool persist = true}) async {
+    await setMemoryEnabled(true, persist: persist);
+    await setMemoryShareEnabled(true, persist: persist);
+  }
+
   // --- Therapeuten-Modus -----------------------------------------------------
 
-  Future<void> setTherapistModeEnabled(bool value, {bool persist = true}) async {
+  Future<void> setTherapistModeEnabled(bool value,
+      {bool persist = true}) async {
     if (therapistModeEnabled == value) return;
     therapistModeEnabled = value;
     notifyListeners();
-    if (persist) await _storage.saveSetting<bool>(_kTherapistOn, therapistModeEnabled);
+    if (persist)
+      await _storage.saveSetting<bool>(_kTherapistOn, therapistModeEnabled);
   }
 
   /// Code setzen/entfernen. Leerer/Null-Code entfernt den gespeicherten Wert.
@@ -121,7 +174,8 @@ class AppSettings extends ChangeNotifier {
       if (next == null) {
         await _storage.remove(_kShareUntil);
       } else {
-        await _storage.saveSetting<String>(_kShareUntil, next.toIso8601String());
+        await _storage.saveSetting<String>(
+            _kShareUntil, next.toIso8601String());
       }
     }
   }
@@ -142,6 +196,10 @@ class AppSettings extends ChangeNotifier {
     therapistModeEnabled = false;
     therapistCode = null;
     shareUntil = null;
+
+    memoryEnabled = false;
+    memoryShareEnabled = false;
+
     notifyListeners();
 
     if (persist) {
@@ -153,6 +211,8 @@ class AppSettings extends ChangeNotifier {
         _storage.saveSetting<bool>(_kTherapistOn, therapistModeEnabled),
         _storage.removeSecure(_kTherapistCode),
         _storage.remove(_kShareUntil),
+        _storage.saveSetting<bool>(_kMemoryEnabled, memoryEnabled),
+        _storage.saveSetting<bool>(_kMemoryShareEnabled, memoryShareEnabled),
       ]);
     }
   }
@@ -167,9 +227,12 @@ class AppSettings extends ChangeNotifier {
         'therapistModeEnabled': therapistModeEnabled,
         'therapistCode': therapistCode, // bewusst mit exportiert
         'shareUntil': shareUntil?.toIso8601String(),
+        'memoryEnabled': memoryEnabled,
+        'memoryShareEnabled': memoryShareEnabled,
       };
 
-  Future<void> applyFromJson(Map<String, dynamic> json, {bool persist = true}) async {
+  Future<void> applyFromJson(Map<String, dynamic> json,
+      {bool persist = true}) async {
     final dm = json['darkMode'] == true;
     final lt = json['largeText'] == true;
     final cb = json['colorBlindMode'] == true;
@@ -180,6 +243,9 @@ class AppSettings extends ChangeNotifier {
     final tCode = _sanitizeCode(json['therapistCode']?.toString());
     final suIso = json['shareUntil']?.toString();
     final su = _parseDate(suIso);
+
+    final memOn = json['memoryEnabled'] == true;
+    final memSh = json['memoryShareEnabled'] == true;
 
     bool changed = false;
     void apply<T>(T prev, T next, void Function(T) setField) {
@@ -212,6 +278,9 @@ class AppSettings extends ChangeNotifier {
       changed = true;
     }
 
+    apply<bool>(memoryEnabled, memOn, (v) => memoryEnabled = v);
+    apply<bool>(memoryShareEnabled, memSh, (v) => memoryShareEnabled = v);
+
     if (changed) {
       notifyListeners();
       if (persist) {
@@ -228,7 +297,10 @@ class AppSettings extends ChangeNotifier {
           if (shareUntil == null)
             _storage.remove(_kShareUntil)
           else
-            _storage.saveSetting<String>(_kShareUntil, shareUntil!.toIso8601String()),
+            _storage.saveSetting<String>(
+                _kShareUntil, shareUntil!.toIso8601String()),
+          _storage.saveSetting<bool>(_kMemoryEnabled, memoryEnabled),
+          _storage.saveSetting<bool>(_kMemoryShareEnabled, memoryShareEnabled),
         ]);
       }
     }
@@ -249,8 +321,10 @@ class AppSettings extends ChangeNotifier {
       final tCode = await _storage.loadSecure(_kTherapistCode);
       final suIso = await _storage.loadSetting<String>(_kShareUntil);
 
-      bool changed = false;
+      final memOn = await _storage.loadSetting<bool>(_kMemoryEnabled);
+      final memSh = await _storage.loadSetting<bool>(_kMemoryShareEnabled);
 
+      bool changed = false;
       bool apply<T>(T? incoming, T current, void Function(T) setField) {
         if (incoming != null && incoming != current) {
           setField(incoming);
@@ -261,7 +335,8 @@ class AppSettings extends ChangeNotifier {
 
       if (apply<bool>(dm, darkMode, (v) => darkMode = v)) changed = true;
       if (apply<bool>(lt, largeText, (v) => largeText = v)) changed = true;
-      if (apply<bool>(cb, colorBlindMode, (v) => colorBlindMode = v)) changed = true;
+      if (apply<bool>(cb, colorBlindMode, (v) => colorBlindMode = v))
+        changed = true;
 
       final decoded = _decodeLocale(locStr);
       if (decoded != null &&
@@ -271,7 +346,8 @@ class AppSettings extends ChangeNotifier {
         changed = true;
       }
 
-      if (apply<bool>(tOn, therapistModeEnabled, (v) => therapistModeEnabled = v)) {
+      if (apply<bool>(
+          tOn, therapistModeEnabled, (v) => therapistModeEnabled = v)) {
         changed = true;
       }
 
@@ -282,15 +358,21 @@ class AppSettings extends ChangeNotifier {
 
       final su = _parseDate(suIso);
       final equalShare = (shareUntil == null && su == null) ||
-          (shareUntil != null && su != null && shareUntil!.isAtSameMomentAs(su));
+          (shareUntil != null &&
+              su != null &&
+              shareUntil!.isAtSameMomentAs(su));
       if (!equalShare) {
         shareUntil = su;
         changed = true;
       }
 
+      if (apply<bool>(memOn, memoryEnabled, (v) => memoryEnabled = v))
+        changed = true;
+      if (apply<bool>(memSh, memoryShareEnabled, (v) => memoryShareEnabled = v))
+        changed = true;
+
       _hydrated = true;
-      if (changed) notifyListeners();
-      if (!changed) notifyListeners(); // signalisiert: geladen
+      notifyListeners(); // signalisiert geladen; UI kann reagieren
     } catch (_) {
       _hydrated = true;
       notifyListeners();
@@ -301,7 +383,9 @@ class AppSettings extends ChangeNotifier {
 
   static String _encodeLocale(Locale l) {
     final cc = l.countryCode;
-    return (cc == null || cc.isEmpty) ? l.languageCode : '${l.languageCode}_$cc';
+    return (cc == null || cc.isEmpty)
+        ? l.languageCode
+        : '${l.languageCode}_$cc';
   }
 
   static Locale? _decodeLocale(String? s) {

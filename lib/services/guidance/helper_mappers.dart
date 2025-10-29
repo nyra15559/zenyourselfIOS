@@ -43,7 +43,7 @@ class HelperMappers {
   /// Extrahiert bis zu 3 Answer-Helpers (Display-Variante, mit „…“).
   static List<String> answerHelpersDisplay(dynamic turn, {int max = 3}) {
     final primary = _listOfString(_get(turn, 'answerHelpers'));
-    final legacy  = _listOfString(_get(turn, 'followups'));
+    final legacy = _listOfString(_get(turn, 'followups'));
     final src = primary.isNotEmpty ? primary : legacy;
 
     final out = <String>[];
@@ -107,17 +107,17 @@ class HelperMappers {
   // ─────────────────────────────────────────────────────────────────────
 
   static List<String> topicChips(dynamic turn, {int limit = 6}) {
-    final tags   = _listOfString(_get(turn, 'tags'));
+    final tags = _listOfString(_get(turn, 'tags'));
 
     // Kontext kann je nach Quelle List<String> (DTO) oder Map mit Facetten sein
     final ctxMap = _map(_get(turn, 'context'));
-    final facetsCtx   = _listOfString(ctxMap['facets']);
-    final topicsCtx   = _listOfString(ctxMap['topics']);
+    final facetsCtx = _listOfString(ctxMap['facets']);
+    final topicsCtx = _listOfString(ctxMap['topics']);
 
     // Normalized-API legt Facetten/Topics unter understanding.{facets,topics} ab
     final understanding = _map(_get(turn, 'understanding'));
-    final facetsUnder   = _listOfString(understanding['facets']);
-    final topicsUnder   = _listOfString(understanding['topics']);
+    final facetsUnder = _listOfString(understanding['facets']);
+    final topicsUnder = _listOfString(understanding['topics']);
 
     final src = <String>[
       ...tags,
@@ -149,13 +149,14 @@ class HelperMappers {
     // Zulässige Eingaben:
     //  - { closure: { mood_intro: {text}, hope_reply, closure_prompt }, flow: {...} }
     //  - direkt { mood_intro, hope_reply, closure_prompt }
-    final src     = _map(closureResponse);
-    final closure = _map(src['closure']).isNotEmpty ? _map(src['closure']) : src;
+    final src = _map(closureResponse);
+    final closure =
+        _map(src['closure']).isNotEmpty ? _map(src['closure']) : src;
 
     final moodIntro = _map(closure['mood_intro']);
-    final moodText  = (moodIntro['text'] ?? '').toString().trim();
+    final moodText = (moodIntro['text'] ?? '').toString().trim();
 
-    final hope   = (closure['hope_reply'] ?? '').toString().trim();
+    final hope = (closure['hope_reply'] ?? '').toString().trim();
     final prompt = (closure['closure_prompt'] ?? '').toString().trim();
 
     return {
@@ -202,7 +203,8 @@ class HelperMappers {
     // 2) Optional aus Kontext lesen (falls vorhanden)
     final ctx = _map(_get(turn, 'context'));
     if ((primary == null || primary.isEmpty) && ctx.isNotEmpty) {
-      primary = _labelCap((ctx['mood'] ?? ctx['primary_emotion'] ?? '').toString());
+      primary =
+          _labelCap((ctx['mood'] ?? ctx['primary_emotion'] ?? '').toString());
     }
     if ((secondary == null || secondary.isEmpty) && ctx.isNotEmpty) {
       secondary = _labelCap((ctx['secondary_emotion'] ?? '').toString());
@@ -233,9 +235,10 @@ class HelperMappers {
     String _asStr(dynamic v) => (v ?? '').toString().trim().toLowerCase();
 
     // Quellen: risk_level | level | risk_flag/riskFlag | risk (bool)
-    final rl      = _asStr(m['risk_level']);
-    final lvl     = _asStr(m['level']);
-    final flag    = _asStr(m['risk_flag'] ?? m['riskFlag'] ?? _get(turn, 'riskFlag'));
+    final rl = _asStr(m['risk_level']);
+    final lvl = _asStr(m['level']);
+    final flag =
+        _asStr(m['risk_flag'] ?? m['riskFlag'] ?? _get(turn, 'riskFlag'));
     final boolFlg = (m['risk'] == true);
 
     String mapLevel(String x) {
@@ -332,7 +335,8 @@ class HelperMappers {
         case 'context':
           return d.context;
         case 'understanding':
-          return d.understanding; // existiert nur bei normalisiertem JSON-Objekt
+          return d
+              .understanding; // existiert nur bei normalisiertem JSON-Objekt
         case 'riskFlag':
           return d.riskFlag;
         case 'helperSuggestion':
@@ -392,9 +396,9 @@ class HelperMappers {
 // ────────────────────────────────────────────────────────────────────────────
 
 class EmotionInfo {
-  final String moodLabel      ; // primäres Label (z. B. „Ruhig“)
-  final String secondaryLabel ; // optional (z. B. „Hoffnungsvoll“)
-  final double moodScore      ; // −2..+2
+  final String moodLabel; // primäres Label (z. B. „Ruhig“)
+  final String secondaryLabel; // optional (z. B. „Hoffnungsvoll“)
+  final double moodScore; // −2..+2
 
   const EmotionInfo({
     required this.moodLabel,

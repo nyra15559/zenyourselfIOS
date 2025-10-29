@@ -1,24 +1,21 @@
-//[BASELINE] lib/core/memory/memory_entry.dart  (Stand: 28.10.)
-
-// lib/core/memory/memory_entry.dart
+// [BASELINE] lib/core/memory/memory_entry.dart — v6.3.1 (Stand: 29.10.2025)
 //
-// MemoryEntry v2.2 — DTO für lokales Kontext-Gedächtnis (snake_case-Maps).
+// MemoryEntry — DTO für lokales Kontext-Gedächtnis (snake_case-Maps, defensiv)
 // -----------------------------------------------------------------------------
 // Kompatibilität (v1 → v2):
-// • sessionId              ⇆  id / session_id
-// • createdAt (ISO-UTC)    ⇆  created_at
+// • sessionId                ⇆  id / session_id
+// • createdAt (ISO-UTC)      ⇆  created_at / ts
 // • contextFacets[List<Facet>] ⇆  context_facets / facets[List<String>]
-// • insightScore[Map|num]  ⇆  insight_score
-// • mood{mental,physical}  ⇆  Strings/Nums; Aliasse: icon/body/somatic
-// • summary / nextHint     ⇆  summary / next_hint
+// • insightScore[Map|num]    ⇆  insight_score
+// • mood{mental,physical}    ⇆  Strings/Nums; Aliasse: icon/body/somatic
+// • summary / nextHint       ⇆  summary / next_hint
 //
 // Hinweise:
 // • toMap() gibt NUR snake_case-Schlüssel zurück (v2 Standard).
-// • fromMap() akzeptiert v1/v2 und normalisiert Daten defensiv.
+// • fromMap() akzeptiert v1/v2/“schmale” Maps (line/ack) und normalisiert defensiv.
 // • toJson()/fromJson() sind Convenience-Wrapper für (De-)Serialisierung.
 
 import 'dart:convert';
-
 import 'package:flutter/foundation.dart';
 
 import '../models/insight_models.dart';
@@ -79,7 +76,8 @@ class MemoryEntry {
   }
 
   static DateTime _asDateTimeUtc(dynamic x) {
-    final s = _asString(x);
+    // Unterstützt ISO-Strings und Fallback auf now()
+    final s = _asString(x).trim();
     final dt = DateTime.tryParse(s);
     return (dt ?? DateTime.now()).toUtc();
   }
@@ -91,11 +89,11 @@ class MemoryEntry {
     final sidRaw = m['sessionId'] ?? m['session_id'] ?? m['id'];
     final sid = _asString(sidRaw).trim();
 
-    // createdAt (Aliases)
-    final createdRaw = m['createdAt'] ?? m['created_at'];
+    // createdAt (Aliases: created_at / ts)
+    final createdRaw = m['createdAt'] ?? m['created_at'] ?? m['ts'];
     final createdAt = _asDateTimeUtc(createdRaw);
 
-    // contextFacets: bevorzugt neue Struktur (List<Map>), fallback alte (List<String>)
+    // contextFacets: bevorzugt List<Map>, Fallback List<String>
     final facets = <Facet>[];
     final cfRaw = m['contextFacets'] ?? m['context_facets'] ?? m['facets'];
     if (cfRaw is List) {
@@ -120,7 +118,8 @@ class MemoryEntry {
     final rawInsight = m['insightScore'] ?? m['insight_score'];
     if (rawInsight is Map) {
       try {
-        insightScore = InsightScore.fromMap(Map<String, dynamic>.from(rawInsight));
+        insightScore =
+            InsightScore.fromMap(Map<String, dynamic>.from(rawInsight));
       } catch (_) {/* ignore */}
     } else if (rawInsight is num) {
       insightScore = InsightScore(rawInsight.toDouble());
@@ -147,10 +146,12 @@ class MemoryEntry {
     final summary = _asString(summaryRaw).trim();
     final nextHint = _asString(nextHintRaw).trim();
 
+    // Session-Fallback
+    final sessionId =
+        sid.isNotEmpty ? sid : 'local_${DateTime.now().millisecondsSinceEpoch}';
+
     return MemoryEntry(
-      sessionId: sid.isNotEmpty
-          ? sid
-          : 'local_${DateTime.now().millisecondsSinceEpoch}',
+      sessionId: sessionId,
       createdAt: createdAt,
       contextFacets: List<Facet>.unmodifiable(facets),
       insightScore: insightScore,
@@ -175,6 +176,8 @@ class MemoryEntry {
   String toJson() => jsonEncode(toMap());
   factory MemoryEntry.fromJson(String json) =>
       MemoryEntry.fromMap(jsonDecode(json) as Map<String, dynamic>);
+
+  // ---------- Equality / Hash / Debug ----------------------------------------
 
   @override
   bool operator ==(Object other) {

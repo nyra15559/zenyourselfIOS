@@ -1,4 +1,4 @@
-//[BASELINE]lib/services/guidance/dtos.dart(Stand: 28.10.) 
+//[BASELINE] lib/services/guidance/dtos.dart (Stand: 29.10.)
 // lib/services/guidance/dtos.dart
 //
 // DTOs & Value-Types für Guidance-Service (standalone, ohne Api-Abhängigkeit)
@@ -17,6 +17,11 @@
 //           Session-Int aus String; Flow: mood { prompt: true }; risk: 'level')
 // • v6.3.3: String→Liste-Split verbessert („;“ auch ohne Leerraum), optional
 //           speech_sequence (für Hope-Kompat) tolerant mitgeführt
+// • v6.4.1: **Neue Felder** für Plan-Punkt 8
+//   – memories_to_save[] (tolerant als List<dynamic>)
+//   – understanding { topic_shift } (tolerant gelesen + in toJson geführt)
+//   – closure{ mood_intro.text, hope_reply, closure_prompt, mode?, reason?, tone? } DTO
+//   – insight_score weiterhin in TurnAnalysis (Top-Level passthrough möglich)
 //
 // Mini-Checkliste (Pflichtenheft A/5):
 // [x] ReflectionTurn.answerHelpers vorhanden (Default [])
@@ -27,6 +32,9 @@
 // [x] helper_suggestion als optionales Feld vorhanden (DTO ↔ JSON)
 // [x] UserAction DTO vorhanden (String+Enum, rückwärtskompatibel)
 // [x] topic_suggestions + analysis vorhanden, tolerant gelesen
+// [x] memories_to_save[] vorhanden, tolerant
+// [x] understanding.topic_shift vorhanden, tolerant
+// [x] ClosureData DTO vorhanden
 
 /// ───────────────────────────────────────────────────────────────────────────
 /// AnalyzeResult (Legacy – optional genutzt)
@@ -216,6 +224,63 @@ class TurnAnalysis {
 }
 
 /// ───────────────────────────────────────────────────────────────────────────
+/// ClosureData — DTO für closure_full-Antworten (Plan-Punkt 8)
+/// ───────────────────────────────────────────────────────────────────────────
+class ClosureData {
+  final String moodIntroText; // closure.mood_intro.text
+  final String hopeReply; // closure.hope_reply
+  final String closurePrompt; // closure.closure_prompt
+
+  /// Optionale Meta-Felder (können vom Worker kommen)
+  final String? mode; // z. B. "user_end" | "panda_end"
+  final String? reason; // z. B. "insight_high" | "fatigue"
+  final String? tone; // z. B. "hope" | "ritual" | "insight" | "light"
+
+  const ClosureData({
+    required this.moodIntroText,
+    required this.hopeReply,
+    required this.closurePrompt,
+    this.mode,
+    this.reason,
+    this.tone,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'mood_intro': {'text': moodIntroText},
+        'hope_reply': hopeReply,
+        'closure_prompt': closurePrompt,
+        if ((mode ?? '').trim().isNotEmpty) 'mode': mode!.trim(),
+        if ((reason ?? '').trim().isNotEmpty) 'reason': reason!.trim(),
+        if ((tone ?? '').trim().isNotEmpty) 'tone': tone!.trim(),
+      };
+
+  static ClosureData? fromMaybe(dynamic v) {
+    if (v is! Map) return null;
+    final m = Map<String, dynamic>.from(v);
+    Map<String, dynamic>? mm(dynamic x) => _asMap(x);
+
+    final closure =
+        mm(m['closure']) ?? m; // sowohl Top-Level als auch verschachtelt
+    final moodIntro = mm(closure['mood_intro']) ?? const <String, dynamic>{};
+
+    final text = (moodIntro['text'] ?? '').toString();
+    final hope = (closure['hope_reply'] ?? '').toString();
+    final prompt = (closure['closure_prompt'] ?? '').toString();
+
+    if (text.isEmpty && hope.isEmpty && prompt.isEmpty) return null;
+
+    return ClosureData(
+      moodIntroText: text,
+      hopeReply: hope,
+      closurePrompt: prompt,
+      mode: closure['mode']?.toString(),
+      reason: closure['reason']?.toString(),
+      tone: closure['tone']?.toString(),
+    );
+  }
+}
+
+/// ───────────────────────────────────────────────────────────────────────────
 /// ReflectionTurn — Kernantwort eines Workers
 /// ───────────────────────────────────────────────────────────────────────────
 class ReflectionTurn {
@@ -242,6 +307,13 @@ class ReflectionTurn {
   final TurnAnalysis? analysis;
   final List<String> topicSuggestions;
 
+  /// NEU (Plan-Punkt 8): Vorschläge, was lokal gespeichert werden könnte
+  /// (vom Worker geliefert; App entscheidet nach Consent).
+  final List<dynamic> memoriesToSave;
+
+  /// NEU (Plan-Punkt 8): Hinweis des Workers auf Themenwechsel.
+  final String? understandingTopicShift;
+
   const ReflectionTurn({
     required this.outputText,
     required this.mirror,
@@ -258,6 +330,8 @@ class ReflectionTurn {
     this.speechSequence = const <dynamic>[],
     this.analysis,
     this.topicSuggestions = const <String>[],
+    this.memoriesToSave = const <dynamic>[],
+    this.understandingTopicShift,
   });
 
   // Fallback-Fehlertext-Kopie, damit dtos.dart unabhängig bleibt
@@ -266,8 +340,9 @@ class ReflectionTurn {
 
   /// 'high' | 'mild' | 'none' (abgeleitet aus riskFlag)
   // ignore: non_constant_identifier_names
-  String get risk_level =>
-      (riskFlag == 'crisis') ? 'high' : (riskFlag == 'support' ? 'mild' : 'none');
+  String get risk_level => (riskFlag == 'crisis')
+      ? 'high'
+      : (riskFlag == 'support' ? 'mild' : 'none');
 
   /// true, wenn Unterstützung/Alarm signalisiert ist (Legacy-Shim)
   bool get risk => riskFlag == 'support' || riskFlag == 'crisis';
@@ -294,17 +369,29 @@ class ReflectionTurn {
       if ((helperSuggestion ?? '').trim().isNotEmpty)
         'helper_suggestion': helperSuggestion!.trim(),
       'flow': flow?.toJson() ??
-          const ReflectionFlow(recommendEnd: false, suggestBreak: false).toJson(),
+          const ReflectionFlow(recommendEnd: false, suggestBreak: false)
+              .toJson(),
       'session': session.toJson(),
       if (tags.isNotEmpty) 'tags': tags,
       'risk_level': risk_level,
       if (risk) 'risk': true, // Legacy-Flag zusätzlich
       if (questions.isNotEmpty) 'questions': questions,
       if (talk.isNotEmpty) 'talk': talk,
-      if (speechSequence.isNotEmpty) 'speech_sequence': List<dynamic>.from(speechSequence),
+      if (speechSequence.isNotEmpty)
+        'speech_sequence': List<dynamic>.from(speechSequence),
       if (analysis != null) 'analysis': analysis!.toJson(),
       if (topicSuggestions.isNotEmpty) 'topic_suggestions': topicSuggestions,
+      if (memoriesToSave.isNotEmpty)
+        'memories_to_save': List<dynamic>.from(memoriesToSave),
     };
+
+    // understanding.topic_shift nur senden, wenn vorhanden
+    if ((understandingTopicShift ?? '').trim().isNotEmpty) {
+      map['understanding'] = {
+        'topic_shift': understandingTopicShift!.trim(),
+      };
+    }
+
     return map;
   }
 
@@ -402,7 +489,8 @@ class ReflectionTurn {
     }
 
     // risk: erlaubt bool 'risk' (→ support) ODER level-Strings / risk_flag
-    String riskFlagFrom(dynamic levelDyn, dynamic riskDyn, dynamic riskFlagDyn) {
+    String riskFlagFrom(
+        dynamic levelDyn, dynamic riskDyn, dynamic riskFlagDyn) {
       // bool risk=true → 'support'
       if (riskDyn == true) return 'support';
       // direkte Flag-Übernahme (worker kann 'crisis'/'support' senden)
@@ -410,7 +498,8 @@ class ReflectionTurn {
       if (rf == 'crisis' || rf == 'support' || rf == 'none') return rf!;
       // Legacy/Level akzeptieren
       final levelCandidate = levelDyn ?? m['level'];
-      final rl = (levelCandidate ?? riskDyn ?? 'none').toString().toLowerCase().trim();
+      final rl =
+          (levelCandidate ?? riskDyn ?? 'none').toString().toLowerCase().trim();
       if (rl == 'high' || rl == 'crisis') return 'crisis';
       if (rl == 'mild' || rl == 'support' || rl == 'true') return 'support';
       return 'none';
@@ -431,7 +520,25 @@ class ReflectionTurn {
     final tsDedup = _orderedDedup(allTopicSugs);
 
     // speech_sequence (optional)
-    final speechSequence = _listDyn(m['speech_sequence'] ?? m['speechSequence']);
+    final speechSequence =
+        _listDyn(m['speech_sequence'] ?? m['speechSequence']);
+
+    // memories_to_save (Plan-Punkt 8) — tolerant sammeln (Top-Level & plan{})
+    final memoriesToSave = _listDyn(
+      m['memories_to_save'] ??
+          m['memoriesToSave'] ??
+          asMap(m['plan'])?['memories_to_save'] ??
+          asMap(m['plan'])?['memoriesToSave'],
+    );
+
+    // understanding.topic_shift (Plan-Punkt 8)
+    String? understandingTopicShift() {
+      final u = asMap(m['understanding']) ?? const <String, dynamic>{};
+      final s = (u['topic_shift'] ?? u['topicShift'] ?? u['shift'])
+          ?.toString()
+          .trim();
+      return (s == null || s.isEmpty) ? null : s;
+    }
 
     return ReflectionTurn(
       outputText: outputText.isEmpty ? kErrorHintFallback : outputText,
@@ -455,6 +562,8 @@ class ReflectionTurn {
       speechSequence: speechSequence,
       analysis: turnAnalysis,
       topicSuggestions: tsDedup,
+      memoriesToSave: memoriesToSave,
+      understandingTopicShift: understandingTopicShift(),
     );
   }
 }
@@ -525,7 +634,9 @@ class ReflectionFlow {
       sessionTurn: asInt(m['session_turn']),
       talkOnly: m['talk_only'] == true,
       allowReflect: m['allow_reflect'] != false,
-      moodPrompt: m['mood_prompt'] == true || m['moodPrompt'] == true || moodPromptNested(),
+      moodPrompt: m['mood_prompt'] == true ||
+          m['moodPrompt'] == true ||
+          moodPromptNested(),
     );
   }
 }
@@ -544,7 +655,8 @@ class ReflectionSession {
     required this.maxTurns,
   });
 
-  ReflectionSession copyWith({String? threadId, int? turnIndex, int? maxTurns}) =>
+  ReflectionSession copyWith(
+          {String? threadId, int? turnIndex, int? maxTurns}) =>
       ReflectionSession(
         threadId: threadId ?? this.threadId,
         turnIndex: turnIndex ?? this.turnIndex,
@@ -658,7 +770,8 @@ class JourneyEntry {
   final String? moodLabel; // z. B. "Gut" | null
   final String text; // Rohtext (PII wird serverseitig/heuristisch reduziert)
 
-  const JourneyEntry({required this.dateIso, required this.text, this.moodLabel});
+  const JourneyEntry(
+      {required this.dateIso, required this.text, this.moodLabel});
 }
 
 class MoodResponse {

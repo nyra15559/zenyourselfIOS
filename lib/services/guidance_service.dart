@@ -1,4 +1,4 @@
-//[BASELINE]lib/services/guidance_service.dart(Stand: 28.10.) 
+//[BASELINE] lib/services/guidance_service.dart (Stand: 29.10.)
 // lib/services/guidance_service.dart
 //
 // ZenYourself — Guidance / Coaching Service (PANDA-REFLECT-12.7 → v6.4.1)
@@ -9,8 +9,11 @@
 //
 // Neu (v6.4.1):
 // • Kleine Robustheitsverbesserungen beim Risk-Normalizer und Chip-Handling.
-// • Präzisere Telemetrie-Flags in _buildMeta().
+// • Präzisere Telemetrie-Flags in _buildMeta() (optional).
 // • Kommentare/Docs aufgeräumt.
+// • **Signaturen** für start/reflect/next inkl. `memories` + `memoryConsent`,
+//   und automatische Übergabe von `context.memories` bei Consent, falls der
+//   Caller keine Memories explizit übergibt (Phase 1 — On-Device).
 //
 // v6.4.0:
 // • Voller `meta`-Support in start/next/reflect/closure — wird an ApiService
@@ -96,6 +99,24 @@ class GuidanceService {
   Future<bool> health() => ApiService.instance.healthCheck();
 
   // ===========================================================================
+  // Intern: Memories best-effort beschaffen, wenn Consent==true
+  // ===========================================================================
+  Future<dynamic> _autoMemoriesIfConsent({
+    required bool consent,
+    dynamic provided,
+  }) async {
+    if (!consent) return provided;
+    if (provided != null) return provided;
+    try {
+      final map =
+          await mem.MemoryService.instance.buildContextMemories(consent: true);
+      // Nur zurückgeben, wenn tatsächlich Inhalte vorhanden sind
+      if (map is Map && map.isNotEmpty) return map;
+    } catch (_) {/* nie blockieren */}
+    return provided;
+  }
+
+  // ===========================================================================
   // 1) TYPED-API (Primary) — liefert ReflectionTurn (kompatibel zu Controller)
   // ===========================================================================
 
@@ -106,13 +127,18 @@ class GuidanceService {
     String tz = 'Europe/Zurich',
     int maxTurns = 3,
     List<Map<String, String>>? history,
-    dynamic memories,                // optional
-    bool memoryConsent = false,      // optional
-    UserAction? userAction,          // optional
+    dynamic memories, // optional
+    bool memoryConsent = false, // optional
+    UserAction? userAction, // optional
     Map<String, dynamic>? clientContext,
-    Map<String, dynamic>? meta,      // ✅ neu (rückwärtskompatibel)
+    Map<String, dynamic>? meta, // ✅ neu (rückwärtskompatibel)
   }) async {
     final svc = ApiService.instance;
+
+    // On-Device Memories nur dann automatisch anreichern, wenn Consent==true
+    final autoMem = await _autoMemoriesIfConsent(
+        consent: memoryConsent, provided: memories);
+
     try {
       // Neuer ApiService mit `meta`?
       final dyn = svc as dynamic;
@@ -123,7 +149,7 @@ class GuidanceService {
         tz: tz,
         maxTurns: maxTurns,
         history: history,
-        memories: memories,
+        memories: autoMem,
         memoryConsent: memoryConsent,
         userAction: userAction,
         clientContext: clientContext,
@@ -139,7 +165,7 @@ class GuidanceService {
       tz: tz,
       maxTurns: maxTurns,
       history: history,
-      memories: memories,
+      memories: autoMem,
       memoryConsent: memoryConsent,
       userAction: userAction,
       clientContext: clientContext,
@@ -152,13 +178,16 @@ class GuidanceService {
     String locale = 'de',
     String tz = 'Europe/Zurich',
     List<Map<String, String>>? history,
-    dynamic memories,                // optional
-    bool memoryConsent = false,      // optional
+    dynamic memories, // optional
+    bool memoryConsent = false, // optional
     UserAction? userAction,
     Map<String, dynamic>? clientContext,
-    Map<String, dynamic>? meta,      // ✅ neu
+    Map<String, dynamic>? meta, // ✅ neu
   }) async {
     final svc = ApiService.instance;
+    final autoMem = await _autoMemoriesIfConsent(
+        consent: memoryConsent, provided: memories);
+
     try {
       final dyn = svc as dynamic;
       final Future<ReflectionTurn>? fut = dyn.reflectFull?.call(
@@ -167,7 +196,7 @@ class GuidanceService {
         locale: locale,
         tz: tz,
         history: history,
-        memories: memories,
+        memories: autoMem,
         memoryConsent: memoryConsent,
         userAction: userAction,
         clientContext: clientContext,
@@ -181,7 +210,7 @@ class GuidanceService {
       locale: locale,
       tz: tz,
       history: history,
-      memories: memories,
+      memories: autoMem,
       memoryConsent: memoryConsent,
       userAction: userAction,
       clientContext: clientContext,
@@ -194,13 +223,17 @@ class GuidanceService {
     String locale = 'de',
     String tz = 'Europe/Zurich',
     List<Map<String, String>>? history,
-    dynamic memories,                // optional
-    bool? memoryConsent,             // optional
+    dynamic memories, // optional
+    bool? memoryConsent, // optional
     UserAction? userAction,
     Map<String, dynamic>? clientContext,
-    Map<String, dynamic>? meta,      // ✅ neu
+    Map<String, dynamic>? meta, // ✅ neu
   }) async {
     final svc = ApiService.instance;
+    final consent = memoryConsent ?? false;
+    final autoMem =
+        await _autoMemoriesIfConsent(consent: consent, provided: memories);
+
     try {
       final dyn = svc as dynamic;
       final Future<ReflectionTurn>? fut = dyn.nextTurnFull?.call(
@@ -209,7 +242,7 @@ class GuidanceService {
         locale: locale,
         tz: tz,
         history: history,
-        memories: memories,
+        memories: autoMem,
         memoryConsent: memoryConsent,
         userAction: userAction,
         clientContext: clientContext,
@@ -223,7 +256,7 @@ class GuidanceService {
       locale: locale,
       tz: tz,
       history: history,
-      memories: memories,
+      memories: autoMem,
       memoryConsent: memoryConsent,
       userAction: userAction,
       clientContext: clientContext,
@@ -286,9 +319,9 @@ class GuidanceService {
     int maxTurns = 3,
     List<Map<String, String>>? history,
     Map<String, dynamic>? clientContext,
-    dynamic memories,           // optional
+    dynamic memories, // optional
     bool memoryConsent = false, // optional
-    UserAction? userAction,     // optional
+    UserAction? userAction, // optional
     Map<String, dynamic>? meta, // ✅ neu
   }) async {
     final t = await startSessionFull(
@@ -314,11 +347,11 @@ class GuidanceService {
     String tz = 'Europe/Zurich',
     int maxTurns = 3,
     List<Map<String, String>>? history,
-    dynamic memories,                // optional
-    bool memoryConsent = false,      // optional
+    dynamic memories, // optional
+    bool memoryConsent = false, // optional
     Map<String, dynamic>? clientContext,
     UserAction? userAction,
-    Map<String, dynamic>? meta,      // ✅ neu
+    Map<String, dynamic>? meta, // ✅ neu
   }) async {
     final t = await startSessionFull(
       text: text,
@@ -342,8 +375,8 @@ class GuidanceService {
     String locale = 'de',
     String tz = 'Europe/Zurich',
     List<Map<String, String>>? history,
-    dynamic memories,           // optional
-    bool? memoryConsent,        // optional
+    dynamic memories, // optional
+    bool? memoryConsent, // optional
     Map<String, dynamic>? clientContext,
     UserAction? userAction,
     Map<String, dynamic>? meta, // ✅ neu
@@ -369,11 +402,11 @@ class GuidanceService {
     String locale = 'de',
     String tz = 'Europe/Zurich',
     List<Map<String, String>>? history,
-    dynamic memories,                // optional
-    bool memoryConsent = false,      // optional
+    dynamic memories, // optional
+    bool memoryConsent = false, // optional
     Map<String, dynamic>? clientContext,
     UserAction? userAction,
-    Map<String, dynamic>? meta,      // ✅ neu
+    Map<String, dynamic>? meta, // ✅ neu
   }) async {
     final t = await reflectFull(
       session: session,
@@ -441,6 +474,8 @@ class GuidanceService {
       Map<String, dynamic> res;
       try {
         final dyn = ApiService.instance as dynamic;
+        // Hinweis: Einige ApiService-Versionen akzeptieren (noch) keine memories in closureFull.
+        // Wir geben nur `meta` mit, Memories werden bereits im Turn verarbeitet.
         final Future<Map<String, dynamic>>? fut = dyn.closureFull?.call(
           session: session,
           answer: answer,
@@ -695,12 +730,18 @@ class GuidanceService {
     var text = mirror.trim();
 
     final patterns = <RegExp>[
-      RegExp(r'^\s*Unten\s+findest\s+du\s+Antwort[-\s]?Chips.*$', caseSensitive: false, multiLine: true),
-      RegExp(r'^\s*Unter\s+dem\s+Eingabefeld\s+findest\s+du\s+Antwort.*$', caseSensitive: false, multiLine: true),
-      RegExp(r'^\s*Wähle\s+einen\s+Antwort[-\s]?Chip.*$', caseSensitive: false, multiLine: true),
-      RegExp(r'you\s+can\s+use\s+the\s+answer\s+chips.*', caseSensitive: false, dotAll: true),
-      RegExp(r"below\s+you'll\s+find\s+answer\s+chips.*", caseSensitive: false, dotAll: true),
-      RegExp(r'antworte\s+in\s+\d+\s*(?:bis|–|-)\s*\d+\s*sätz', caseSensitive: false, dotAll: true),
+      RegExp(r'^\s*Unten\s+findest\s+du\s+Antwort[-\s]?Chips.*$',
+          caseSensitive: false, multiLine: true),
+      RegExp(r'^\s*Unter\s+dem\s+Eingabefeld\s+findest\s+du\s+Antwort.*$',
+          caseSensitive: false, multiLine: true),
+      RegExp(r'^\s*Wähle\s+einen\s+Antwort[-\s]?Chip.*$',
+          caseSensitive: false, multiLine: true),
+      RegExp(r'you\s+can\s+use\s+the\s+answer\s+chips.*',
+          caseSensitive: false, dotAll: true),
+      RegExp(r"below\s+you'll\s+find\s+answer\s+chips.*",
+          caseSensitive: false, dotAll: true),
+      RegExp(r'antworte\s+in\s+\d+\s*(?:bis|–|-)\s*\d+\s*sätz',
+          caseSensitive: false, dotAll: true),
     ];
     for (final p in patterns) {
       text = text.replaceAll(p, '').trim();
@@ -713,8 +754,9 @@ class GuidanceService {
   }
 
   Map<String, dynamic> _normalizeClosureResponse(Map<String, dynamic> src) {
-    Map<String, dynamic> m(dynamic x) =>
-        (x is Map<String, dynamic>) ? x : (x is Map ? Map<String, dynamic>.from(x) : <String, dynamic>{});
+    Map<String, dynamic> m(dynamic x) => (x is Map<String, dynamic>)
+        ? x
+        : (x is Map ? Map<String, dynamic>.from(x) : <String, dynamic>{});
 
     final flow = m(src['flow']);
     final closure = m(src['closure']);
@@ -724,7 +766,8 @@ class GuidanceService {
       ...src,
       'flow': {
         ...flow,
-        'mood_prompt': flow['mood_prompt'] == true || flow['recommend_end'] == true,
+        'mood_prompt':
+            flow['mood_prompt'] == true || flow['recommend_end'] == true,
         'recommend_end': flow['recommend_end'] == true,
       },
       'closure': {
@@ -749,7 +792,7 @@ class GuidanceService {
       final s = Map<String, dynamic>.from(src);
       final lvl = asStr(s['risk_level']);
       final legacyLvl = asStr(s['level']); // manche Server
-      final flag = asStr(s['risk_flag']);  // support|crisis
+      final flag = asStr(s['risk_flag']); // support|crisis
       final boolFlag = s['risk'] == true;
 
       // vorrangig Strings mappen
@@ -759,7 +802,8 @@ class GuidanceService {
         return 'none';
       }
 
-      final candidate = lvl.isNotEmpty ? lvl : (legacyLvl.isNotEmpty ? legacyLvl : flag);
+      final candidate =
+          lvl.isNotEmpty ? lvl : (legacyLvl.isNotEmpty ? legacyLvl : flag);
       level = mapLevel(candidate);
 
       if (level == 'none' && boolFlag) level = 'mild'; // konservativ
@@ -773,13 +817,14 @@ class GuidanceService {
   // Normalisierung → UI-freundliches JSON
   // ---------------------------------------------------------------------------
   Json _turnToJson(ReflectionTurn t) {
-    final ReflectionFlow flow =
-        t.flow ?? const ReflectionFlow(recommendEnd: false, suggestBreak: false);
+    final ReflectionFlow flow = t.flow ??
+        const ReflectionFlow(recommendEnd: false, suggestBreak: false);
 
     final flowJson = flow.toJson();
     final flowOut = <String, dynamic>{
       ...flowJson,
-      'mood_prompt': (flowJson['mood_prompt'] == true) || (flow.recommendEnd == true),
+      'mood_prompt':
+          (flowJson['mood_prompt'] == true) || (flow.recommendEnd == true),
       'recommend_end': flow.recommendEnd == true,
     };
 
@@ -806,8 +851,10 @@ class GuidanceService {
 
     // Chips (Display & Insert) — mind. 2 sicherstellen
     final List<String> answerHelpersDisplay = _extractAnswerHelpers(t);
-    final List<String> answerHelpersInsert =
-        answerHelpersDisplay.map(_cleanChipForInsert).where((e) => e.isNotEmpty).toList(growable: false);
+    final List<String> answerHelpersInsert = answerHelpersDisplay
+        .map(_cleanChipForInsert)
+        .where((e) => e.isNotEmpty)
+        .toList(growable: false);
 
     // Chip-Typ nur als Stil-Hinweis
     final String chipType = _inferChipType(primaryQuestion, t.tags);
@@ -861,7 +908,8 @@ class GuidanceService {
       map['answer_helpers_insert'] = answerHelpersInsert;
       map['chip_set_id'] = chipSetId;
     }
-    if (t.outputText.trim().isNotEmpty && t.outputText != ApiService.errorHint) {
+    if (t.outputText.trim().isNotEmpty &&
+        t.outputText != ApiService.errorHint) {
       map['output_text'] = t.outputText;
     }
     if (t.talk.isNotEmpty) {
@@ -892,10 +940,12 @@ class GuidanceService {
   // Nur Stil-Hinweis
   String _inferChipType(String? question, List<String> tags) {
     final q = (question ?? '').toLowerCase();
-    if (q.contains('kleine option') || (q.contains('kurz') && q.contains('ausprobieren'))) {
+    if (q.contains('kleine option') ||
+        (q.contains('kurz') && q.contains('ausprobieren'))) {
       return 'tips';
     }
-    if (tags.any((t) => t.toLowerCase().contains('tip') || t.toLowerCase().contains('übung'))) {
+    if (tags.any((t) =>
+        t.toLowerCase().contains('tip') || t.toLowerCase().contains('übung'))) {
       return 'tips';
     }
     return 'reflect';

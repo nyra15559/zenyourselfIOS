@@ -1,4 +1,5 @@
 // lib/widgets/panda_mood_picker.dart
+import '../shared/zen_style.dart';
 //
 // PandaMoodPicker — Bottom-Sheet (kompakt, a11y-first, color-blind-safe)
 // Update: 2025-10-22
@@ -41,8 +42,10 @@ class _PandaMoodPickerState extends State<PandaMoodPicker> {
   Future<List<PandaMood>> _loadMoods() async {
     if (kDebugMode) debugPrint('[PandaMoodPicker] Lade Stimmungen …');
     try {
-      final list = await PandaMood.loadAll().timeout(const Duration(seconds: 5));
-      if (kDebugMode) debugPrint('[PandaMoodPicker] ${list.length} Stimmungen geladen');
+      final list =
+          await PandaMood.loadAll().timeout(const Duration(seconds: 5));
+      if (kDebugMode)
+        debugPrint('[PandaMoodPicker] ${list.length} Stimmungen geladen');
       return list;
     } on TimeoutException {
       if (kDebugMode) debugPrint('[PandaMoodPicker] Timeout beim Laden');
@@ -93,7 +96,8 @@ class _PandaMoodPickerState extends State<PandaMoodPicker> {
               crossAxisCount: cols,
               crossAxisSpacing: 12,
               mainAxisSpacing: 12,
-              childAspectRatio: 0.95, // etwas höher als breit – Platz fürs Label
+              childAspectRatio:
+                  0.95, // etwas höher als breit – Platz fürs Label
             ),
             itemBuilder: (context, i) {
               final m = moods[i];
@@ -182,8 +186,8 @@ class _MoodTile extends StatelessWidget {
               child: Image.asset(
                 mood.asset,
                 fit: BoxFit.contain,
-                errorBuilder: (_, __, ___) =>
-                    Icon(Icons.emoji_emotions, size: icon, color: theme.colorScheme.primary),
+                errorBuilder: (_, __, ___) => Icon(Icons.emoji_emotions,
+                    size: icon, color: theme.colorScheme.primary),
               ),
             ),
             const SizedBox(height: 8),
@@ -219,7 +223,7 @@ Future<PandaMood?> showPandaMoodPicker(
     isScrollControlled: true,
     useSafeArea: true,
     showDragHandle: true, // falls verfügbar
-    barrierColor: theme.colorScheme.scrim.withValues(alpha: .35),
+    barrierColor: theme.colorScheme.scrim.withValue(alpha: .35),
     backgroundColor: theme.colorScheme.surface,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
@@ -231,10 +235,12 @@ Future<PandaMood?> showPandaMoodPicker(
       // Maximal 60% der Höhe, damit nichts erschlägt.
       final rawMedia = MediaQuery.of(sheetContext);
       final maxHeight = rawMedia.size.height * 0.60;
-      final clamped = rawMedia.textScaler.clamp(maxScaleFactor: 1.20, minScaleFactor: 0.90);
+      final clamped =
+          rawMedia.textScaler.clamp(maxScaleFactor: 1.20, minScaleFactor: 0.90);
 
       if (kDebugMode) {
-        debugPrint('[PandaMoodPicker] Sheet geöffnet (maxHeight=${maxHeight.toStringAsFixed(0)}).');
+        debugPrint(
+            '[PandaMoodPicker] Sheet geöffnet (maxHeight=${maxHeight.toStringAsFixed(0)}).');
       }
 
       void safePop([PandaMood? value]) {
@@ -312,7 +318,8 @@ Future<PandaMood?> showPandaMoodPicker(
   return fut.then((value) {
     if (value == null) {
       onDismissed?.call();
-      if (kDebugMode) debugPrint('[PandaMoodPicker] Sheet ohne Auswahl geschlossen.');
+      if (kDebugMode)
+        debugPrint('[PandaMoodPicker] Sheet ohne Auswahl geschlossen.');
     } else {
       if (kDebugMode) debugPrint('[PandaMoodPicker] Gewählt: ${value.labelDe}');
     }

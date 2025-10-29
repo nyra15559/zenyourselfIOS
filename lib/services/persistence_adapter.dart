@@ -106,13 +106,11 @@ class LocalStorageService {
 
   static Future<void> setBool(String key, bool value) =>
       _backend.setBool(key, value);
-  static Future<bool?> getBool(String key) =>
-      _backend.getBool(key);
+  static Future<bool?> getBool(String key) => _backend.getBool(key);
 
   static Future<void> setString(String key, String value) =>
       _backend.setString(key, value);
-  static Future<String?> getString(String key) =>
-      _backend.getString(key);
+  static Future<String?> getString(String key) => _backend.getString(key);
 
   static Future<void> remove(String key) => _backend.remove(key);
 }
@@ -146,17 +144,14 @@ class KVStore {
   Future<void> setBool(String key, bool value) =>
       LocalStorageService.setBool(key, value);
 
-  Future<bool?> getBool(String key) =>
-      LocalStorageService.getBool(key);
+  Future<bool?> getBool(String key) => LocalStorageService.getBool(key);
 
   Future<void> setString(String key, String value) =>
       LocalStorageService.setString(key, value);
 
-  Future<String?> getString(String key) =>
-      LocalStorageService.getString(key);
+  Future<String?> getString(String key) => LocalStorageService.getString(key);
 
-  Future<void> remove(String key) =>
-      LocalStorageService.remove(key);
+  Future<void> remove(String key) => LocalStorageService.remove(key);
 }
 
 /// ==============================
@@ -230,7 +225,8 @@ class FunctionsPersistenceAdapter extends PersistenceAdapter {
 class MemoryPersistenceAdapter extends PersistenceAdapter {
   List<jm.JournalEntry> _entries;
   MemoryPersistenceAdapter([Iterable<jm.JournalEntry>? seed])
-      : _entries = List<jm.JournalEntry>.from(seed ?? const <jm.JournalEntry>[]);
+      : _entries =
+            List<jm.JournalEntry>.from(seed ?? const <jm.JournalEntry>[]);
 
   @override
   Future<List<jm.JournalEntry>> load() async =>

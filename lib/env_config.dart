@@ -3,22 +3,24 @@
 // Zentrale Umgebungs-Konfiguration (web-safe).
 // Reihenfolge: --dart-define → Runtime-Env (nur IO) → Defaults.
 
-import 'env_runtime_stub.dart'
-  if (dart.library.io) 'env_runtime_io.dart';
+import 'env_runtime_stub.dart' if (dart.library.io) 'env_runtime_io.dart';
 
 class ZenEnv {
   // 1) Compile-time Flags
-  static const _dEnabled = String.fromEnvironment('ZEN_API_ENABLED', defaultValue: '');
-  static const _dUrl     = String.fromEnvironment('ZEN_API_URL',     defaultValue: '');
-  static const _dToken   = String.fromEnvironment('ZEN_APP_TOKEN',   defaultValue: '');
+  static const _dEnabled =
+      String.fromEnvironment('ZEN_API_ENABLED', defaultValue: '');
+  static const _dUrl = String.fromEnvironment('ZEN_API_URL', defaultValue: '');
+  static const _dToken =
+      String.fromEnvironment('ZEN_APP_TOKEN', defaultValue: '');
 
   // 2) Runtime (nur IO-Targets; auf Web immer null)
   static String? _env(String key) => EnvRuntime.read(key);
 
   // 3) Defaults
   static const _defaultEnabled = true;
-  static const _defaultUrl     = 'https://nameless-breeze-87fb.edcvaultcom.workers.dev';
-  static const _defaultToken   =
+  static const _defaultUrl =
+      'https://nameless-breeze-87fb.edcvaultcom.workers.dev';
+  static const _defaultToken =
       'daded2f03bd67dd25d8434272c7095c234c80f9d15daefb253418b7a779244aa';
 
   // Helper
@@ -26,6 +28,7 @@ class ZenEnv {
     final v = s.toLowerCase().trim();
     return v == 'true' || v == '1' || v == 'yes' || v == 'y';
   }
+
   static String _normalizeUrl(String s) =>
       s.endsWith('/') ? s.substring(0, s.length - 1) : s;
 

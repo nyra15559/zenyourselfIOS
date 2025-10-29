@@ -1,14 +1,14 @@
-// lib/core/models/insight_models.dart
+// [BASELINE] lib/core/models/insight_models.dart — v6.3.1 (Stand: 29.10.2025)
 //
 // Insight-Modelle (Facet, MoodPair, InsightScore)
 // ------------------------------------------------
 // • Kleine, immutable Value-Types ohne externe Abhängigkeiten (außer foundation)
 // • Tolerante Factory-Methoden (fromWorker/fromMap), defensive Defaults
-// • Bewahren strikte Backwards-Kompatibilität zu bestehenden Call-Sites
+// • Strikte Backwards-Kompatibilität zu bestehenden Call-Sites
 // • Utilitys (copyWith, toString) für bequemere Nutzung
 //
 // Kompat-Hinweise:
-// - Facet.fromWorker akzeptiert String ODER Map {key|id|label|name, hits?}
+// - Facet.fromWorker akzeptiert String ODER Map {key|id|label|name|title, hits?}
 // - MoodPair.fromWorker akzeptiert {mental|icon, physical|body|somatic}
 // - InsightScore.as0to4() normiert heuristisch (0..1 oder 0..100 → Quartile)
 
@@ -34,7 +34,7 @@ class Facet {
   /// Tolerant gegen verschiedene Worker-Schemata.
   /// Akzeptiert:
   /// - String → {key: s, label: s}
-  /// - Map → {key|id|label|name, hits?}
+  /// - Map → {key|id|label|name|title, hits?}
   factory Facet.fromWorker(dynamic raw) {
     if (raw is String) {
       final s = raw.trim();
@@ -43,7 +43,10 @@ class Facet {
     if (raw is Map) {
       final m = Map<String, dynamic>.from(raw);
       String pickKey() {
-        final k = (m['key'] ?? m['id'] ?? m['label'] ?? m['name'] ?? '').toString().trim();
+        final k =
+            (m['key'] ?? m['id'] ?? m['label'] ?? m['name'] ?? m['title'] ?? '')
+                .toString()
+                .trim();
         if (k.isNotEmpty) return k;
         final l = (m['label'] ?? m['title'] ?? '').toString().trim();
         return l.isNotEmpty ? l : '';
@@ -66,7 +69,9 @@ class Facet {
   factory Facet.fromMap(Map<String, dynamic> m) => Facet(
         key: (m['key'] ?? '').toString(),
         label: (m['label'] ?? m['key'] ?? '').toString(),
-        hits: (m['hits'] is num) ? (m['hits'] as num).toInt().clamp(1, 1 << 31) : 1,
+        hits: (m['hits'] is num)
+            ? (m['hits'] as num).toInt().clamp(1, 1 << 31)
+            : 1,
       );
 
   /// V2-Map (snake_case) Ausgabe.
@@ -162,8 +167,8 @@ class MoodPair {
         'physical': physical,
       };
 
-  MoodPair copyWith({int? mental, int? physical}) =>
-      MoodPair(mental: mental ?? this.mental, physical: physical ?? this.physical);
+  MoodPair copyWith({int? mental, int? physical}) => MoodPair(
+      mental: mental ?? this.mental, physical: physical ?? this.physical);
 
   @override
   String toString() => 'MoodPair(mental:$mental, physical:$physical)';
@@ -228,8 +233,12 @@ class InsightScore {
       final m = Map<String, dynamic>.from(raw);
       final val = (m['value'] ?? m['score'] ?? m['v']);
       final base = m['baseline'];
-      final v = (val is num) ? val.toDouble() : double.tryParse(val?.toString() ?? '') ?? 0.0;
-      final b = (base is num) ? base.toDouble() : double.tryParse(base?.toString() ?? '');
+      final v = (val is num)
+          ? val.toDouble()
+          : double.tryParse(val?.toString() ?? '') ?? 0.0;
+      final b = (base is num)
+          ? base.toDouble()
+          : double.tryParse(base?.toString() ?? '');
       return InsightScore(v, baseline: b);
     }
     return const InsightScore(0.0);
@@ -253,7 +262,8 @@ class InsightScore {
       InsightScore(value ?? this.value, baseline: baseline ?? this.baseline);
 
   @override
-  String toString() => 'InsightScore(value:$value, baseline:${baseline ?? '∅'})';
+  String toString() =>
+      'InsightScore(value:$value, baseline:${baseline ?? '∅'})';
 
   @override
   bool operator ==(Object other) {

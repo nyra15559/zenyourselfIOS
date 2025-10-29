@@ -1,4 +1,5 @@
 // lib/features/accessibility/large_text_mode.dart
+import '../../shared/zen_style.dart';
 //
 // LargeTextMode — sichere, a11y-freundliche Textskalierung
 // --------------------------------------------------------
@@ -87,8 +88,7 @@ class LargeTextModeSwitcher extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Tooltip(
-          message:
-              "Aktiviere große Schrift, um Texte leichter zu lesen.\n"
+          message: "Aktiviere große Schrift, um Texte leichter zu lesen.\n"
               "Wir respektieren immer deine System-Einstellungen.",
           child: A11yText(
             "Textgröße",
@@ -101,8 +101,10 @@ class LargeTextModeSwitcher extends StatelessWidget {
           spacing: 8,
           runSpacing: 8,
           children: [
-            _scaleBtn(context, provider, LargeTextScale.system, "System", accent),
-            _scaleBtn(context, provider, LargeTextScale.normal, "Normal", accent),
+            _scaleBtn(
+                context, provider, LargeTextScale.system, "System", accent),
+            _scaleBtn(
+                context, provider, LargeTextScale.normal, "Normal", accent),
             _scaleBtn(context, provider, LargeTextScale.large, "Groß", accent),
             _scaleBtn(context, provider, LargeTextScale.xl, "XL", accent),
           ],
@@ -126,9 +128,10 @@ class LargeTextModeSwitcher extends StatelessWidget {
       label: "Textgröße $label${isActive ? ' (aktiv)' : ''}",
       child: OutlinedButton(
         style: OutlinedButton.styleFrom(
-          backgroundColor: isActive ? accent.withValues(alpha: 0.14) : null,
+          backgroundColor: isActive ? accent.withValue(alpha: 0.14) : null,
           side: BorderSide(color: isActive ? accent : Colors.grey.shade300),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         ),
         onPressed: () {
           HapticFeedback.selectionClick();
@@ -136,7 +139,8 @@ class LargeTextModeSwitcher extends StatelessWidget {
         },
         child: Text(
           label,
-          style: TextStyle(fontWeight: isActive ? FontWeight.bold : FontWeight.normal),
+          style: TextStyle(
+              fontWeight: isActive ? FontWeight.bold : FontWeight.normal),
         ),
       ),
     );

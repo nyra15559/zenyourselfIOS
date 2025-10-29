@@ -1,4 +1,4 @@
-//[BASELINE]lib/features/reflection/reflection_screen.dart(Stand: 28.10.) 
+// [BASELINE] lib/features/reflection/reflection_screen.dart (Stand: 29.10.)
 // lib/features/reflection/reflection_screen.dart
 //
 // ReflectionScreen — Panda v3.24.3 (Oxford level; CH risk actions; no auto-nav)
@@ -16,6 +16,9 @@
 // • Mini-Einbau Name-Lernen (lokal, on-device):
 //   – Beim Start der Runde:     unawaited(MemoryService.instance.learnNameFromText(userText));
 //   – Beim Fortsetzen/Antwort:  unawaited(MemoryService.instance.learnNameFromText(userAnswer));
+// • Phase-9 Hooks (unsichtbar, on-device):
+//   – Vor Worker-Call:  unawaited(MemoryService.saveUserTurn(...))
+//   – Nach Worker-Turn: unawaited(MemoryService.savePandaTurn(...)); unawaited(MemoryService.saveFromWorker(turn))
 // • Fallbacks bleiben erhalten: Wenn die API keine `meta`/`memories`/`memoryConsent`
 //   kennt, wird automatisch auf die alte Signatur zurückgefallen (NoSuchMethodError).
 // • Fixes: DTO-Session verwenden, PandaMood-Score aus valence → 0..4,
@@ -65,7 +68,8 @@ import '../../services/core/api_service.dart'; // Mood speichern
 
 // Memory-Layer
 import '../../core/memory/memory_service.dart';
-import '../../core/memory/memory_store.dart' show MemoryStore; // pickFor()/enabled (dyn tolerant)
+import '../../core/memory/memory_store.dart'
+    show MemoryStore; // pickFor()/enabled (dyn tolerant)
 
 // CH Hotlines (Call-Buttons) + Launcher-Utilities
 import '../../widgets/hotline_widget.dart'; // SwissHotlineCard / Section
@@ -285,7 +289,8 @@ class _ReflectionScreenState extends State<ReflectionScreen>
         if (userText != null) 'user_text': userText,
         if (userAnswer != null) 'user_answer': userAnswer,
         if (mode != null) 'mode': mode,
-        'initial_seed_present': (widget.initialUserText ?? '').trim().isNotEmpty,
+        'initial_seed_present':
+            (widget.initialUserText ?? '').trim().isNotEmpty,
       },
       'safety': {
         'region': 'CH',
@@ -321,8 +326,8 @@ class _ReflectionScreenState extends State<ReflectionScreen>
   void initState() {
     super.initState();
 
-    _fadeSlideCtrl =
-        AnimationController(vsync: this, duration: _animShort)..value = 1.0;
+    _fadeSlideCtrl = AnimationController(vsync: this, duration: _animShort)
+      ..value = 1.0;
 
     _attachSttEngine();
 
@@ -389,9 +394,8 @@ class _ReflectionScreenState extends State<ReflectionScreen>
 
     final bool isEnter = e.logicalKey == LogicalKeyboardKey.enter ||
         e.logicalKey == LogicalKeyboardKey.numpadEnter;
-    final bool withCtrlOrCmd =
-        HardwareKeyboard.instance.isControlPressed ||
-            HardwareKeyboard.instance.isMetaPressed;
+    final bool withCtrlOrCmd = HardwareKeyboard.instance.isControlPressed ||
+        HardwareKeyboard.instance.isMetaPressed;
     final bool withShift = HardwareKeyboard.instance.isShiftPressed;
 
     if (withCtrlOrCmd && isEnter && !loading) {
@@ -457,6 +461,18 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       // NEU: lokales Namenslernen aus der Antwort (best-effort)
       unawaited(MemoryService.instance.learnNameFromText(text));
 
+      // Phase-9: User-Turn speichern (unsichtbar)
+      unawaited(() async {
+        try {
+          final dyn = MemoryService.instance as dynamic;
+          await dyn.saveUserTurn?.call(text, {
+            'screen': 'reflection',
+            'mode': 'answer',
+            'ts': DateTime.now().toUtc().toIso8601String(),
+          });
+        } catch (_) {}
+      }());
+
       unawaited(
         _continueReflectionFromWorker(round: _current!, userAnswer: text),
       );
@@ -496,13 +512,16 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       final id = (s['id'] ?? s['thread_id'] ?? '').toString();
       final turnIdx = (s['turn'] is num)
           ? (s['turn'] as num).toInt()
-          : (s['turn_index'] is num) ? (s['turn_index'] as num).toInt() : 0;
+          : (s['turn_index'] is num)
+              ? (s['turn_index'] as num).toInt()
+              : 0;
       final maxTurns =
           (s['max_turns'] is num) ? (s['max_turns'] as num).toInt() : 3;
 
       return ReflectionSession(
-        threadId:
-            id.isNotEmpty ? id : 'local_${DateTime.now().millisecondsSinceEpoch}',
+        threadId: id.isNotEmpty
+            ? id
+            : 'local_${DateTime.now().millisecondsSinceEpoch}',
         turnIndex: turnIdx,
         maxTurns: maxTurns,
       );
@@ -532,7 +551,8 @@ class _ReflectionScreenState extends State<ReflectionScreen>
           'facets_count': keys.length,
           'consent': consent,
         };
-        return _PickedMem(payload: res, consent: consent, keys: keys, metaSafe: metaSafe);
+        return _PickedMem(
+            payload: res, consent: consent, keys: keys, metaSafe: metaSafe);
       }
     } catch (_) {
       // ignore
@@ -548,11 +568,14 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       if (hint != null) {
         final payload = <String, dynamic>{
           if ((hint.facets as List?)?.isNotEmpty ?? false)
-            'recent_facets': List<String>.from((hint.facets as List).map((e) => e.toString())),
+            'recent_facets': List<String>.from(
+                (hint.facets as List).map((e) => e.toString())),
           if ((hint.tags as List?)?.isNotEmpty ?? false)
-            'recent_tags': List<String>.from((hint.tags as List).map((e) => e.toString())),
+            'recent_tags':
+                List<String>.from((hint.tags as List).map((e) => e.toString())),
           if ((hint.topics as List?)?.isNotEmpty ?? false)
-            'last_themes': List<String>.from((hint.topics as List).map((e) => e.toString())),
+            'last_themes': List<String>.from(
+                (hint.topics as List).map((e) => e.toString())),
         };
         final keys = _extractFacetKeys(payload);
         return _PickedMem(
@@ -582,7 +605,8 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       if (v is List) {
         for (final e in v) {
           if (e is Map) {
-            addStr((e['label'] ?? e['key'] ?? e['topic'] ?? e['tag'] ?? '').toString());
+            addStr((e['label'] ?? e['key'] ?? e['topic'] ?? e['tag'] ?? '')
+                .toString());
           } else {
             addStr(e?.toString());
           }
@@ -592,14 +616,14 @@ class _ReflectionScreenState extends State<ReflectionScreen>
 
     if (src is Map) {
       // v2 camelCase Objects
-      addList(src['contextFacets']);   // [{label,...}]
-      addList(src['facets']);          // [String]
+      addList(src['contextFacets']); // [{label,...}]
+      addList(src['facets']); // [String]
       // snake_case Context-Hint
-      addList(src['context_facets']);  // [{label,...}] or [String]
-      addList(src['recent_facets']);   // [String]
-      addList(src['recent_tags']);     // [String]
-      addList(src['last_themes']);     // [String]
-      addList(src['recent_topics']);   // [String]
+      addList(src['context_facets']); // [{label,...}] or [String]
+      addList(src['recent_facets']); // [String]
+      addList(src['recent_tags']); // [String]
+      addList(src['last_themes']); // [String]
+      addList(src['recent_topics']); // [String]
     }
 
     return out.toList(growable: false);
@@ -616,7 +640,8 @@ class _ReflectionScreenState extends State<ReflectionScreen>
         .map((e) => e.toLowerCase()); // normalized UI-Facetten
 
     final q = _coerceQuestion(turn).toLowerCase();
-    final qTokens = q.split(RegExp(r'[^a-zäöüß0-9]+')).where((w) => w.length >= 3);
+    final qTokens =
+        q.split(RegExp(r'[^a-zäöüß0-9]+')).where((w) => w.length >= 3);
 
     final set = {...tags, ...ctx, ...facs, ...qTokens};
     return set.any(mem.contains);
@@ -655,8 +680,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     if (!_hasInsight(turn)) return;
     if (!_hasTopicOverlap(picked, turn)) return;
 
-    final double? score =
-        _safeNum(turn, ['insight_score']) ??
+    final double? score = _safeNum(turn, ['insight_score']) ??
         _safeNum(turn, ['flow', 'insight_score']) ??
         (() {
           try {
@@ -701,6 +725,18 @@ class _ReflectionScreenState extends State<ReflectionScreen>
 
     // NEU (Mini-Einbau): Name aus dem User-Text lokal lernen (best-effort)
     unawaited(MemoryService.instance.learnNameFromText(userText));
+
+    // Phase-9: User-Turn speichern (unsichtbar)
+    unawaited(() async {
+      try {
+        final dyn = MemoryService.instance as dynamic;
+        await dyn.saveUserTurn?.call(userText, {
+          'screen': 'reflection',
+          'mode': mode,
+          'ts': DateTime.now().toUtc().toIso8601String(),
+        });
+      } catch (_) {}
+    }());
 
     // NEU: Memories picken (best-effort)
     final _PickedMem? picked = await _pickMemoriesFor(userText);
@@ -755,7 +791,8 @@ class _ReflectionScreenState extends State<ReflectionScreen>
         } on NoSuchMethodError {
           // 3) Ganz alter Fallback → ohne Extras
           turn = await GuidanceService.instance
-              .startSessionFull(text: userText, locale: 'de', tz: 'Europe/Zurich')
+              .startSessionFull(
+                  text: userText, locale: 'de', tz: 'Europe/Zurich')
               .timeout(_netTimeout);
         }
       } on TimeoutException {
@@ -776,8 +813,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
         return;
       }
 
-      final bool flagMoodPrompt =
-          _safeBool(turn, ['mood', 'prompt']) ||
+      final bool flagMoodPrompt = _safeBool(turn, ['mood', 'prompt']) ||
           _safeBool(turn, ['flow', 'mood_prompt']);
       final bool flagRecommendEnd = _safeBool(turn, ['flow', 'recommend_end']);
 
@@ -790,12 +826,30 @@ class _ReflectionScreenState extends State<ReflectionScreen>
         round.allowClosure = wantClosure;
 
         final hasHelpers = step.followups.isNotEmpty;
-        _chipMode =
-            (step.expectsAnswer || hasHelpers) ? _ChipMode.answer : _ChipMode.none;
+        _chipMode = (step.expectsAnswer || hasHelpers)
+            ? _ChipMode.answer
+            : _ChipMode.none;
       });
 
+      // Phase-9 (nach Turn): Panda-Output + memories_to_save persistieren (best-effort)
+      unawaited(() async {
+        try {
+          final mirror = _coerceMirror(turn);
+          final q = _coerceQuestion(turn);
+          final out = (q.isNotEmpty) ? ('$mirror\n\n$q') : mirror;
+          final dyn = MemoryService.instance as dynamic;
+          await dyn.savePandaTurn?.call(out, {
+            'screen': 'reflection',
+            'session': _session?.threadId,
+            'ts': DateTime.now().toUtc().toIso8601String(),
+          });
+          await dyn.saveFromWorker?.call(turn);
+        } catch (_) {}
+      }());
+
       // NEU: bei Einsicht + Overlap → Acknowledge
-      unawaited(_acknowledgeIfInsight(round: round, turn: turn, picked: picked));
+      unawaited(
+          _acknowledgeIfInsight(round: round, turn: turn, picked: picked));
 
       _fadeSlideCtrl.forward(from: 0);
       _scrollToBottom();
@@ -829,11 +883,24 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     // NEU (Mini-Einbau): Name aus der Antwort lokal lernen (best-effort)
     unawaited(MemoryService.instance.learnNameFromText(userAnswer));
 
+    // Phase-9: User-Turn speichern (unsichtbar)
+    unawaited(() async {
+      try {
+        final dyn = MemoryService.instance as dynamic;
+        await dyn.saveUserTurn?.call(userAnswer, {
+          'screen': 'reflection',
+          'mode': 'answer',
+          'ts': DateTime.now().toUtc().toIso8601String(),
+        });
+      } catch (_) {}
+    }());
+
     // NEU: Memories picken für die Antwort (aktualisierte Achse)
     final _PickedMem? picked = await _pickMemoriesFor(userAnswer);
 
     dynamic turn;
-    final meta = _buildMeta(userAnswer: userAnswer, memorySummary: picked?.metaSafe);
+    final meta =
+        _buildMeta(userAnswer: userAnswer, memorySummary: picked?.metaSafe);
 
     try {
       if (_session != null) {
@@ -921,8 +988,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
 
     if (!mounted) return;
 
-    final bool flagMoodPrompt =
-        _safeBool(turn, ['mood', 'prompt']) ||
+    final bool flagMoodPrompt = _safeBool(turn, ['mood', 'prompt']) ||
         _safeBool(turn, ['flow', 'mood_prompt']);
     final bool flagRecommendEnd = _safeBool(turn, ['flow', 'recommend_end']);
 
@@ -936,9 +1002,26 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       if (flagMoodPrompt || flagRecommendEnd) round.allowClosure = true;
 
       final hasHelpers = step.followups.isNotEmpty;
-      _chipMode =
-          (step.expectsAnswer || hasHelpers) ? _ChipMode.answer : _ChipMode.none;
+      _chipMode = (step.expectsAnswer || hasHelpers)
+          ? _ChipMode.answer
+          : _ChipMode.none;
     });
+
+    // Phase-9 (nach Turn): Panda-Output + memories_to_save persistieren (best-effort)
+    unawaited(() async {
+      try {
+        final mirror = _coerceMirror(turn);
+        final q = _coerceQuestion(turn);
+        final out = (q.isNotEmpty) ? ('$mirror\n\n$q') : mirror;
+        final dyn = MemoryService.instance as dynamic;
+        await dyn.savePandaTurn?.call(out, {
+          'screen': 'reflection',
+          'session': _session?.threadId,
+          'ts': DateTime.now().toUtc().toIso8601String(),
+        });
+        await dyn.saveFromWorker?.call(turn);
+      } catch (_) {}
+    }());
 
     // NEU: bei Einsicht + Overlap → Acknowledge
     unawaited(_acknowledgeIfInsight(round: round, turn: turn, picked: picked));
@@ -983,8 +1066,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
 
   // ---------------- Turn → Step ----------------------------------------------
   _PandaStep _buildStepFromTurn(dynamic t) {
-    final bool isClosure =
-        _safeBool(t, ['mood', 'prompt']) ||
+    final bool isClosure = _safeBool(t, ['mood', 'prompt']) ||
         _safeBool(t, ['flow', 'mood_prompt']) ||
         _safeBool(t, ['flow', 'recommend_end']);
 
@@ -1017,8 +1099,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       talkLines: talk,
       risk: risk,
       followups: helpers,
-      helperSuggestion:
-          helperSuggestion.isNotEmpty ? helperSuggestion : null,
+      helperSuggestion: helperSuggestion.isNotEmpty ? helperSuggestion : null,
     );
   }
 
@@ -1185,8 +1266,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
 
     final closure = _safeString(res, ['closure', 'mood_intro', 'text']).trim();
     final level = _safeString(res, ['risk_level']).toLowerCase();
-    final risk =
-        _safeBool(res, ['risk']) || level == 'high' || level == 'mild';
+    final risk = _safeBool(res, ['risk']) || level == 'high' || level == 'mild';
 
     setState(() => loading = false);
 
@@ -1208,8 +1288,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       if (round.steps.isNotEmpty) {
         final last = round.steps.last;
         if (risk && !last.risk) {
-          round.steps[round.steps.length - 1] =
-              last.copyWith(risk: true);
+          round.steps[round.steps.length - 1] = last.copyWith(risk: true);
         }
       }
     });
@@ -1218,7 +1297,8 @@ class _ReflectionScreenState extends State<ReflectionScreen>
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      _maybeAskMood(context, round: round, moodPrompt: true, afterClosure: true);
+      _maybeAskMood(context,
+          round: round, moodPrompt: true, afterClosure: true);
     });
   }
 
@@ -1253,11 +1333,15 @@ class _ReflectionScreenState extends State<ReflectionScreen>
   String _stripInstructionHints(String raw) {
     final lines = raw.split(RegExp(r'\r?\n'));
     final patterns = <RegExp>[
-      RegExp(r'^\s*Unten\s+findest\s+du\s+Antwort[-\s]?Chips.*$', caseSensitive: false),
-      RegExp(r'^\s*Unter\s+dem\s+Eingabefeld\s+findest\s+du\s+Antwort.*$', caseSensitive: false),
+      RegExp(r'^\s*Unten\s+findest\s+du\s+Antwort[-\s]?Chips.*$',
+          caseSensitive: false),
+      RegExp(r'^\s*Unter\s+dem\s+Eingabefeld\s+findest\s+du\s+Antwort.*$',
+          caseSensitive: false),
       RegExp(r'^\s*Wähle\s+einen\s+Antwort[-\s]?Chip.*$', caseSensitive: false),
-      RegExp(r'^\s*You\s+can\s+use\s+the\s+answer\s+chips.*$', caseSensitive: false),
-      RegExp(r"^\s*Below\s+you'll\s+find\s+answer\s+chips.*$", caseSensitive: false),
+      RegExp(r'^\s*You\s+can\s+use\s+the\s+answer\s+chips.*$',
+          caseSensitive: false),
+      RegExp(r"^\s*Below\s+you'll\s+find\s+answer\s+chips.*$",
+          caseSensitive: false),
     ];
 
     bool matchesAny(String s) => patterns.any((p) => p.hasMatch(s));
@@ -1397,7 +1481,9 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     final clean = text.replaceAll(RegExp(r'\s+'), ' ').trim();
     if (clean.isEmpty) return 'Reflexion';
     const max = 36;
-    return clean.length <= max ? clean : '${clean.substring(0, max).trimRight()}…';
+    return clean.length <= max
+        ? clean
+        : '${clean.substring(0, max).trimRight()}…';
   }
 
   String _firstWords(String s, int n) {
@@ -1457,7 +1543,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(Icons.cloud_off_rounded,
-                  color: Colors.black.withValues(alpha: .65)),
+                  color: Colors.black.withValue(alpha: .65)),
               const SizedBox(height: 10),
               Text(
                 (msg.isNotEmpty ? msg : 'Verbindung gerade schwierig.'),
@@ -1534,7 +1620,9 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     final bool showStarter = _rounds.isEmpty && _chipMode == _ChipMode.starter;
 
     final bool showAnswerChips = !closureActive &&
-        (r != null && r.steps.isNotEmpty && r.steps.last.followups.isNotEmpty) &&
+        (r != null &&
+            r.steps.isNotEmpty &&
+            r.steps.last.followups.isNotEmpty) &&
         _chipMode == _ChipMode.answer;
 
     final List<String> rawTemplates = showAnswerChips
@@ -1542,7 +1630,8 @@ class _ReflectionScreenState extends State<ReflectionScreen>
         : (showStarter ? _starterChips() : const <String>[]);
 
     final lastQ = r?.steps.isNotEmpty == true ? r!.steps.last.question : '';
-    final lastA = r?.steps.isNotEmpty == true ? (r!.steps.last.answer ?? '') : '';
+    final lastA =
+        r?.steps.isNotEmpty == true ? (r!.steps.last.answer ?? '') : '';
     final List<String> answerTemplatesRefined =
         _refineChips(rawTemplates, question: lastQ, lastAnswer: lastA);
 
@@ -1634,12 +1723,12 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                                   key: ValueKey(_rounds[index].id),
                                   child: Builder(
                                     builder: (_) {
-                                      final isLast = index == _rounds.length - 1;
+                                      final isLast =
+                                          index == _rounds.length - 1;
                                       final isTyping = isLast && lastIsTyping;
-                                      final hasRisk = _rounds[index]
-                                              .steps
-                                              .isNotEmpty &&
-                                          _rounds[index].steps.last.risk;
+                                      final hasRisk =
+                                          _rounds[index].steps.isNotEmpty &&
+                                              _rounds[index].steps.last.risk;
 
                                       final thread = _RoundThread(
                                         maxWidth: cardMaxW,
@@ -1651,8 +1740,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                                                 _rounds[index])
                                             : null,
                                         onDelete: _rounds[index].entryId != null
-                                            ? () =>
-                                                _deleteRound(_rounds[index])
+                                            ? () => _deleteRound(_rounds[index])
                                             : null,
                                         onSelectMood: (score, label) async {
                                           setState(() {
@@ -1750,7 +1838,8 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                                                 children: [
                                                   ExcludeSemantics(
                                                     child: Icon(
-                                                      Icons.info_outline_rounded,
+                                                      Icons
+                                                          .info_outline_rounded,
                                                       size: 16,
                                                       color: Colors.black54,
                                                     ),
@@ -1806,7 +1895,8 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                                                       in answerTemplates)
                                                     ZenChipGhost(
                                                       label: s,
-                                                      onPressed: () => _onTapChip(
+                                                      onPressed: () =>
+                                                          _onTapChip(
                                                         s,
                                                         isAnswerTemplate:
                                                             !showStarter,
@@ -1839,7 +1929,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                                             ?.copyWith(
                                               height: 1.25,
                                               color: Colors.black
-                                                  .withValues(alpha: 0.72),
+                                                  .withValue(alpha: 0.72),
                                             ),
                                       ),
                                     ),
@@ -1883,8 +1973,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                             child: ConstrainedBox(
                               constraints: BoxConstraints(maxWidth: cardMaxW),
                               child: Padding(
-                                padding:
-                                    const EdgeInsets.fromLTRB(0, 0, 0, 8),
+                                padding: const EdgeInsets.fromLTRB(0, 0, 0, 8),
                                 child: _InputBar(
                                   controller: _controller,
                                   focusNode: _inputFocus,
@@ -1940,7 +2029,8 @@ class _ReflectionScreenState extends State<ReflectionScreen>
   final _kBannedStarters = <RegExp>[
     RegExp(r'^\s*mir ist wichtig\b', caseSensitive: false),
     RegExp(r'^\s*im kern geht es\b', caseSensitive: false),
-    RegExp(r'^\s*ein(?:er)?\s+kleiner\s+nächster\s+schritt\b', caseSensitive: false),
+    RegExp(r'^\s*ein(?:er)?\s+kleiner\s+nächster\s+schritt\b',
+        caseSensitive: false),
     RegExp(r'^\s*es fühlt sich an wie\b', caseSensitive: false),
   ];
 
@@ -1959,16 +2049,24 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     required String question,
     String lastAnswer = '',
   }) {
-    final qTokens =
-        question.toLowerCase().split(RegExp(r'[^a-zäöüß0-9]+')).where((w) => w.length >= 3).toSet();
-    final aTokens =
-        lastAnswer.toLowerCase().split(RegExp(r'[^a-zäöüß0-9]+')).where((w) => w.length >= 3).toSet();
+    final qTokens = question
+        .toLowerCase()
+        .split(RegExp(r'[^a-zäöüß0-9]+'))
+        .where((w) => w.length >= 3)
+        .toSet();
+    final aTokens = lastAnswer
+        .toLowerCase()
+        .split(RegExp(r'[^a-zäöüß0-9]+'))
+        .where((w) => w.length >= 3)
+        .toSet();
     final anchors = {...qTokens, ...aTokens};
 
     bool looksInAxis(String t) {
       if (anchors.isEmpty) return true;
-      final toks =
-          t.toLowerCase().split(RegExp(r'[^a-zäöüß0-9]+')).where((w) => w.length >= 3);
+      final toks = t
+          .toLowerCase()
+          .split(RegExp(r'[^a-zäöüß0-9]+'))
+          .where((w) => w.length >= 3);
       return toks.any(anchors.contains);
     }
 
@@ -2004,6 +2102,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       // sehr neutraler Ableitungs-Text:
       return 'Wichtig ist mir außerdem … ';
     }
+
     out.add(_ensureEllipsisSuffix(fromQ(q)));
     return out;
   }
@@ -2024,7 +2123,8 @@ class _ReflectionScreenState extends State<ReflectionScreen>
 
     _controller
       ..text = next
-      ..selection = TextSelection.fromPosition(TextPosition(offset: next.length));
+      ..selection =
+          TextSelection.fromPosition(TextPosition(offset: next.length));
     _focusInput();
     if (isAnswerTemplate) setState(() => _chipMode = _ChipMode.answer);
     if (_rounds.isEmpty) setState(() => _chipMode = _ChipMode.none);
@@ -2124,8 +2224,9 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     if (_didPromptMood || _isMoodOpen) return;
 
     _isMoodOpen = true;
-    final title =
-        afterClosure ? 'Wie fühlst du dich jetzt?' : 'Wie fühlst du dich gerade?';
+    final title = afterClosure
+        ? 'Wie fühlst du dich jetzt?'
+        : 'Wie fühlst du dich gerade?';
 
     final chosen = await showPandaMoodPicker(
       context,
@@ -2155,8 +2256,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
 
   void _appendThankYouAfterSave(ReflectionRound r) {
     if (!mounted) return;
-    const thankYou =
-        'Danke dir fürs Speichern und Reflektieren. 💛\n'
+    const thankYou = 'Danke dir fürs Speichern und Reflektieren. 💛\n'
         'Möchtest du weiterreden? Wenn nicht, wünsche ich dir einen ruhigen Tag.';
     final step = _PandaStep(
       mirror: _capChars(thankYou, kMirrorMaxChars),
@@ -2191,14 +2291,14 @@ class _CalmGlassBanner extends StatelessWidget {
       margin: const EdgeInsets.symmetric(horizontal: 16),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: .20),
+        color: Colors.white.withValue(alpha: .20),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withValues(alpha: .22)),
+        border: Border.all(color: Colors.white.withValue(alpha: .22)),
         boxShadow: [
           BoxShadow(
             blurRadius: 20,
             offset: const Offset(0, 8),
-            color: Colors.black.withValues(alpha: .10),
+            color: Colors.black.withValue(alpha: .10),
           ),
         ],
       ),

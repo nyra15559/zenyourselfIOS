@@ -13,8 +13,8 @@ class PandaMood {
   final String key;
   final String labelDe;
   final double valence; // -1..+1
-  final double energy;  // 0..1
-  final String asset;   // assets/panda_moods/...
+  final double energy; // 0..1
+  final String asset; // assets/panda_moods/...
 
   const PandaMood({
     required this.id,

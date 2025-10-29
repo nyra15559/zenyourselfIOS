@@ -32,8 +32,7 @@ class EnvRuntime {
 
   // ---------- Typed Helpers ----------
 
-  static bool readBool(String key, {bool defaultValue = false}) =>
-      defaultValue;
+  static bool readBool(String key, {bool defaultValue = false}) => defaultValue;
 
   static int? readInt(String key) => null;
 

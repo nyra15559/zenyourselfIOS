@@ -1,4 +1,4 @@
-// lib/core/privacy/privacy_screen.dart
+//[BASELINE] lib/core/privacy/privacy_screen.dart (Stand: 29.10.)
 //
 // ZenYourself — Privacy Screen (calm, props-only UI, 2025)
 // -----------------------------------------------------------------------------
@@ -8,34 +8,55 @@
 // • "withValues(alpha: …)" überall für Konsistenz.
 // • Backdrop mit sanftem Glow/Haze (ruhig, AA-konform).
 //
-// Einbindung:
+// Einbindung (Beispiel):
 //   final screen = PrivacyScreen(
 //     props: PrivacyScreenProps(
+//       // Datenschutz-Schalter
 //       shareDiagnostics: false,
 //       shareUsage: false,
 //       enableCloudBackup: false,
 //       localOnly: true,
+//       // Erinnerung & Name
+//       memoryConsent: false,           // Panda darf sich erinnern (on-device)
+//       greetByName: false,             // Panda darf mit Namen ansprechen
+//       currentName: null,              // oder z.B. "Matthias"
+//       // Meta
 //       policyVersion: 'v2.1',
 //       lastUpdated: DateTime(2025, 10, 10),
+//       // Aktionen/Callbacks (Persistenz/Flows passieren im Orchestrator)
 //       onOpenPolicy: () { /* open policy URL/route */ },
 //       onSave: (settings) { /* persist settings */ },
 //       onExport: () { /* export flow */ },
 //       onDeleteAll: () { /* delete flow */ },
+//       onForgetName: () { /* remove stored name */ },
+//       onEditName: () { /* optional: open rename flow */ },
+//       onForgetMemories: () { /* optional: wipe on-device memories */ },
+//       // Optional Titel/Untertitel
+//       title: null,
+//       subtitle: null,
 //     ),
 //   );
 //
 // Hinweise:
 // • Dieser Screen trifft KEINE Entscheidungen. Orchestrator persistiert.
-// • Schaltet ihr "localOnly" an, werden die restlichen Schalter visuell gedimmt.
+// • Wenn "localOnly" aktiv ist, werden Diagnose/Usage/Cloud visuell gedimmt.
+// • Memory-Consent bleibt unabhängig von "localOnly" aktiv (on-device Memory).
+// • „Mit Namen ansprechen“ ist nur aktiv, wenn ein Name vorhanden ist.
 
 import 'package:flutter/material.dart';
 import '../../shared/zen_style.dart';
 
 class PrivacyScreenProps {
+  // Datenschutz-Basics
   final bool shareDiagnostics; // Absturz-/Diagnose-Infos teilen
-  final bool shareUsage;       // anonyme Nutzungsanalyse
-  final bool enableCloudBackup;// Cloud-Backup von Metadaten
-  final bool localOnly;        // Inhalte nur lokal (keine Cloud-Inhalte)
+  final bool shareUsage; // anonyme Nutzungsanalyse
+  final bool enableCloudBackup; // Cloud-Backup von Metadaten
+  final bool localOnly; // Inhalte nur lokal (keine Cloud-Inhalte)
+
+  // Erinnerung & Name
+  final bool memoryConsent; // Panda darf sich erinnern (on-device)
+  final bool greetByName; // Panda darf dich mit Namen ansprechen
+  final String? currentName; // aktueller gespeicherter Name (optional)
 
   final String policyVersion;
   final DateTime? lastUpdated;
@@ -46,21 +67,37 @@ class PrivacyScreenProps {
   final VoidCallback? onExport;
   final VoidCallback? onDeleteAll;
 
+  // Name/Memory-spezifische Aktionen (optional)
+  final VoidCallback? onForgetName;
+  final VoidCallback? onEditName;
+  final VoidCallback? onForgetMemories;
+
   // Optional: Titel/Untertitel überschreiben
   final String? title;
   final String? subtitle;
 
   const PrivacyScreenProps({
+    // Basics
     this.shareDiagnostics = false,
     this.shareUsage = false,
     this.enableCloudBackup = false,
     this.localOnly = true,
+    // Memory & Name
+    this.memoryConsent = false,
+    this.greetByName = false,
+    this.currentName,
+    // Meta
     this.policyVersion = 'v1.0',
     this.lastUpdated,
+    // Actions
     this.onOpenPolicy,
     this.onSave,
     this.onExport,
     this.onDeleteAll,
+    this.onForgetName,
+    this.onEditName,
+    this.onForgetMemories,
+    // Optional Titles
     this.title,
     this.subtitle,
   });
@@ -72,11 +109,17 @@ class PrivacySettings {
   final bool enableCloudBackup;
   final bool localOnly;
 
+  // NEU: Memory & Name
+  final bool memoryConsent;
+  final bool greetByName;
+
   const PrivacySettings({
     required this.shareDiagnostics,
     required this.shareUsage,
     required this.enableCloudBackup,
     required this.localOnly,
+    required this.memoryConsent,
+    required this.greetByName,
   });
 
   Map<String, dynamic> toJson() => {
@@ -84,6 +127,8 @@ class PrivacySettings {
         'share_usage': shareUsage,
         'enable_cloud_backup': enableCloudBackup,
         'local_only': localOnly,
+        'memory_consent': memoryConsent,
+        'greet_by_name': greetByName,
       };
 }
 
@@ -96,10 +141,15 @@ class PrivacyScreen extends StatefulWidget {
 }
 
 class _PrivacyScreenState extends State<PrivacyScreen> {
+  // Basics
   late bool _shareDiagnostics = widget.props.shareDiagnostics;
   late bool _shareUsage = widget.props.shareUsage;
   late bool _enableCloudBackup = widget.props.enableCloudBackup;
   late bool _localOnly = widget.props.localOnly;
+
+  // Memory & Name
+  late bool _memoryConsent = widget.props.memoryConsent;
+  late bool _greetByName = widget.props.greetByName;
 
   @override
   Widget build(BuildContext context) {
@@ -110,6 +160,9 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
     final lastStr = lastUpdate == null
         ? null
         : '${ZenFormat.two(lastUpdate.day)}.${ZenFormat.two(lastUpdate.month)}.${lastUpdate.year}';
+
+    final hasName = (widget.props.currentName != null &&
+        widget.props.currentName!.trim().isNotEmpty);
 
     // Ruhiger Hintergrund
     return Scaffold(
@@ -128,7 +181,7 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
               padding: EdgeInsets.fromLTRB(pad.left, 8, pad.right, 0),
               child: LayoutBuilder(
                 builder: (context, c) {
-                  final maxW = c.maxWidth.clamp(0, 760.0).toDouble();
+                  final maxW = c.maxWidth.clamp(0.0, 760.0).toDouble();
                   return Center(
                     child: ConstrainedBox(
                       constraints: BoxConstraints(maxWidth: maxW),
@@ -151,15 +204,24 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
                                 Text(
                                   widget.props.subtitle ??
                                       'Wir schützen deine Privatsphäre. '
-                                      'Du entscheidest, was geteilt wird.',
+                                          'Du entscheidest, was geteilt wird.',
                                   style: ZenReflectionText.mirrorStyle,
                                 ),
                                 const SizedBox(height: 10),
-                                _PrinciplesRow(
-                                  items: const [
-                                    ('Keine versteckten Datenflüsse', Icons.verified_user_rounded),
-                                    ('Inhalte bleiben privat', Icons.lock_rounded),
-                                    ('Transparente Einwilligungen', Icons.fact_check_rounded),
+                                const _PrinciplesRow(
+                                  items: [
+                                    (
+                                      'Keine versteckten Datenflüsse',
+                                      Icons.verified_user_rounded
+                                    ),
+                                    (
+                                      'Inhalte bleiben privat',
+                                      Icons.lock_rounded
+                                    ),
+                                    (
+                                      'Transparente Einwilligungen',
+                                      Icons.fact_check_rounded
+                                    ),
                                   ],
                                 ),
                               ],
@@ -168,8 +230,8 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
 
                           const SizedBox(height: 12),
 
-                          // Einwilligungen
-                          _SectionHeader(title: 'Deine Einwilligungen'),
+                          // Einwilligungen (Basics)
+                          const _SectionHeader(title: 'Deine Einwilligungen'),
                           const SizedBox(height: 8),
                           _ToggleCard(
                             items: [
@@ -180,7 +242,8 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
                                     'Keine automatische Cloud-Speicherung.',
                                 icon: Icons.shield_rounded,
                                 value: _localOnly,
-                                onChanged: (v) => setState(() => _localOnly = v),
+                                onChanged: (v) =>
+                                    setState(() => _localOnly = v),
                               ),
                               _ToggleItem(
                                 title: 'Diagnose senden',
@@ -191,7 +254,8 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
                                 value: _shareDiagnostics,
                                 onChanged: _localOnly
                                     ? null // visuell dimmen: deaktiviert wenn lokal-only
-                                    : (v) => setState(() => _shareDiagnostics = v),
+                                    : (v) =>
+                                        setState(() => _shareDiagnostics = v),
                                 dimWhenDisabled: _localOnly,
                               ),
                               _ToggleItem(
@@ -215,7 +279,8 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
                                 value: _enableCloudBackup,
                                 onChanged: _localOnly
                                     ? null
-                                    : (v) => setState(() => _enableCloudBackup = v),
+                                    : (v) =>
+                                        setState(() => _enableCloudBackup = v),
                                 dimWhenDisabled: _localOnly,
                               ),
                             ],
@@ -223,8 +288,83 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
 
                           const SizedBox(height: 14),
 
+                          // Erinnerung & Name
+                          const _SectionHeader(title: 'Erinnerungen & Name'),
+                          const SizedBox(height: 8),
+                          ZenGlassCard(
+                            borderRadius: const BorderRadius.all(ZenRadii.l),
+                            padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+                            topOpacity: .20,
+                            bottomOpacity: .10,
+                            child: Column(
+                              children: [
+                                _ToggleRow(
+                                  item: _ToggleItem(
+                                    title: 'Erinnerungen erlauben (on-device)',
+                                    subtitle:
+                                        'Panda darf auf deinem Gerät Erinnerungen an eure Gespräche speichern und nutzen. '
+                                        'Nichts verlässt dein Gerät ohne deine ausdrückliche Zustimmung.',
+                                    icon: Icons.memory_rounded,
+                                    value: _memoryConsent,
+                                    onChanged: (v) =>
+                                        setState(() => _memoryConsent = v),
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                _ToggleRow(
+                                  item: _ToggleItem(
+                                    title: 'Mit Namen ansprechen',
+                                    subtitle: hasName
+                                        ? 'Panda darf dich beim Namen nennen.'
+                                        : 'Kein Name gespeichert. Füge einen Namen hinzu, um diese Option zu aktivieren.',
+                                    icon: Icons.badge_rounded,
+                                    value: _greetByName && hasName,
+                                    onChanged: hasName
+                                        ? (v) =>
+                                            setState(() => _greetByName = v)
+                                        : null,
+                                    dimWhenDisabled: !hasName,
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                _NameRow(
+                                  name: widget.props.currentName,
+                                  onEdit: widget.props.onEditName,
+                                  onForget: widget.props.onForgetName,
+                                ),
+                                if (widget.props.onForgetMemories != null) ...[
+                                  const SizedBox(height: 10),
+                                  Align(
+                                    alignment: Alignment.centerRight,
+                                    child: TextButton.icon(
+                                      onPressed: widget.props.onForgetMemories,
+                                      icon: const Icon(
+                                          Icons.cleaning_services_rounded),
+                                      label: const Text('Erinnerungen löschen'),
+                                    ),
+                                  ),
+                                ],
+                                const SizedBox(height: 2),
+                                Opacity(
+                                  opacity: .82,
+                                  child: Text(
+                                    'Hinweis: Erinnerungen werden nur lokal gespeichert (Ghost-Mode). '
+                                    'Panda nennt gespeicherte Inhalte nie proaktiv — nur wenn du das Thema wieder aufgreifst.',
+                                    style: tt.bodySmall?.copyWith(
+                                      color:
+                                          ZenColors.ink.withValue(alpha: .80),
+                                    ),
+                                    textAlign: TextAlign.left,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+
+                          const SizedBox(height: 14),
+
                           // Rechtliches
-                          _SectionHeader(title: 'Rechtliches'),
+                          const _SectionHeader(title: 'Rechtliches'),
                           const SizedBox(height: 8),
                           ZenGlassCard(
                             borderRadius: const BorderRadius.all(ZenRadii.l),
@@ -241,7 +381,8 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
                                 const SizedBox(width: 10),
                                 Expanded(
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       Text(
                                         'Datenschutzerklärung',
@@ -257,7 +398,8 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
                                           'Version ${widget.props.policyVersion}',
                                         ].join(' • '),
                                         style: tt.bodyMedium?.copyWith(
-                                          color: ZenColors.ink.withValues(alpha: .75),
+                                          color: ZenColors.ink
+                                              .withValue(alpha: .75),
                                         ),
                                       ),
                                       const SizedBox(height: 8),
@@ -266,21 +408,29 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
                                         runSpacing: 8,
                                         children: [
                                           TextButton.icon(
-                                            onPressed: widget.props.onOpenPolicy,
-                                            icon: const Icon(Icons.open_in_new_rounded),
-                                            label: const Text('Erklärung lesen'),
+                                            onPressed:
+                                                widget.props.onOpenPolicy,
+                                            icon: const Icon(
+                                                Icons.open_in_new_rounded),
+                                            label:
+                                                const Text('Erklärung lesen'),
                                           ),
                                           if (widget.props.onExport != null)
                                             OutlinedButton.icon(
                                               onPressed: widget.props.onExport,
-                                              icon: const Icon(Icons.file_download_rounded),
-                                              label: const Text('Daten exportieren'),
+                                              icon: const Icon(
+                                                  Icons.file_download_rounded),
+                                              label: const Text(
+                                                  'Daten exportieren'),
                                             ),
                                           if (widget.props.onDeleteAll != null)
                                             OutlinedButton.icon(
-                                              onPressed: widget.props.onDeleteAll,
-                                              icon: const Icon(Icons.delete_outline_rounded),
-                                              label: const Text('Alle Daten löschen'),
+                                              onPressed:
+                                                  widget.props.onDeleteAll,
+                                              icon: const Icon(
+                                                  Icons.delete_outline_rounded),
+                                              label: const Text(
+                                                  'Alle Daten löschen'),
                                             ),
                                         ],
                                       ),
@@ -341,8 +491,11 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
                           Expanded(
                             child: Text(
                               'Deine Auswahl gilt ab dem Speichern.',
-                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                    color: ZenColors.ink.withValues(alpha: .87),
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodyMedium
+                                  ?.copyWith(
+                                    color: ZenColors.ink.withValue(alpha: .87),
                                     fontWeight: FontWeight.w600,
                                   ),
                             ),
@@ -351,14 +504,19 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
                           ElevatedButton.icon(
                             onPressed: () {
                               final out = PrivacySettings(
-                                shareDiagnostics: _shareDiagnostics && !_localOnly,
+                                shareDiagnostics:
+                                    _shareDiagnostics && !_localOnly,
                                 shareUsage: _shareUsage && !_localOnly,
-                                enableCloudBackup: _enableCloudBackup && !_localOnly,
+                                enableCloudBackup:
+                                    _enableCloudBackup && !_localOnly,
                                 localOnly: _localOnly,
+                                memoryConsent: _memoryConsent,
+                                greetByName: _greetByName && hasName,
                               );
                               widget.props.onSave?.call(out);
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Einstellungen gespeichert')),
+                                const SnackBar(
+                                    content: Text('Einstellungen gespeichert')),
                               );
                             },
                             icon: const Icon(Icons.save_rounded),
@@ -413,9 +571,9 @@ class _PrinciplesRow extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             decoration: BoxDecoration(
-              color: ZenColors.surface.withValues(alpha: .72),
+              color: ZenColors.surface.withValue(alpha: .72),
               borderRadius: const BorderRadius.all(ZenRadii.m),
-              border: Border.all(color: ZenColors.jade.withValues(alpha: .18)),
+              border: Border.all(color: ZenColors.jade.withValue(alpha: .18)),
               boxShadow: const [ZenShadows.glow],
             ),
             child: Row(
@@ -499,6 +657,10 @@ class _ToggleRow extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          const ExcludeSemantics(
+            child:
+                Icon(Icons.info_outline, size: 0), // Placeholder for alignment
+          ),
           ExcludeSemantics(
             child: Icon(item.icon, size: 18, color: ZenColors.ink),
           ),
@@ -520,7 +682,7 @@ class _ToggleRow extends StatelessWidget {
                   Text(
                     item.subtitle,
                     style: tt.bodyMedium?.copyWith(
-                      color: ZenColors.ink.withValues(alpha: .78),
+                      color: ZenColors.ink.withValue(alpha: .78),
                     ),
                   ),
                 ],
@@ -534,6 +696,64 @@ class _ToggleRow extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _NameRow extends StatelessWidget {
+  final String? name;
+  final VoidCallback? onEdit;
+  final VoidCallback? onForget;
+
+  const _NameRow({
+    required this.name,
+    required this.onEdit,
+    required this.onForget,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+    final hasName = name != null && name!.trim().isNotEmpty;
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        const ExcludeSemantics(
+          child: Icon(Icons.person_rounded, size: 18, color: ZenColors.ink),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: hasName
+              ? Text(
+                  'Gespeicherter Name: $name',
+                  style: tt.bodyMedium?.copyWith(
+                    color: ZenColors.inkStrong,
+                    fontWeight: FontWeight.w600,
+                  ),
+                )
+              : Text(
+                  'Kein Name gespeichert.',
+                  style: tt.bodyMedium?.copyWith(
+                    color: ZenColors.ink.withValue(alpha: .80),
+                  ),
+                ),
+        ),
+        const SizedBox(width: 8),
+        if (onEdit != null)
+          OutlinedButton.icon(
+            onPressed: onEdit,
+            icon: const Icon(Icons.edit_rounded, size: 18),
+            label: const Text('Namen ändern'),
+          ),
+        const SizedBox(width: 8),
+        if (onForget != null)
+          TextButton.icon(
+            onPressed: onForget,
+            icon: const Icon(Icons.backspace_rounded, size: 18),
+            label: const Text('Name löschen'),
+          ),
+      ],
     );
   }
 }

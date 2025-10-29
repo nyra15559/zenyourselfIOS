@@ -1,11 +1,12 @@
 // lib/features/accessibility/a11y_utils.dart
+import '../../shared/zen_style.dart';
 //
 // ZenYourself • Accessibility Utils (safe-by-default)
 // ---------------------------------------------------
 // • Eigene Palette/Provider (keine Kollision mit Color-Blind-Palette)
 // • WCAG-Kontrast-Helpers, dynamische On-Color, Reduced-Motion-Hinweis
 // • Semantik-Werkzeuge (Announce), fokusfreundliche Text-Komponente
-// • Flutter ≥3.12+: TextScaler, Color.withValues(alpha: …)
+// • Flutter ≥3.12+: TextScaler, Color.withValue(alpha: …)
 
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
@@ -38,12 +39,11 @@ class ZenA11yPalette {
   static const _zenWhite = Color(0xFFFDFCF6);
   static const _zenGold = Color(0xFFFFD48A);
 
-  Color get primary =>
-      isDark
-          ? _zenWhite
-          : isColorBlind
-              ? const Color(0xFF1B263B)
-              : _zenJade;
+  Color get primary => isDark
+      ? _zenWhite
+      : isColorBlind
+          ? const Color(0xFF1B263B)
+          : _zenJade;
 
   Color get accent => isColorBlind ? _zenGold : _zenJadeLight;
 
@@ -54,7 +54,7 @@ class ZenA11yPalette {
   Color get error => const Color(0xFFD7263D);
 
   Color get border =>
-      isHighContrast ? Colors.black : _zenJadeLight.withValues(alpha: 0.14);
+      isHighContrast ? Colors.black : _zenJadeLight.withValue(alpha: 0.14);
 
   /// Kontrastfreundliche Textfarbe zu einem Hintergrund bestimmen.
   static Color onColor(Color bg) =>
@@ -73,8 +73,9 @@ class ZenA11yPalette {
   /// Relative Luminanz nach WCAG – aktualisiert auf neues Color-API.
   /// Achtung: Projekt nutzt Color.r/g/b (0..1), nicht red/green/blue (0..255).
   static double _relativeLuminance(Color c) {
-    double gamma(double s) =>
-        s <= 0.03928 ? s / 12.92 : math.pow((s + 0.055) / 1.055, 2.4).toDouble();
+    double gamma(double s) => s <= 0.03928
+        ? s / 12.92
+        : math.pow((s + 0.055) / 1.055, 2.4).toDouble();
 
     final r = gamma(c.r);
     final g = gamma(c.g);
@@ -214,7 +215,7 @@ class A11yText extends StatelessWidget {
           ? [
               Shadow(
                 blurRadius: 10,
-                color: palette.accent.withValues(alpha: 0.12),
+                color: palette.accent.withValue(alpha: 0.12),
                 offset: const Offset(0, 2),
               )
             ]
@@ -361,7 +362,7 @@ class A11yContrastDemo extends StatelessWidget {
         A11yText(
           "Kontrast: ${contrastRatio(chipFg, chipBg).toStringAsFixed(2)}",
           fontSize: 12.5,
-          color: Colors.black.withValues(alpha: 0.6),
+          color: Colors.black.withValue(alpha: 0.6),
         ),
       ],
     );

@@ -6,7 +6,7 @@
 // • Tages-Gruppierung (lokale Zeit) — „Heute“, „Gestern“, sonst TT.MM.JJJJ
 // • Ruhige Abstände, konstante Max-Width, viele consts/Keys für Leistung
 // • Aktionen ausschließlich im „…“-Menü der Card (keine Inline-CTAs)
-// • Nur Color.withValues(alpha: …); keine withOpacity(..)
+// • Nur Color.withValue(alpha: …); keine withOpacity(..)
 // • Keine Breaking Changes (Provider-/Model-APIs unverändert)
 // • Backdrop & Layout via ZenAppScaffold (stabil, asset-sicher)
 //
@@ -18,9 +18,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
-import '../../shared/zen_style.dart' as zs hide ZenBackdrop, ZenGlassCard, ZenAppBar;
+import '../../shared/zen_style.dart' as zs
+    hide ZenBackdrop, ZenGlassCard, ZenAppBar;
 import '../../shared/ui/zen_widgets.dart' as zw
-    show ZenBackdrop, ZenGlassCard, ZenAppBar, PandaHeader, ZenToast, ZenAppScaffold;
+    show
+        ZenBackdrop,
+        ZenGlassCard,
+        ZenAppBar,
+        PandaHeader,
+        ZenToast,
+        ZenAppScaffold;
 
 import '../../models/journal_entry.dart' as jm;
 import '../../providers/journal_entries_provider.dart' as jp;
@@ -80,7 +87,8 @@ class _JournalScreenState extends State<JournalScreen> {
 
     return zw.ZenAppScaffold(
       appBar: const zw.ZenAppBar(
-        title: null, // <— Oberer Titel entfernt, damit kein doppelter Titel erscheint
+        title:
+            null, // <— Oberer Titel entfernt, damit kein doppelter Titel erscheint
         showBack: true,
         actions: [],
       ),
@@ -103,8 +111,8 @@ class _JournalScreenState extends State<JournalScreen> {
           Align(
             alignment: Alignment.topCenter,
             child: ConstrainedBox(
-              constraints:
-                  const BoxConstraints(maxWidth: JournalScreen._maxContentWidth),
+              constraints: const BoxConstraints(
+                  maxWidth: JournalScreen._maxContentWidth),
               child: isEmpty
                   ? _wrapRefresh(
                       context: context,
@@ -180,7 +188,8 @@ class _JournalScreenState extends State<JournalScreen> {
     // Klarer CTA zusätzlich zum FAB (falls Nutzer das FAB übersieht)
     return ListView(
       key: const PageStorageKey('journal_empty'),
-      physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
+      physics:
+          const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
       padding: EdgeInsets.symmetric(
         horizontal: isMobile ? zs.ZenSpacing.s : zs.ZenSpacing.xl,
       ),
@@ -260,7 +269,8 @@ class _JournalScreenState extends State<JournalScreen> {
   }) {
     return ListView.builder(
       key: const PageStorageKey('journal_timeline_list'),
-      physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
+      physics:
+          const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
       padding: EdgeInsets.symmetric(
         horizontal: isMobile ? zs.ZenSpacing.s : zs.ZenSpacing.xl,
       ),
@@ -287,7 +297,8 @@ class _JournalScreenState extends State<JournalScreen> {
               child: IntrinsicWidth(
                 child: zw.ZenGlassCard(
                   borderRadius: const BorderRadius.all(zs.ZenRadii.l),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   topOpacity: .26,
                   bottomOpacity: .10,
                   borderOpacity: .18,
@@ -370,7 +381,8 @@ class _JournalScreenState extends State<JournalScreen> {
           journalText: viewKind == jv.EntryKind.journal ? e.thoughtText : null,
 
           // Reflexion
-          userThought: viewKind == jv.EntryKind.reflection ? e.thoughtText : null,
+          userThought:
+              viewKind == jv.EntryKind.reflection ? e.thoughtText : null,
           aiQuestion: viewKind == jv.EntryKind.reflection ? e.aiQuestion : null,
           userAnswer: viewKind == jv.EntryKind.reflection ? e.userAnswer : null,
 
@@ -392,7 +404,7 @@ class _JournalScreenState extends State<JournalScreen> {
     if (t.isNotEmpty) return t;
     final fallback = (e.title ?? '').trim();
     return fallback.isEmpty ? null : fallback;
-    }
+  }
 
   Future<void> _continueIntoReflection(
     BuildContext context,
@@ -409,11 +421,13 @@ class _JournalScreenState extends State<JournalScreen> {
     })();
 
     await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => ReflectionScreen(initialUserText: seed)),
+      MaterialPageRoute(
+          builder: (_) => ReflectionScreen(initialUserText: seed)),
     );
   }
 
-  void _startNewEntry(BuildContext context, jp.JournalEntriesProvider provider) {
+  void _startNewEntry(
+      BuildContext context, jp.JournalEntriesProvider provider) {
     final active = provider.filterKind;
 
     switch (active) {
@@ -503,7 +517,8 @@ class _JournalScreenState extends State<JournalScreen> {
                         provider.addDiary(text: merged);
                         Navigator.pop(ctx);
                         HapticFeedback.selectionClick();
-                        zw.ZenToast.show(context, 'Tagebuch-Eintrag gespeichert');
+                        zw.ZenToast.show(
+                            context, 'Tagebuch-Eintrag gespeichert');
                       },
                     ),
                   ),
@@ -681,7 +696,8 @@ class _JournalScreenState extends State<JournalScreen> {
       final mm = d.month.toString().padLeft(2, '0');
       return 'Eintrag $dd.$mm.${d.year}';
     }
-    final words = base.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+    final words =
+        base.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
     if (words.length <= 10) return base;
     return '${words.take(10).join(' ')}…';
   }
@@ -708,7 +724,8 @@ class _FilterPill extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
 
-    Widget chip(jp.JournalFilterKind kind, String label, IconData icon, int count) {
+    Widget chip(
+        jp.JournalFilterKind kind, String label, IconData icon, int count) {
       final selected = provider.filterKind == kind;
       return Padding(
         padding: const EdgeInsets.only(right: 8, bottom: 8),
@@ -731,8 +748,8 @@ class _FilterPill extends StatelessWidget {
             ],
           ),
           // Token-/Theme-basiert statt Weiß: bessere Dark-Mode-Kohärenz
-          selectedColor: zs.ZenColors.sage.withValues(alpha: .22),
-          backgroundColor: cs.surface.withValues(alpha: .18),
+          selectedColor: zs.ZenColors.sage.withValue(alpha: .22),
+          backgroundColor: cs.surface.withValue(alpha: .18),
           showCheckmark: false,
           labelStyle: Theme.of(context).textTheme.labelMedium?.copyWith(
                 color: selected ? zs.ZenColors.deepSage : zs.ZenColors.jadeMid,
@@ -741,7 +758,7 @@ class _FilterPill extends StatelessWidget {
           side: BorderSide(
             color: selected
                 ? zs.ZenColors.deepSage
-                : zs.ZenColors.jadeMid.withValues(alpha: .22),
+                : zs.ZenColors.jadeMid.withValue(alpha: .22),
           ),
           shape: const StadiumBorder(),
         ),
@@ -751,10 +768,14 @@ class _FilterPill extends StatelessWidget {
     return Wrap(
       alignment: WrapAlignment.center, // zentriert unter dem Panda
       children: [
-        chip(jp.JournalFilterKind.all, 'Alle', Icons.all_inclusive_rounded, allCount),
-        chip(jp.JournalFilterKind.journal, 'Tagebuch', Icons.menu_book_rounded, journalCount),
-        chip(jp.JournalFilterKind.reflection, 'Reflexion', Icons.psychology_alt_rounded, reflectionCount),
-        chip(jp.JournalFilterKind.story, 'Kurzgeschichte', Icons.auto_stories_rounded, storyCount),
+        chip(jp.JournalFilterKind.all, 'Alle', Icons.all_inclusive_rounded,
+            allCount),
+        chip(jp.JournalFilterKind.journal, 'Tagebuch', Icons.menu_book_rounded,
+            journalCount),
+        chip(jp.JournalFilterKind.reflection, 'Reflexion',
+            Icons.psychology_alt_rounded, reflectionCount),
+        chip(jp.JournalFilterKind.story, 'Kurzgeschichte',
+            Icons.auto_stories_rounded, storyCount),
       ],
     );
   }
@@ -789,14 +810,16 @@ class _DayHeader extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 10),
           decoration: BoxDecoration(
-            // vorher: Colors.white.withValues(.66) → Theme-Surface für Dark/Light
-            color: cs.surface.withValues(alpha: .66),
+            // vorher: Colors.white.withValue(.66) → Theme-Surface für Dark/Light
+            color: cs.surface.withValue(alpha: .66),
             borderRadius: const BorderRadius.all(zs.ZenRadii.m),
             border: Border.all(
-              color: zs.ZenColors.jadeMid.withValues(alpha: 0.14),
+              color: zs.ZenColors.jadeMid.withValue(alpha: 0.14),
               width: 1,
             ),
-            boxShadow: const [BoxShadow(color: Color(0x14000000), blurRadius: 8)],
+            boxShadow: const [
+              BoxShadow(color: Color(0x14000000), blurRadius: 8)
+            ],
           ),
           child: Text(
             txt,
@@ -866,8 +889,8 @@ class _RailPainter extends CustomPainter {
       ..style = PaintingStyle.stroke;
 
     Shader grad(Offset from, Offset to) {
-      final top = zs.ZenColors.sage.withValues(alpha: .16);
-      final mid = zs.ZenColors.deepSage.withValues(alpha: .27);
+      final top = zs.ZenColors.sage.withValue(alpha: .16);
+      final mid = zs.ZenColors.deepSage.withValue(alpha: .27);
       return LinearGradient(
         begin: Alignment.topCenter,
         end: Alignment.bottomCenter,
@@ -887,7 +910,7 @@ class _RailPainter extends CustomPainter {
     }
 
     final dotPaint = Paint()
-      ..color = zs.ZenColors.deepSage.withValues(alpha: .28)
+      ..color = zs.ZenColors.deepSage.withValue(alpha: .28)
       ..style = PaintingStyle.fill
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 1.2);
     canvas.drawCircle(Offset(centerX, dotY), 4.8, dotPaint);

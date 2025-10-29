@@ -117,19 +117,19 @@ class JournalEntry {
   final String? subtitle;
 
   // Reflection-Felder
-  final String? thoughtText;   // „Dein Gedanke …“
-  final String? aiQuestion;    // Panda-Leitfrage (kursiv in der View)
-  final String? userAnswer;    // Deine Antwort (grün)
+  final String? thoughtText; // „Dein Gedanke …“
+  final String? aiQuestion; // Panda-Leitfrage (kursiv in der View)
+  final String? userAnswer; // Deine Antwort (grün)
 
   // Story-Felder
-  final String? storyTitle;    // Überschrift der Story
-  final String? storyTeaser;   // kurzer Teaser (für Card-Preview)
-  final String? storyBody;     // VOLLTEXT — wird nie beschnitten
+  final String? storyTitle; // Überschrift der Story
+  final String? storyTeaser; // kurzer Teaser (für Card-Preview)
+  final String? storyBody; // VOLLTEXT — wird nie beschnitten
 
   // Meta
-  final List<String> tags;     // automatische/manuelle Tags
-  final bool hidden;           // Soft-Hide-Flag
-  final String? sourceRef;     // z. B. Session-ID, Worker, Import-Quelle
+  final List<String> tags; // automatische/manuelle Tags
+  final bool hidden; // Soft-Hide-Flag
+  final String? sourceRef; // z. B. Session-ID, Worker, Import-Quelle
 
   const JournalEntry({
     required this.id,
@@ -321,8 +321,7 @@ class JournalEntry {
 
   @override
   bool operator ==(Object other) =>
-      identical(this, other) ||
-      (other is JournalEntry && other.id == id);
+      identical(this, other) || (other is JournalEntry && other.id == id);
 
   @override
   int get hashCode => id.hashCode;
@@ -390,7 +389,8 @@ class JournalEntry {
         if (s != null && s.isNotEmpty) tags.add(s);
       }
     } else if (rawTags is String && rawTags.trim().isNotEmpty) {
-      tags.addAll(rawTags.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty));
+      tags.addAll(
+          rawTags.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty));
     }
 
     // Legacy mood → in Tags spiegeln, falls noch nicht vorhanden
@@ -414,16 +414,24 @@ class JournalEntry {
       title: s0(map['title']) ?? s0(map['label']),
       subtitle: s0(map['subtitle']) ?? s0(map['subTitle']) ?? s0(map['sub']),
       thoughtText: s0(map['thoughtText']) ?? s0(map['text']) ?? s0(map['body']),
-      aiQuestion: s0(map['aiQuestion']) ?? s0(map['question']) ?? s0(map['prompt']),
-      userAnswer: s0(map['userAnswer']) ?? s0(map['answer']) ?? s0(map['response']),
-      storyTitle: s0(map['storyTitle']) ?? s0(map['story_title']) ?? s0(map['storyName']),
-      storyTeaser: s0(map['storyTeaser']) ?? s0(map['story_teaser']) ?? s0(map['teaser']),
-      storyBody: s0(map['storyBody']) ?? s0(map['story_body']) ?? s0(map['content']),
+      aiQuestion:
+          s0(map['aiQuestion']) ?? s0(map['question']) ?? s0(map['prompt']),
+      userAnswer:
+          s0(map['userAnswer']) ?? s0(map['answer']) ?? s0(map['response']),
+      storyTitle: s0(map['storyTitle']) ??
+          s0(map['story_title']) ??
+          s0(map['storyName']),
+      storyTeaser: s0(map['storyTeaser']) ??
+          s0(map['story_teaser']) ??
+          s0(map['teaser']),
+      storyBody:
+          s0(map['storyBody']) ?? s0(map['story_body']) ?? s0(map['content']),
       tags: tags,
-      hidden: b(map['hidden']) ||
-          b(map['isHidden']) ||
-          b(map['softHidden']),
-      sourceRef: s0(map['sourceRef']) ?? s0(map['source']) ?? s0(map['session']) ?? s0(map['remoteId']),
+      hidden: b(map['hidden']) || b(map['isHidden']) || b(map['softHidden']),
+      sourceRef: s0(map['sourceRef']) ??
+          s0(map['source']) ??
+          s0(map['session']) ??
+          s0(map['remoteId']),
     );
 
     return entry.withAutoTitleIfEmpty();
@@ -434,7 +442,8 @@ class JournalEntry {
       final obj = jsonDecode(source);
       if (obj is Map<String, dynamic>) return fromMap(obj);
       if (obj is Map) return fromMap(obj.cast<String, dynamic>());
-      throw const FormatException('JournalEntry.fromJson: JSON object expected');
+      throw const FormatException(
+          'JournalEntry.fromJson: JSON object expected');
     } else if (source is Map<String, dynamic>) {
       return fromMap(source);
     } else if (source is Map) {
@@ -453,8 +462,9 @@ class JournalEntry {
         map.containsKey('storyTeaser'));
     if (hasStory) return 'story';
 
-    final hasReflection =
-        map.containsKey('aiQuestion') || map.containsKey('userAnswer') || map.containsKey('question');
+    final hasReflection = map.containsKey('aiQuestion') ||
+        map.containsKey('userAnswer') ||
+        map.containsKey('question');
     if (hasReflection) return 'reflection';
 
     return 'journal';
@@ -518,7 +528,7 @@ class JournalEntry {
   }
 
   static String _genIdFallback(DateTime createdUtc) =>
-    'je_${createdUtc.microsecondsSinceEpoch}';
+      'je_${createdUtc.microsecondsSinceEpoch}';
 
   static bool _nonEmpty(String? s) => s != null && s.trim().isNotEmpty;
 
@@ -541,7 +551,8 @@ extension JournalEntryUiCompatX on JournalEntry {
     String? candidate;
     switch (kind) {
       case EntryKind.reflection:
-        candidate = JournalEntry._firstNonEmpty([userAnswer, aiQuestion, thoughtText]);
+        candidate =
+            JournalEntry._firstNonEmpty([userAnswer, aiQuestion, thoughtText]);
         break;
       case EntryKind.journal:
         candidate = JournalEntry._firstNonEmpty([thoughtText, subtitle]);

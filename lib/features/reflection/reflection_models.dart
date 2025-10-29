@@ -1,18 +1,16 @@
-//[BASELINE] lib/features/reflection/reflection_models.dart(Stand: 29.10.)
+// [BASELINE] lib/features/reflection/reflection_models.dart (Stand: 29.10., v3.25.2-hope)
 // Part: Modelle/Typen/Utils (library: reflection_screen)
 // -----------------------------------------------------------------------------
-// v3.25.1 — Worker v15.x Alignment (Oxford style, +Flow/Session-Checks, fixes)
-// - Risk-Fallback robuster: _asBool(m['risk']) statt striktem == true
+// v3.25.2 — Worker v15.x Alignment (+Hope passthrough, Oxford style, fixes)
+// - NEU: _PandaStep.hope (optional) + robustes Parsing (hope | hope_text |
+//        flow.hope | ui.hope | speech_sequence[*].type=='hope')
+// - Risk-Fallback robust: _asBool(m['risk']) statt striktem == true
 // - Followups: Doppelpunkte am Ende entfernen (harmoniert mit UI-Chips)
 // - String→Liste: Trennzeichen „;“ auch ohne Leerraum splitten (\s*;\s*)
 // - Answer-Helper: weitere verschachtelte Aliase (flow/ui: chips/answers/options)
 // - Bestehende v3.25 Features bleiben unverändert (Fragen/Chips/HelperSuggestion)
 // -----------------------------------------------------------------------------
-/*
-// Lints / Analyzer:
-// Private Typen in öffentlicher API sind hier bewusst gewollt.
-// Unterdrücken wir zentral für diese Datei:
-*/
+// Lints / Analyzer: Private Typen in öffentlicher API sind hier bewusst gewollt.
 // ignore_for_file: library_private_types_in_public_api
 
 part of 'reflection_screen.dart';
@@ -31,10 +29,11 @@ const int kMaxAnswersForMoodFallback = 3; // spätestens nach so vielen Antworte
 /// Ein semantischer „Schritt“ des Panda-Coaches:
 /// - [mirror]: kurze, beruhigende Spiegelung
 /// - [question]: optionale Leitfrage (0–1)
-/// - [followups]: Antwort-Chips als Satzstarter (keine Fragen, max. 3)
+//  - [followups]: Antwort-Chips als Satzstarter (keine Fragen, max. 3)
 /// - [talkLines]: optionale Zusatzzeilen (max. 2)
 /// - [risk]: Risiko-Hinweis (true = Safety-Hinweis/CH-Card anzeigen)
 /// - [helperSuggestion]: sanfter 0–1-Satz vom Worker (optional)
+/// - [hope]: kurzer, hoffnungsvoller Satz (optional; wird im UI unter der Frage gezeigt)
 /// - [answer]: Nutzerantwort auf die aktuelle Frage (optional)
 class _PandaStep {
   final String mirror;
@@ -52,6 +51,9 @@ class _PandaStep {
   /// Optionaler sanfter Satz aus dem Worker (key: 'helper_suggestion')
   final String? helperSuggestion;
 
+  /// Optionaler Hope-Satz (siehe UI-Hope-Slot)
+  final String? hope;
+
   /// Frei eingegebene Nutzerantwort (wird getrimmt gespeichert)
   String? answer;
 
@@ -62,10 +64,12 @@ class _PandaStep {
     List<String> talkLines = const [],
     this.risk = false,
     String? helperSuggestion,
+    String? hope,
     String? answer,
   })  : followups = _sanitizeFollowups(followups),
         talkLines = _sanitizeTalk(talkLines),
         helperSuggestion = _trimOrNull(helperSuggestion),
+        hope = _trimOrNull(hope),
         answer = _trimOrNull(answer);
 
   /// Talk-only Schritt (keine Frage/Antwort erwartet).
@@ -75,6 +79,7 @@ class _PandaStep {
     List<String> talkLines = const [],
     bool risk = false,
     String? helperSuggestion,
+    String? hope,
   }) =>
       _PandaStep(
         mirror: mirror,
@@ -83,6 +88,7 @@ class _PandaStep {
         followups: const [],
         risk: risk,
         helperSuggestion: helperSuggestion,
+        hope: hope,
       );
 
   /// true, wenn der Nutzer bereits eine Antwort hinterlegt hat.
@@ -98,6 +104,7 @@ class _PandaStep {
         talkLines: List<String>.from(talkLines),
         risk: risk,
         helperSuggestion: helperSuggestion,
+        hope: hope,
         answer: answer,
       );
 
@@ -108,6 +115,7 @@ class _PandaStep {
     List<String>? talkLines,
     bool? risk,
     String? helperSuggestion,
+    String? hope,
     String? answer,
   }) {
     final step = _PandaStep(
@@ -117,13 +125,14 @@ class _PandaStep {
       talkLines: talkLines ?? List<String>.from(this.talkLines),
       risk: risk ?? this.risk,
       helperSuggestion: helperSuggestion ?? this.helperSuggestion,
+      hope: hope ?? this.hope,
       answer: this.answer,
     );
     if (answer != null) step.answer = _trimOrNull(answer);
     return step;
   }
 
-  /// Serialisierung (schreibt zusätzlich 'answer_helpers' & 'helper_suggestion').
+  /// Serialisierung (schreibt zusätzlich 'answer_helpers' & 'helper_suggestion' & 'hope').
   JsonMap toMap() => <String, dynamic>{
         'mirror': mirror,
         'question': question,
@@ -133,6 +142,7 @@ class _PandaStep {
         'talk': List<String>.from(talkLines),
         'risk': risk,
         'helper_suggestion': helperSuggestion,
+        if ((hope ?? '').toString().trim().isNotEmpty) 'hope': hope,
         'answer': hasAnswer ? answer!.trim() : null,
       };
 
@@ -185,6 +195,17 @@ class _PandaStep {
       uiMap?['helperSuggestion'],
     ]);
 
+    // Hope-Text: direkt + Aliase + verschachtelt + speech_sequence
+    final hope = _pickFirstNonEmptyString([
+          m['hope'],
+          m['hope_text'],
+          flowMap?['hope'],
+          uiMap?['hope'],
+        ]) ??
+        _extractHopeFromSpeechSequence(m) ??
+        _extractHopeFromSpeechSequence(flowMap) ??
+        _extractHopeFromSpeechSequence(uiMap);
+
     return _PandaStep(
       mirror: _asString(m['mirror']),
       question: q,
@@ -192,6 +213,7 @@ class _PandaStep {
       talkLines: talk,
       risk: risk,
       helperSuggestion: hs,
+      hope: hope,
       answer: _asNullableTrimmedString(m['answer']),
     );
   }
@@ -203,7 +225,7 @@ class _PandaStep {
         'question:"${_ellipsis(question, 40)}", '
         'followups:${followups.length}, talk:${talkLines.length}, '
         'risk:$risk, helperSuggestion:${(helperSuggestion ?? '').isNotEmpty}, '
-        'hasAnswer:$a)';
+        'hope:${(hope ?? '').isNotEmpty}, hasAnswer:$a)';
   }
 
   @override
@@ -212,6 +234,7 @@ class _PandaStep {
         question,
         risk,
         helperSuggestion ?? '',
+        hope ?? '',
         Object.hashAll(talkLines),
         Object.hashAll(followups),
         (answer ?? ''),
@@ -225,6 +248,7 @@ class _PandaStep {
         question == other.question &&
         risk == other.risk &&
         (helperSuggestion ?? '') == (other.helperSuggestion ?? '') &&
+        (hope ?? '') == (other.hope ?? '') &&
         _listEquals(talkLines, other.talkLines) &&
         _listEquals(followups, other.followups) &&
         (answer ?? '') == (other.answer ?? '');
@@ -257,8 +281,8 @@ class _PandaStep {
       var s = raw.toString().trim();
       if (s.isEmpty) return '';
       s = s.replaceAll(RegExp(r'^[„“"»«]+|[„“"»«]+$'), '');
-      s = s.replaceAll(RegExp(r'[?？.。!！]+$'), '');   // '…' bleibt bewusst stehen
-      s = s.replaceAll(RegExp(r'\s*[:：]\s*$'), '');  // Doppelpunkte am Ende weg
+      s = s.replaceAll(RegExp(r'[?？.。!！]+$'), ''); // '…' bleibt bewusst stehen
+      s = s.replaceAll(RegExp(r'\s*[:：]\s*$'), ''); // Doppelpunkte am Ende weg
       s = s.replaceAll(RegExp(r'\s+'), ' ').trim();
       if (s.length > 72) s = '${s.substring(0, 72).trimRight()}…';
       return s;
@@ -293,10 +317,12 @@ class _PandaStep {
       ...asList(m['options']),
     ];
 
-    final Map<String, dynamic> flow =
-        (m['flow'] is Map) ? Map<String, dynamic>.from(m['flow']) : const <String, dynamic>{};
-    final Map<String, dynamic> ui =
-        (m['ui'] is Map) ? Map<String, dynamic>.from(m['ui']) : const <String, dynamic>{};
+    final Map<String, dynamic> flow = (m['flow'] is Map)
+        ? Map<String, dynamic>.from(m['flow'])
+        : const <String, dynamic>{};
+    final Map<String, dynamic> ui = (m['ui'] is Map)
+        ? Map<String, dynamic>.from(m['ui'])
+        : const <String, dynamic>{};
 
     final nested = <String>[
       ...asList(flow['answer_helpers']),
@@ -328,6 +354,31 @@ class _PandaStep {
       if (out.length >= 3) break;
     }
     return out;
+  }
+
+  /// Extrahiert Hope-Text aus einer 'speech_sequence' Struktur:
+  /// - Liste von Maps: {type:'hope', text:'...'}
+  /// - Liste dynamischer Objekte mit .type/.text
+  static String? _extractHopeFromSpeechSequence(dynamic container) {
+    try {
+      if (container is Map && container['speech_sequence'] is List) {
+        final seq = container['speech_sequence'] as List;
+        for (final e in seq) {
+          if (e is Map) {
+            final t = _asString(e['type']).toLowerCase();
+            final txt = _asString(e['text']).trim();
+            if (t == 'hope' && txt.isNotEmpty) return txt;
+          } else {
+            try {
+              final t = (e as dynamic).type?.toString().toLowerCase();
+              final txt = (e as dynamic).text?.toString().trim();
+              if (t == 'hope' && (txt ?? '').isNotEmpty) return txt;
+            } catch (_) {}
+          }
+        }
+      }
+    } catch (_) {}
+    return null;
   }
 }
 
@@ -386,7 +437,8 @@ class ReflectionRound {
   bool get answered => steps.any((s) => s.hasAnswer);
 
   /// true, wenn die Stimmung gesetzt ist.
-  bool get hasMood => moodScore != null || ((moodLabel ?? '').trim().isNotEmpty);
+  bool get hasMood =>
+      moodScore != null || ((moodLabel ?? '').trim().isNotEmpty);
 
   /// true, wenn Antwort + Stimmung vorhanden sind.
   bool get isComplete => answered && hasMood;
@@ -535,8 +587,7 @@ class ReflectionRound {
   }
 
   @override
-  String toString() =>
-      'ReflectionRound(id:$id, steps:${steps.length}, '
+  String toString() => 'ReflectionRound(id:$id, steps:${steps.length}, '
       'answers:$answersCount, pending:$hasPendingQuestion, '
       'readyForMood:$readyForMood, wantsFollowup:$wantsFollowup, '
       'mood:$moodLabel/$moodScore, moodIntro:$moodIntro, allowClosure:$allowClosure)';
@@ -694,8 +745,7 @@ class TurnProbe {
       } catch (_) {}
     }
 
-    final map =
-        (s is Map) ? Map<String, dynamic>.from(s) : <String, dynamic>{};
+    final map = (s is Map) ? Map<String, dynamic>.from(s) : <String, dynamic>{};
 
     final threadId = _pickFirstNonEmptyString([
           map['thread_id'],
@@ -703,7 +753,8 @@ class TurnProbe {
           map['threadId'],
         ]) ??
         '';
-    final turnIdx = _coerceInt(map['turn_index'] ?? map['turn'] ?? map['turnIndex']) ?? 0;
+    final turnIdx =
+        _coerceInt(map['turn_index'] ?? map['turn'] ?? map['turnIndex']) ?? 0;
     final maxTurns = _coerceInt(map['max_turns'] ?? map['maxTurns']) ?? 3;
 
     return {
@@ -751,8 +802,10 @@ class TurnProbe {
 
   /// Risk-Level → 'high' | 'mild' | 'none' (bool 'risk' als Fallback mild).
   static String riskLevel(dynamic turn) {
-    final rl = _asString(_extractNested(turn, const ['risk_level'])).toLowerCase();
-    final legacy = _asString(_extractNested(turn, const ['level'])).toLowerCase();
+    final rl =
+        _asString(_extractNested(turn, const ['risk_level'])).toLowerCase();
+    final legacy =
+        _asString(_extractNested(turn, const ['level'])).toLowerCase();
     if (rl == 'high' || rl == 'mild') return rl;
     if (legacy == 'high' || legacy == 'mild') return legacy;
     final flag = _asBool(_extractNested(turn, const ['risk']));

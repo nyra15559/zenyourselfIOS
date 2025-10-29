@@ -53,8 +53,10 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
   @override
   void initState() {
     super.initState();
-    _introCtrl = AnimationController(vsync: this, duration: zs.animLong)..forward();
-    _tilesCtrl = AnimationController(vsync: this, duration: zs.animMed)..forward();
+    _introCtrl = AnimationController(vsync: this, duration: zs.animLong)
+      ..forward();
+    _tilesCtrl = AnimationController(vsync: this, duration: zs.animMed)
+      ..forward();
   }
 
   @override
@@ -88,13 +90,15 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
 
   Future<void> _openReflection() async {
     HapticFeedback.selectionClick();
-    await _pushLocked(MaterialPageRoute(builder: (_) => const ReflectionScreen()));
+    await _pushLocked(
+        MaterialPageRoute(builder: (_) => const ReflectionScreen()));
   }
 
   void _showLockedSnack(int remaining) {
     final plural = remaining == 1 ? 'Runde' : 'Runden';
     final snack = SnackBar(
-      content: Text('Noch $remaining komplette $plural bis zur Kurzgeschichte.'),
+      content:
+          Text('Noch $remaining komplette $plural bis zur Kurzgeschichte.'),
       behavior: SnackBarBehavior.floating,
       duration: const Duration(seconds: 2),
     );
@@ -108,7 +112,7 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
     final width = size.width;
 
     // Responsiv
-    final bool isXsSm = width < 480;         // 1 Spalte
+    final bool isXsSm = width < 480; // 1 Spalte
     final bool isMd = width >= 480 && width < 760;
     final bool isLg = width >= 760;
 
@@ -119,11 +123,13 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
     final double tileExtent = isXsSm ? 76 : (isMd ? 86 : 96);
 
     // TextScaler zähmen
-    final textScaler = media.textScaler.clamp(maxScaleFactor: 1.15, minScaleFactor: 0.90);
+    final textScaler =
+        media.textScaler.clamp(maxScaleFactor: 1.15, minScaleFactor: 0.90);
 
     // Reflexions-Zähler (Provider/Fallback)
     final prov = context.watch<JournalEntriesProvider?>();
-    final reflectionsCount = prov?.reflections.length ?? widget.reflections.length;
+    final reflectionsCount =
+        prov?.reflections.length ?? widget.reflections.length;
     final storyUnlocked = reflectionsCount >= _kStoryUnlock;
     final remaining = storyUnlocked ? 0 : (_kStoryUnlock - reflectionsCount);
 
@@ -140,7 +146,8 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
         label: 'Gedankenbuch',
         subtitleXs: 'Gedanken loslassen',
         subtitleMd: 'Lass deine Gedanken los',
-        onTap: () => _pushLocked(MaterialPageRoute(builder: (_) => const JournalScreen())),
+        onTap: () => _pushLocked(
+            MaterialPageRoute(builder: (_) => const JournalScreen())),
       ),
       _OptionData(
         icon: Icons.psychology_alt_rounded,
@@ -153,9 +160,12 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
         icon: Icons.auto_stories_rounded,
         label: 'Kurzgeschichte',
         subtitleXs: storyUnlocked ? 'Story lesen' : 'Noch $remaining bis frei',
-        subtitleMd: storyUnlocked ? 'Therapeutische Kurzgeschichte lesen' : 'Noch $remaining bis freigeschaltet',
+        subtitleMd: storyUnlocked
+            ? 'Therapeutische Kurzgeschichte lesen'
+            : 'Noch $remaining bis freigeschaltet',
         locked: !storyUnlocked,
-        lockHint: 'Noch $remaining vollständige Runde${remaining == 1 ? '' : 'n'} bis zur Story',
+        lockHint:
+            'Noch $remaining vollständige Runde${remaining == 1 ? '' : 'n'} bis zur Story',
         onTap: () {
           if (!storyUnlocked) {
             HapticFeedback.selectionClick();
@@ -170,7 +180,8 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
         label: 'Impuls',
         subtitleXs: 'Atem & Reset',
         subtitleMd: 'Atem & Mini-Reset',
-        onTap: () => _pushLocked(MaterialPageRoute(builder: (_) => const ImpulseScreen())),
+        onTap: () => _pushLocked(
+            MaterialPageRoute(builder: (_) => const ImpulseScreen())),
       ),
       _OptionData(
         icon: Icons.insights_rounded,
@@ -215,11 +226,13 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
 
               // Content als Sliver-Scroll (inkl. AppBar + Footer)
               SafeArea(
-                top: false, // wir verwenden eine SliverAppBar, die selbst Höhe einnimmt
+                top:
+                    false, // wir verwenden eine SliverAppBar, die selbst Höhe einnimmt
                 bottom: false,
                 child: Center(
                   child: ConstrainedBox(
-                    constraints: BoxConstraints(minWidth: 320, maxWidth: maxGridWidth),
+                    constraints:
+                        BoxConstraints(minWidth: 320, maxWidth: maxGridWidth),
                     child: CustomScrollView(
                       slivers: [
                         // ---------- Fix: Zurück-Button als SliverAppBar (nimmt Platz ein) ----------
@@ -241,11 +254,14 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
                         // Headline
                         SliverToBoxAdapter(
                           child: ScaleTransition(
-                            scale: CurvedAnimation(parent: _introCtrl, curve: Curves.elasticOut),
+                            scale: CurvedAnimation(
+                                parent: _introCtrl, curve: Curves.elasticOut),
                             child: Padding(
                               padding: EdgeInsets.fromLTRB(
                                 zs.ZenSpacing.m,
-                                size.height < 700 ? zs.ZenSpacing.s : zs.ZenSpacing.l,
+                                size.height < 700
+                                    ? zs.ZenSpacing.s
+                                    : zs.ZenSpacing.l,
                                 zs.ZenSpacing.m,
                                 zs.ZenSpacing.m,
                               ),
@@ -262,7 +278,7 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
                                   shadows: [
                                     Shadow(
                                       blurRadius: 8,
-                                      color: Colors.black.withValues(alpha: .08),
+                                      color: Colors.black.withValue(alpha: .08),
                                       offset: const Offset(0, 2),
                                     ),
                                   ],
@@ -274,9 +290,11 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
 
                         // Grid der Optionen (mit SliverFadeTransition!)
                         SliverPadding(
-                          padding: const EdgeInsets.symmetric(horizontal: zs.ZenSpacing.m),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: zs.ZenSpacing.m),
                           sliver: SliverFadeTransition(
-                            opacity: CurvedAnimation(parent: _tilesCtrl, curve: Curves.easeOutCubic),
+                            opacity: CurvedAnimation(
+                                parent: _tilesCtrl, curve: Curves.easeOutCubic),
                             sliver: SliverGrid(
                               delegate: SliverChildBuilderDelegate(
                                 (context, index) {
@@ -284,7 +302,8 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
                                   return _OptionTile(
                                     icon: d.icon,
                                     label: d.label,
-                                    subtitle: isXsSm ? d.subtitleXs : d.subtitleMd,
+                                    subtitle:
+                                        isXsSm ? d.subtitleXs : d.subtitleMd,
                                     locked: d.locked,
                                     lockHint: d.lockHint,
                                     onTap: d.onTap,
@@ -292,7 +311,8 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
                                 },
                                 childCount: items.length,
                               ),
-                              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                              gridDelegate:
+                                  SliverGridDelegateWithFixedCrossAxisCount(
                                 crossAxisCount: columns,
                                 mainAxisSpacing: zs.ZenSpacing.m,
                                 crossAxisSpacing: zs.ZenSpacing.m,
@@ -303,12 +323,14 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
                         ),
 
                         // Abstand vor Footer
-                        const SliverToBoxAdapter(child: SizedBox(height: zs.ZenSpacing.l)),
+                        const SliverToBoxAdapter(
+                            child: SizedBox(height: zs.ZenSpacing.l)),
 
                         // Footer (Zitat + Privacy)
                         SliverToBoxAdapter(
                           child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: zs.ZenSpacing.m),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: zs.ZenSpacing.m),
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
@@ -325,7 +347,10 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
                                       fontStyle: FontStyle.italic,
                                       fontSize: isXsSm ? 14.5 : 16.0,
                                       shadows: const [
-                                        Shadow(blurRadius: 6, color: Colors.black26, offset: Offset(0, 2)),
+                                        Shadow(
+                                            blurRadius: 6,
+                                            color: Colors.black26,
+                                            offset: Offset(0, 2)),
                                       ],
                                     ),
                                   ),
@@ -337,7 +362,8 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
                                   maxLines: 2,
                                   overflow: TextOverflow.ellipsis,
                                   style: tt.bodySmall?.copyWith(
-                                    color: zs.ZenColors.deepSage.withValues(alpha: .82),
+                                    color: zs.ZenColors.deepSage
+                                        .withValue(alpha: .82),
                                   ),
                                 ),
                                 const SizedBox(height: zs.ZenSpacing.l),
@@ -422,17 +448,17 @@ class _BackButton extends StatelessWidget {
         child: InkWell(
           borderRadius: const BorderRadius.all(zs.ZenRadii.l),
           onTap: () => Navigator.maybeOf(context)?.maybePop(),
-          splashColor: zs.ZenColors.surface.withValues(alpha: .12),
-          highlightColor: zs.ZenColors.surface.withValues(alpha: .06),
+          splashColor: zs.ZenColors.surface.withValue(alpha: .12),
+          highlightColor: zs.ZenColors.surface.withValue(alpha: .06),
           child: Container(
             width: 46,
             height: 46,
             decoration: BoxDecoration(
-              color: zs.ZenColors.surface.withValues(alpha: .49),
+              color: zs.ZenColors.surface.withValue(alpha: .49),
               shape: BoxShape.circle,
               boxShadow: zs.ZenShadows.card,
               border: Border.all(
-                color: zs.ZenColors.sage.withValues(alpha: .18),
+                color: zs.ZenColors.sage.withValue(alpha: .18),
                 width: 1.2,
               ),
             ),
@@ -487,13 +513,14 @@ class _OptionTile extends StatelessWidget {
               width: isXsSm ? 38 : 42,
               height: isXsSm ? 38 : 42,
               decoration: BoxDecoration(
-                color: zs.ZenColors.cta.withValues(alpha: .12),
+                color: zs.ZenColors.cta.withValue(alpha: .12),
                 shape: BoxShape.circle,
                 border: Border.all(
-                  color: zs.ZenColors.cta.withValues(alpha: .35),
+                  color: zs.ZenColors.cta.withValue(alpha: .35),
                 ),
               ),
-              child: Icon(icon, color: zs.ZenColors.cta, size: isXsSm ? 20 : 22),
+              child:
+                  Icon(icon, color: zs.ZenColors.cta, size: isXsSm ? 20 : 22),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -518,7 +545,7 @@ class _OptionTile extends StatelessWidget {
                     maxLines: isXsSm ? 1 : 2,
                     overflow: TextOverflow.ellipsis,
                     style: tt.bodyMedium!.copyWith(
-                      color: zs.ZenColors.cta.withValues(alpha: .82),
+                      color: zs.ZenColors.cta.withValue(alpha: .82),
                       fontStyle: FontStyle.italic,
                       fontSize: isXsSm ? 12.5 : 13,
                       height: 1.15,
@@ -546,12 +573,13 @@ class _OptionTile extends StatelessWidget {
         color: Colors.transparent,
         child: InkWell(
           borderRadius: const BorderRadius.all(zs.ZenRadii.xl),
-          splashColor: zs.ZenColors.cta.withValues(alpha: .12),
-          highlightColor: zs.ZenColors.cta.withValues(alpha: .06),
+          splashColor: zs.ZenColors.cta.withValue(alpha: .12),
+          highlightColor: zs.ZenColors.cta.withValue(alpha: .06),
           onTap: () {
             if (locked) {
               HapticFeedback.selectionClick();
-              final msg = lockHint ?? 'Noch etwas Geduld – bald freigeschaltet.';
+              final msg =
+                  lockHint ?? 'Noch etwas Geduld – bald freigeschaltet.';
               final snack = SnackBar(
                 content: Text(msg),
                 behavior: SnackBarBehavior.floating,

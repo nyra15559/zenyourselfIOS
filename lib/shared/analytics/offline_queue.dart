@@ -45,10 +45,10 @@ typedef JsonMap = Map<String, dynamic>;
 
 /// Ergebnis des Transport-Versands (Batch).
 class TransportOutcome {
-  final bool ok;          // erfolgreich übertragen
-  final bool retriable;   // bei Fehler: ob Retry sinnvoll (z. B. Netzwerk/5xx)
-  final int? status;      // optionaler HTTP-Status
-  final String? message;  // optionaler Fehlertext
+  final bool ok; // erfolgreich übertragen
+  final bool retriable; // bei Fehler: ob Retry sinnvoll (z. B. Netzwerk/5xx)
+  final int? status; // optionaler HTTP-Status
+  final String? message; // optionaler Fehlertext
 
   const TransportOutcome({
     required this.ok,
@@ -57,7 +57,8 @@ class TransportOutcome {
     this.message,
   });
 
-  factory TransportOutcome.success() => const TransportOutcome(ok: true, retriable: false);
+  factory TransportOutcome.success() =>
+      const TransportOutcome(ok: true, retriable: false);
   factory TransportOutcome.retry([String? msg]) =>
       TransportOutcome(ok: false, retriable: true, message: msg);
   factory TransportOutcome.fail([String? msg]) =>
@@ -171,7 +172,8 @@ class AnalyticsOfflineQueue {
   final bool Function()? isNetworkAvailable;
 
   /// Sanitizer-Listen (telemetry ohne PII)
-  final Set<String> allowedProps; // Whitelist; leere Menge → alle erlaubt (außer blockiert)
+  final Set<String>
+      allowedProps; // Whitelist; leere Menge → alle erlaubt (außer blockiert)
   final Set<String> blockedProps; // Blacklist; gewinnt immer
 
   /// Key-Normalisierung: max. Länge pro Wert (Strings werden ggf. gekürzt).
@@ -199,22 +201,24 @@ class AnalyticsOfflineQueue {
     this.maxStringLength = 256,
     bool startPeriodicFlush = true,
   })  : storage = storage ?? InMemoryOfflineStorage(),
-        allowedProps = (allowedProps ?? const <String>{
-          // unkritische, aggregierbare Felder (Beispiele)
-          'screen', 'action', 'feature', 'category',
-          'success', 'error_code', 'retry_count',
-          'duration_ms', 'network', 'locale',
-          'app_version', 'platform', 'build', 'release',
-          'session_id', // kurzlebig, pseudonym (keine User-ID!)
-        }),
-        blockedProps = (blockedProps ?? const <String>{
-          // typische PII-Schlüssel — werden gnadenlos entfernt
-          'name', 'full_name', 'first_name', 'last_name',
-          'email', 'mail', 'phone', 'phone_number',
-          'address', 'street', 'zip', 'city',
-          'user_id', 'account_id', 'customer_id',
-          'message', 'content', 'text', 'note', 'body',
-        }) {
+        allowedProps = (allowedProps ??
+            const <String>{
+              // unkritische, aggregierbare Felder (Beispiele)
+              'screen', 'action', 'feature', 'category',
+              'success', 'error_code', 'retry_count',
+              'duration_ms', 'network', 'locale',
+              'app_version', 'platform', 'build', 'release',
+              'session_id', // kurzlebig, pseudonym (keine User-ID!)
+            }),
+        blockedProps = (blockedProps ??
+            const <String>{
+              // typische PII-Schlüssel — werden gnadenlos entfernt
+              'name', 'full_name', 'first_name', 'last_name',
+              'email', 'mail', 'phone', 'phone_number',
+              'address', 'street', 'zip', 'city',
+              'user_id', 'account_id', 'customer_id',
+              'message', 'content', 'text', 'note', 'body',
+            }) {
     if (startPeriodicFlush) _startTimer();
   }
 
@@ -290,7 +294,8 @@ class AnalyticsOfflineQueue {
 
       if (batchItems.isEmpty) return;
 
-      final payload = batchItems.map((e) => e.event.toJson()).toList(growable: false);
+      final payload =
+          batchItems.map((e) => e.event.toJson()).toList(growable: false);
 
       TransportOutcome outcome;
       try {
@@ -302,7 +307,8 @@ class AnalyticsOfflineQueue {
       if (outcome.ok) {
         // Erfolgreich: entferne versendete Items aus Queue
         final sentIds = batchItems.map((e) => e.id).toSet();
-        queue = queue.where((e) => !sentIds.contains(e.id)).toList(growable: true);
+        queue =
+            queue.where((e) => !sentIds.contains(e.id)).toList(growable: true);
         await storage.save(queue);
         _lastFlush = DateTime.now();
         return;
@@ -331,7 +337,8 @@ class AnalyticsOfflineQueue {
 
       // Queue neu zusammensetzen: unveränderte + updated (statt der alten batchItems)
       final sentIds = batchItems.map((e) => e.id).toSet();
-      final survivors = queue.where((e) => !sentIds.contains(e.id)).toList(growable: true);
+      final survivors =
+          queue.where((e) => !sentIds.contains(e.id)).toList(growable: true);
       survivors.addAll(updated);
       await storage.save(survivors);
       _lastFlush = DateTime.now();
@@ -441,8 +448,10 @@ class _TelemetryEvent {
 
   factory _TelemetryEvent.fromJson(JsonMap j) => _TelemetryEvent(
         type: (j['type'] as String?) ?? 'unknown',
-        ts: DateTime.tryParse((j['ts'] as String?) ?? '')?.toUtc() ?? DateTime.now().toUtc(),
-        props: (j['props'] as Map?)?.cast<String, dynamic>() ?? <String, dynamic>{},
+        ts: DateTime.tryParse((j['ts'] as String?) ?? '')?.toUtc() ??
+            DateTime.now().toUtc(),
+        props: (j['props'] as Map?)?.cast<String, dynamic>() ??
+            <String, dynamic>{},
       );
 }
 
@@ -488,19 +497,24 @@ class _QueueItem {
   }
 
   JsonMap toJson() => <String, dynamic>{
-    'id': id,
-    'event': event.toJson(),
-    'retry': retryCount,
-    'next': nextEligibleAt.toIso8601String(),
-    'enq': enqueuedAt.toIso8601String(),
-  };
+        'id': id,
+        'event': event.toJson(),
+        'retry': retryCount,
+        'next': nextEligibleAt.toIso8601String(),
+        'enq': enqueuedAt.toIso8601String(),
+      };
 
   factory _QueueItem.fromJson(JsonMap j) => _QueueItem(
         id: (j['id'] as String?) ?? _makeId(),
-        event: _TelemetryEvent.fromJson((j['event'] as Map?)?.cast<String, dynamic>() ?? <String, dynamic>{}),
+        event: _TelemetryEvent.fromJson(
+            (j['event'] as Map?)?.cast<String, dynamic>() ??
+                <String, dynamic>{}),
         retryCount: (j['retry'] as num?)?.toInt() ?? 0,
-        nextEligibleAt: DateTime.tryParse((j['next'] as String?) ?? '')?.toUtc() ?? DateTime.now().toUtc(),
-        enqueuedAt: DateTime.tryParse((j['enq'] as String?) ?? '')?.toUtc() ?? DateTime.now().toUtc(),
+        nextEligibleAt:
+            DateTime.tryParse((j['next'] as String?) ?? '')?.toUtc() ??
+                DateTime.now().toUtc(),
+        enqueuedAt: DateTime.tryParse((j['enq'] as String?) ?? '')?.toUtc() ??
+            DateTime.now().toUtc(),
       );
 
   factory _QueueItem.fromEvent(_TelemetryEvent e) => _QueueItem(

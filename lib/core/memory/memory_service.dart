@@ -1,4 +1,4 @@
-// [BASELINE] lib/core/memory/memory_service.dart — v6.3.1 (Stand: 29.10.2025)
+// [BASELINE] lib/core/memory/memory_service.dart — v6.3.3+hotfix1 (Stand: 29.10.2025)
 // ZenYourself — MemoryService (Lokales Kontext-Gedächtnis, Ghost-Mode by default)
 // -----------------------------------------------------------------------------
 // Leitprinzipien:
@@ -34,13 +34,13 @@ import 'memory_store.dart';
 /// Alle Felder optional; leere Felder werden nicht gesendet.
 class MemoryContextHint {
   final List<String>? facets; // stabile Facet-Keys
-  final List<String>? tags;   // optional
+  final List<String>? tags; // optional
   final List<String>? topics; // human labels der Facetten
   const MemoryContextHint({this.facets, this.tags, this.topics});
 
   Map<String, dynamic> toJson() => <String, dynamic>{
         if (facets != null && facets!.isNotEmpty) 'facets': facets,
-        if (tags != null && tags!.isNotOrEmpty) 'tags': tags,
+        if (tags != null && tags!.isNotEmpty) 'tags': tags,
         if (topics != null && topics!.isNotEmpty) 'topics': topics,
       };
 }
@@ -52,8 +52,8 @@ class MemoryService {
   final MemoryStore _store = MemoryStore.instance;
 
   // Flags
-  bool _enabled = true;        // Ghost-Mode (lokales Gedächtnis)
-  bool _shareEnabled = false;  // Therapist-Mode (Opt-in)
+  bool _enabled = true; // Ghost-Mode (lokales Gedächtnis)
+  bool _shareEnabled = false; // Therapist-Mode (Opt-in)
 
   bool get enabled => _enabled;
   bool get shareEnabled => _shareEnabled;
@@ -110,12 +110,16 @@ class MemoryService {
 
   Future<void> setEnabled(bool v) async {
     _enabled = v;
-    try { await _store.setEnabled(v); } catch (_) {/* ignore */}
+    try {
+      await _store.setEnabled(v);
+    } catch (_) {/* ignore */}
   }
 
   Future<void> setShareEnabled(bool v) async {
     _shareEnabled = v;
-    try { await _setOptBool(_kShareEnabled, v); } catch (_) {/* ignore */}
+    try {
+      await _setOptBool(_kShareEnabled, v);
+    } catch (_) {/* ignore */}
   }
 
   // ---------------- Identity (lokal, nur bei Opt-in nutzbar) -----------------
@@ -187,14 +191,20 @@ class MemoryService {
 
       // klassische & erweiterte Muster
       final patterns = <RegExp>[
-        RegExp(r"\bich\s+hei(?:ß|ss|s)e\s+([a-zäöüß\-\' ]+)", caseSensitive: false),
-        RegExp(r"\bmein\s+name\s+ist\s+([a-zäöüß\-\' ]+)", caseSensitive: false),
-        RegExp(r"\bmein\s+vorname\s+ist\s+([a-zäöüß\-\' ]+)", caseSensitive: false),
+        RegExp(r"\bich\s+hei(?:ß|ss|s)e\s+([a-zäöüß\-\' ]+)",
+            caseSensitive: false),
+        RegExp(r"\bmein\s+name\s+ist\s+([a-zäöüß\-\' ]+)",
+            caseSensitive: false),
+        RegExp(r"\bmein\s+vorname\s+ist\s+([a-zäöüß\-\' ]+)",
+            caseSensitive: false),
         RegExp(r"\bich\s+bin\s+([a-zäöüß\-\' ]+)", caseSensitive: false),
         RegExp(r"\bnenn\s+mich\s+([a-zäöüß\-\' ]+)", caseSensitive: false),
-        RegExp(r"\bman\s+nennt\s+mich\s+([a-zäöüß\-\' ]+)", caseSensitive: false),
-        RegExp(r"\bdu\s+kannst\s+mich\s+([a-zäöüß\-\' ]+)\s+nennen", caseSensitive: false),
-        RegExp(r"\bja(?:,\s*)?\s*einfach\s+([a-zäöüß\-\' ]+)\b", caseSensitive: false),
+        RegExp(r"\bman\s+nennt\s+mich\s+([a-zäöüß\-\' ]+)",
+            caseSensitive: false),
+        RegExp(r"\bdu\s+kannst\s+mich\s+([a-zäöüß\-\' ]+)\s+nennen",
+            caseSensitive: false),
+        RegExp(r"\bja(?:,\s*)?\s*einfach\s+([a-zäöüß\-\' ]+)\b",
+            caseSensitive: false),
       ];
 
       for (final re in patterns) {
@@ -224,7 +234,7 @@ class MemoryService {
       clean = clean[0].toUpperCase() + clean.substring(1);
 
       // Ausschlüsse
-      const banned = {'einfach','ja','okay','ok','nein'};
+      const banned = {'einfach', 'ja', 'okay', 'ok', 'nein'};
       if (banned.contains(clean.toLowerCase())) return;
 
       await saveIdentityName(clean, greetByName: greetByName);
@@ -249,13 +259,17 @@ class MemoryService {
       // leichten Sync-Hint aktualisieren
       if (entry.contextFacets.isNotEmpty) {
         final sorted = [...entry.contextFacets]..sort((a, b) {
-          final byHits = (b.hits).compareTo(a.hits);
-          if (byHits != 0) return byHits;
-          return (a.label).toLowerCase().compareTo((b.label).toLowerCase());
-        });
+            final byHits = (b.hits).compareTo(a.hits);
+            if (byHits != 0) return byHits;
+            return (a.label).toLowerCase().compareTo((b.label).toLowerCase());
+          });
 
-        final facetKeys   = sorted.map((f) => f.key).where((s) => s.trim().isNotEmpty).toList();
-        final facetLabels = sorted.map((f) => f.label).where((s) => s.trim().isNotEmpty).toList();
+        final facetKeys =
+            sorted.map((f) => f.key).where((s) => s.trim().isNotEmpty).toList();
+        final facetLabels = sorted
+            .map((f) => f.label)
+            .where((s) => s.trim().isNotEmpty)
+            .toList();
 
         _lastHint = MemoryContextHint(
           facets: facetKeys.take(6).toList(growable: false),
@@ -319,7 +333,8 @@ class MemoryService {
   }
 
   /// Zentrale, compile-sichere Line-Save-Kaskade ohne statische MemoryEntry-Factories.
-  Future<void> _saveLine(String role, String text, {Map<String, dynamic>? meta}) async {
+  Future<void> _saveLine(String role, String text,
+      {Map<String, dynamic>? meta}) async {
     if (!_enabled) return;
     try {
       final m = meta ?? const <String, dynamic>{};
@@ -378,7 +393,9 @@ class MemoryService {
     _latestTopicsTs = null;
     _topFacetsCache = null;
     _topFacetsTs = null;
-    try { await _store.clearAll(); } catch (_) {/* ignore */}
+    try {
+      await _store.clearAll();
+    } catch (_) {/* ignore */}
   }
 
   // ---------------- Read ------------------------------------------------------
@@ -417,13 +434,18 @@ class MemoryService {
         ..sort((a, b) {
           final byCount = (counts[b] ?? 0).compareTo(counts[a] ?? 0);
           if (byCount != 0) return byCount;
-          final aIdx = all.indexWhere((e) => e.contextFacets.any((f) => f.key == a));
-          final bIdx = all.indexWhere((e) => e.contextFacets.any((f) => f.key == b));
+          final aIdx =
+              all.indexWhere((e) => e.contextFacets.any((f) => f.key == a));
+          final bIdx =
+              all.indexWhere((e) => e.contextFacets.any((f) => f.key == b));
           return aIdx.compareTo(bIdx);
         });
 
-      final result = keys.take(limit).map((k) =>
-          Facet(key: k, label: labels[k] ?? k, hits: counts[k] ?? 1)).toList(growable: false);
+      final result = keys
+          .take(limit)
+          .map(
+              (k) => Facet(key: k, label: labels[k] ?? k, hits: counts[k] ?? 1))
+          .toList(growable: false);
 
       _topFacetsCache = result;
       _topFacetsTs = DateTime.now();
@@ -438,7 +460,8 @@ class MemoryService {
     try {
       if (_latestTopicsCache != null &&
           _latestTopicsTs != null &&
-          DateTime.now().difference(_latestTopicsTs!).inSeconds <= _topicsTtlSec) {
+          DateTime.now().difference(_latestTopicsTs!).inSeconds <=
+              _topicsTtlSec) {
         return _latestTopicsCache!.take(limit).toList(growable: false);
       }
 
@@ -467,7 +490,8 @@ class MemoryService {
   }
 
   /// Alias (für ApiService.recentTopics)
-  Future<List<String>> recentTopics({int limit = 6}) => latestTopics(limit: limit);
+  Future<List<String>> recentTopics({int limit = 6}) =>
+      latestTopics(limit: limit);
 
   /// Liefert kompakte Recall-Liste (Labels) für UI-Brücken.
   /// Hinweis: UI soll aktuell **keine** „Letzten Themen“-Chips anzeigen; diese API
@@ -489,6 +513,7 @@ class MemoryService {
           if (t.contains(hint)) return 1;
           return 0;
         }
+
         tmp.sort((a, b) => score(b).compareTo(score(a)));
       }
 
@@ -559,7 +584,8 @@ class MemoryService {
   }
 
   /// **Memories-Block** für ApiService (nur bei Consent verwenden!).
-  Future<Map<String, dynamic>> buildContextMemories({required bool consent}) async {
+  Future<Map<String, dynamic>> buildContextMemories(
+      {required bool consent}) async {
     try {
       if (!_enabled || !consent) return const <String, dynamic>{};
 
@@ -606,7 +632,8 @@ class MemoryService {
     }
   }
 
-  List<int>? exportByteContext([int maxBytes = 2048]) => tryGetByteContext(maxBytes);
+  List<int>? exportByteContext([int maxBytes = 2048]) =>
+      tryGetByteContext(maxBytes);
   List<int>? byteContext([int maxBytes = 2048]) => tryGetByteContext(maxBytes);
 
   // ---------------- interne Helfer ------------------------------------------

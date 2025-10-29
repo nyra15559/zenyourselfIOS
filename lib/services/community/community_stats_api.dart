@@ -53,7 +53,8 @@ class CommunityStatsApi {
     if (timeout != null) _timeout = timeout;
     if (ttl != null) _ttl = ttl;
     if (invokeOverride != null) _invokeOverride = invokeOverride;
-    if (extraHeaders != null) _extraHeaders = Map<String, String>.from(extraHeaders);
+    if (extraHeaders != null)
+      _extraHeaders = Map<String, String>.from(extraHeaders);
   }
 
   /// Lädt den globalen Help-Zähler. `null` bei Fehlern.
@@ -118,7 +119,8 @@ class CommunityStatsApi {
         if (headers != null) ...headers,
       };
       if (_etag != null && _etag!.isNotEmpty) h['If-None-Match'] = _etag!;
-      if (_lastModified != null && _lastModified!.isNotEmpty) h['If-Modified-Since'] = _lastModified!;
+      if (_lastModified != null && _lastModified!.isNotEmpty)
+        h['If-Modified-Since'] = _lastModified!;
 
       final resp = await _invoke(_InvokeRequest(
         url: url,
@@ -148,7 +150,8 @@ class CommunityStatsApi {
       final v = resp.jsonOrNull;
       final extracted = extract(v);
       if (extracted == null) {
-        debugPrint('[CommunityStatsApi] Konnte Zähler nicht extrahieren. Body: ${resp.bodyString}');
+        debugPrint(
+            '[CommunityStatsApi] Konnte Zähler nicht extrahieren. Body: ${resp.bodyString}');
         return _cachedValue;
       }
 
@@ -178,7 +181,8 @@ class CommunityStatsApi {
     }
 
     // direkte Felder
-    final direct = tryNum(j['help_total']) ?? tryNum(j['count']) ?? tryNum(j['total']);
+    final direct =
+        tryNum(j['help_total']) ?? tryNum(j['count']) ?? tryNum(j['total']);
     if (direct != null) return direct;
 
     // totals.help / totals.help_total
@@ -191,7 +195,9 @@ class CommunityStatsApi {
     // data.*
     final data = j['data'];
     if (data is Map<String, dynamic>) {
-      final d = tryNum(data['help_total']) ?? tryNum(data['count']) ?? tryNum(data['total']);
+      final d = tryNum(data['help_total']) ??
+          tryNum(data['count']) ??
+          tryNum(data['total']);
       if (d != null) return d;
       final dt = data['totals'];
       if (dt is Map<String, dynamic>) {
@@ -200,7 +206,7 @@ class CommunityStatsApi {
       }
     }
     return null;
-    }
+  }
 
   /// Extrahiert *conversations* Zähler aus tolerantem JSON
   int? _extractConversationsCount(Map<String, dynamic>? j) {
@@ -215,8 +221,7 @@ class CommunityStatsApi {
     }
 
     // direkte Felder
-    final direct =
-        tryNum(j['conversations_total']) ??
+    final direct = tryNum(j['conversations_total']) ??
         tryNum(j['conversation_total']) ??
         tryNum(j['conversations']) ??
         tryNum(j['chats_total']) ??
@@ -228,8 +233,7 @@ class CommunityStatsApi {
     // totals.*
     final totals = j['totals'];
     if (totals is Map<String, dynamic>) {
-      final nested =
-          tryNum(totals['conversations']) ??
+      final nested = tryNum(totals['conversations']) ??
           tryNum(totals['conversations_total']) ??
           tryNum(totals['chats']) ??
           tryNum(totals['talks']);
@@ -239,8 +243,7 @@ class CommunityStatsApi {
     // data.*
     final data = j['data'];
     if (data is Map<String, dynamic>) {
-      final d =
-          tryNum(data['conversations_total']) ??
+      final d = tryNum(data['conversations_total']) ??
           tryNum(data['conversation_total']) ??
           tryNum(data['conversations']) ??
           tryNum(data['chats_total']) ??
@@ -251,8 +254,7 @@ class CommunityStatsApi {
 
       final dt = data['totals'];
       if (dt is Map<String, dynamic>) {
-        final n2 =
-            tryNum(dt['conversations']) ??
+        final n2 = tryNum(dt['conversations']) ??
             tryNum(dt['conversations_total']) ??
             tryNum(dt['chats']) ??
             tryNum(dt['talks']);
@@ -271,9 +273,9 @@ class CommunityStatsApi {
 
     final client = HttpClient()..connectionTimeout = req.timeout;
     try {
-      final r = await client
-          .openUrl(req.method, req.url)
-          .timeout(req.timeout, onTimeout: () => throw _NetTimeout('Timeout beim Verbindungsaufbau.'));
+      final r = await client.openUrl(req.method, req.url).timeout(req.timeout,
+          onTimeout: () =>
+              throw _NetTimeout('Timeout beim Verbindungsaufbau.'));
 
       req.headers.forEach(r.headers.add);
       if (req.method != 'GET') {
@@ -284,9 +286,9 @@ class CommunityStatsApi {
       }
 
       final res = await r.close().timeout(
-        req.timeout,
-        onTimeout: () => throw _NetTimeout('Timeout beim Lesen.'),
-      );
+            req.timeout,
+            onTimeout: () => throw _NetTimeout('Timeout beim Lesen.'),
+          );
 
       final bytes = await res.fold<List<int>>(<int>[], (p, e) => p..addAll(e));
       final headers = <String, String>{};
@@ -294,7 +296,8 @@ class CommunityStatsApi {
         if (values.isNotEmpty) headers[name.toLowerCase()] = values.join(',');
       });
 
-      return _InvokeResponse(status: res.statusCode, headers: headers, bodyBytes: bytes);
+      return _InvokeResponse(
+          status: res.statusCode, headers: headers, bodyBytes: bytes);
     } on _NetTimeout {
       rethrow;
     } catch (e) {
@@ -327,7 +330,8 @@ class _InvokeResponse {
   final int status;
   final Map<String, String> headers;
   final List<int> bodyBytes;
-  const _InvokeResponse({required this.status, required this.headers, required this.bodyBytes});
+  const _InvokeResponse(
+      {required this.status, required this.headers, required this.bodyBytes});
 
   String get bodyString {
     try {

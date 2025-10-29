@@ -289,7 +289,11 @@ class LocalStorageService {
       if (!k.startsWith(_ns)) continue;
       final short = k.substring(_ns.length);
       final v = prefs.get(k);
-      if (v is List<String> || v is String || v is bool || v is int || v is double) {
+      if (v is List<String> ||
+          v is String ||
+          v is bool ||
+          v is int ||
+          v is double) {
         out[short] = v;
       } else {
         // Unbekannt → als String (JSON?) ablegen

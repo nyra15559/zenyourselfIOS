@@ -66,14 +66,16 @@ class JournalEntryView extends StatelessWidget {
 
   // ─────────────────────────────── Styles ───────────────────────────────
   TextStyle _bodyInkStyle(BuildContext c) =>
-      (Theme.of(c).textTheme.bodyMedium ?? const TextStyle(fontSize: 14.5)).copyWith(
-        color: zs.ZenColors.inkStrong.withValues(alpha: .96),
+      (Theme.of(c).textTheme.bodyMedium ?? const TextStyle(fontSize: 14.5))
+          .copyWith(
+        color: zs.ZenColors.inkStrong.withValue(alpha: .96),
         height: 1.30,
       );
 
   TextStyle _questionStyle(BuildContext c) =>
-      (Theme.of(c).textTheme.bodyMedium ?? const TextStyle(fontSize: 14)).copyWith(
-        color: zs.ZenColors.inkStrong.withValues(alpha: .96),
+      (Theme.of(c).textTheme.bodyMedium ?? const TextStyle(fontSize: 14))
+          .copyWith(
+        color: zs.ZenColors.inkStrong.withValue(alpha: .96),
         fontStyle: FontStyle.italic,
         fontWeight: FontWeight.w500,
         height: 1.28,
@@ -81,10 +83,11 @@ class JournalEntryView extends StatelessWidget {
 
   TextStyle _captionStyle(BuildContext c) =>
       (Theme.of(c).textTheme.labelSmall ?? const TextStyle(fontSize: 12))
-          .copyWith(color: zs.ZenColors.inkSubtle.withValues(alpha: .90));
+          .copyWith(color: zs.ZenColors.inkSubtle.withValue(alpha: .90));
 
   TextStyle _titleStyle(BuildContext c) =>
-      (Theme.of(c).textTheme.titleMedium ?? const TextStyle(fontSize: 18)).copyWith(
+      (Theme.of(c).textTheme.titleMedium ?? const TextStyle(fontSize: 18))
+          .copyWith(
         fontWeight: FontWeight.w700,
         color: zs.ZenColors.deepSage,
         height: 1.22,
@@ -100,7 +103,8 @@ class JournalEntryView extends StatelessWidget {
     // SafeArea unten: Keyboard bevorzugen, sonst Notch/Inset
     final bottomInsets = mq.viewInsets.bottom;
     final bottomSafe = mq.viewPadding.bottom;
-    final bottomPad = zs.ZenSpacing.l + (bottomInsets > 0 ? bottomInsets : bottomSafe);
+    final bottomPad =
+        zs.ZenSpacing.l + (bottomInsets > 0 ? bottomInsets : bottomSafe);
 
     // Back-Overlap fix: zusätzlicher Top-Offset um AppBar-Höhe
     const topToolbarOffset = kToolbarHeight; // 56.0
@@ -149,7 +153,8 @@ class JournalEntryView extends StatelessWidget {
               keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
               padding: EdgeInsets.fromLTRB(
                 zs.ZenSpacing.m,
-                20 + topToolbarOffset, // ← Back-Overlap fix (unter AppBar einrücken)
+                20 +
+                    topToolbarOffset, // ← Back-Overlap fix (unter AppBar einrücken)
                 zs.ZenSpacing.m,
                 bottomPad, // ← nutzt Keyboard/Insets, sonst Safe-Padding
               ),
@@ -217,10 +222,10 @@ class JournalEntryView extends StatelessWidget {
               child: Container(
                 padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 8),
                 decoration: BoxDecoration(
-                  color: zs.ZenColors.mist.withValues(alpha: .80),
+                  color: zs.ZenColors.mist.withValue(alpha: .80),
                   borderRadius: const BorderRadius.all(zs.ZenRadii.s),
                   border: Border.all(
-                    color: zs.ZenColors.jadeMid.withValues(alpha: .18),
+                    color: zs.ZenColors.jadeMid.withValue(alpha: .18),
                   ),
                 ),
                 child: Row(
@@ -268,8 +273,10 @@ class JournalEntryView extends StatelessWidget {
     final nonEmpty = lines.where((s) => s.isNotEmpty).toList();
 
     final title = nonEmpty.isNotEmpty ? nonEmpty.first : '';
-    final bodyLines = nonEmpty.length > 1 ? nonEmpty.sublist(1) : const <String>[];
-    final body = bodyLines.join('\n').trim().replaceAll(RegExp(r'\n{3,}'), '\n\n');
+    final bodyLines =
+        nonEmpty.length > 1 ? nonEmpty.sublist(1) : const <String>[];
+    final body =
+        bodyLines.join('\n').trim().replaceAll(RegExp(r'\n{3,}'), '\n\n');
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -278,7 +285,8 @@ class JournalEntryView extends StatelessWidget {
           Text(title, style: _titleStyle(context)),
           if (body.isNotEmpty) const SizedBox(height: 10),
         ],
-        if (body.isNotEmpty) SelectableText(body, style: _bodyInkStyle(context)),
+        if (body.isNotEmpty)
+          SelectableText(body, style: _bodyInkStyle(context)),
       ],
     );
   }
@@ -363,7 +371,8 @@ class JournalEntryView extends StatelessWidget {
     final mm = two(l.minute);
 
     if (sameDay(l, now)) return 'Heute, $hh:$mm';
-    if (sameDay(l, now.subtract(const Duration(days: 1)))) return 'Gestern, $hh:$mm';
+    if (sameDay(l, now.subtract(const Duration(days: 1))))
+      return 'Gestern, $hh:$mm';
 
     final dd = two(l.day);
     final mo = two(l.month);
@@ -383,16 +392,17 @@ class _MoodLabelChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHigh.withValues(alpha: .60),
+        color: theme.colorScheme.surfaceContainerHigh.withValue(alpha: .60),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: theme.colorScheme.outlineVariant.withValues(alpha: .50),
+          color: theme.colorScheme.outlineVariant.withValue(alpha: .50),
           width: 1,
         ),
       ),
       child: Text(
         text,
-        style: theme.textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w600),
+        style:
+            theme.textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w600),
       ),
     );
   }

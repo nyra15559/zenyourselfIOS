@@ -52,7 +52,8 @@ class CommunityQuestion {
       text: text.trim(),
       votes: 0,
       createdAt: createdAt?.toUtc() ?? now,
-      authorAlias: authorAlias?.trim().isEmpty == true ? null : authorAlias?.trim(),
+      authorAlias:
+          authorAlias?.trim().isEmpty == true ? null : authorAlias?.trim(),
     );
   }
 
@@ -102,14 +103,17 @@ class CommunityQuestion {
       text: (text ?? this.text).trim(),
       votes: (votes ?? this.votes).clamp(0, 1 << 31),
       createdAt: (createdAt ?? this.createdAt).toUtc(),
-      authorAlias: authorAlias == null ? this.authorAlias : (authorAlias.trim().isEmpty ? null : authorAlias.trim()),
+      authorAlias: authorAlias == null
+          ? this.authorAlias
+          : (authorAlias.trim().isEmpty ? null : authorAlias.trim()),
       isArchived: isArchived ?? this.isArchived,
       isFlagged: isFlagged ?? this.isFlagged,
     );
   }
 
   /// Sortierung: Neueste zuerst
-  int compareByRecency(CommunityQuestion other) => other.createdAt.compareTo(createdAt);
+  int compareByRecency(CommunityQuestion other) =>
+      other.createdAt.compareTo(createdAt);
 
   /// Sortierung: Meiste Votes zuerst
   int compareByVotes(CommunityQuestion other) => other.votes.compareTo(votes);
@@ -142,19 +146,19 @@ class CommunityQuestion {
           isFlagged == other.isFlagged;
 
   @override
-  int get hashCode => Object.hash(id, text, votes, createdAt, authorAlias, isArchived, isFlagged);
+  int get hashCode => Object.hash(
+      id, text, votes, createdAt, authorAlias, isArchived, isFlagged);
 
   // ---- Helpers ----
 
-  static String _genLocalId(DateTime t) =>
-      'cq_${t.microsecondsSinceEpoch}';
+  static String _genLocalId(DateTime t) => 'cq_${t.microsecondsSinceEpoch}';
 
   static int? _toInt(dynamic v) {
     if (v == null) return null;
     if (v is int) return v;
     if (v is double) return v.toInt();
     return int.tryParse(v.toString());
-    }
+  }
 
   static bool _toBool(dynamic v) {
     if (v is bool) return v;

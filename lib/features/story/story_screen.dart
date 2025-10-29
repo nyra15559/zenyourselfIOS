@@ -18,11 +18,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import '../../services/guidance/dtos.dart';
 
-
-
-
 // Zen-Design (Tokens)
-import '../../shared/zen_style.dart' as zs hide ZenBackdrop, ZenGlassCard, ZenAppBar;
+import '../../shared/zen_style.dart' as zs
+    hide ZenBackdrop, ZenGlassCard, ZenAppBar;
 // Zen-Widgets
 import '../../shared/ui/zen_widgets.dart' as zw;
 
@@ -45,8 +43,8 @@ const String kStoryPandaAsset = 'assets/story_panda_final.png';
 // Feintuning für die vertikale Verankerung des Heros.
 // Passe factor/min/max bei Bedarf minimal an.
 const double _kHeroTopAnchorFactor = 0.01; // 12% der Höhe
-const double _kHeroTopAnchorMin = -10;      // min. 36 px
-const double _kHeroTopAnchorMax = 60;     // max. 120 px
+const double _kHeroTopAnchorMin = -10; // min. 36 px
+const double _kHeroTopAnchorMax = 60; // max. 120 px
 
 class StoryScreen extends StatefulWidget {
   const StoryScreen({super.key});
@@ -102,7 +100,8 @@ class _StoryScreenState extends State<StoryScreen>
     final s = await _store.loadSetting<String>(_kResetAtKey);
     if (!mounted) return;
     setState(() {
-      _lastResetAt = (s == null || s.trim().isEmpty) ? null : DateTime.tryParse(s);
+      _lastResetAt =
+          (s == null || s.trim().isEmpty) ? null : DateTime.tryParse(s);
     });
   }
 
@@ -117,7 +116,8 @@ class _StoryScreenState extends State<StoryScreen>
   // ---- Progress / Daten -----------------------------------------------------
 
   int _progressFrom(JournalEntriesProvider journal) {
-    final List<jm.JournalEntry> all = journal.entries.where(_isReflection).toList();
+    final List<jm.JournalEntry> all =
+        journal.entries.where(_isReflection).toList();
     if (_lastResetAt == null) {
       return all.length.clamp(0, StoryScreen.neededReflections);
     }
@@ -135,7 +135,8 @@ class _StoryScreenState extends State<StoryScreen>
     if (_lastResetAt == null) {
       return all.take(n).toList();
     }
-    final afterReset = all.where((e) => e.createdAt.isAfter(_lastResetAt!)).toList();
+    final afterReset =
+        all.where((e) => e.createdAt.isAfter(_lastResetAt!)).toList();
     return afterReset.take(n).toList();
   }
 
@@ -164,7 +165,8 @@ class _StoryScreenState extends State<StoryScreen>
     try {
       await _feelDelay(200);
 
-      final recent = _lastNReflectionsSinceReset(prov, StoryScreen.neededReflections);
+      final recent =
+          _lastNReflectionsSinceReset(prov, StoryScreen.neededReflections);
       final topics = await _deriveTopics(recent);
 
       if (!mounted) return;
@@ -182,7 +184,8 @@ class _StoryScreenState extends State<StoryScreen>
 
       if (!mounted) return;
 
-      final ok = ((story.title.trim().isNotEmpty) || (story.body.trim().isNotEmpty));
+      final ok =
+          ((story.title.trim().isNotEmpty) || (story.body.trim().isNotEmpty));
       if (!ok) {
         throw Exception('Story-Service ohne Inhalt geantwortet.');
       }
@@ -233,8 +236,10 @@ class _StoryScreenState extends State<StoryScreen>
     return topics;
   }
 
-  String _compact(String s) =>
-      s.replaceAll(RegExp(r'\s+'), ' ').replaceAll(RegExp(r'[\.!?]'), '').trim();
+  String _compact(String s) => s
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .replaceAll(RegExp(r'[\.!?]'), '')
+      .trim();
 
   String _friendlyError(Object e) {
     final raw = e.toString();
@@ -260,7 +265,8 @@ class _StoryScreenState extends State<StoryScreen>
     try {
       final prov = context.read<JournalEntriesProvider>();
 
-      final title = (s.title.trim().isEmpty) ? 'Kurzgeschichte' : s.title.trim();
+      final title =
+          (s.title.trim().isEmpty) ? 'Kurzgeschichte' : s.title.trim();
       final body = s.body.trim();
 
       if (body.isEmpty && title.isEmpty) {
@@ -386,7 +392,8 @@ class _StoryScreenState extends State<StoryScreen>
                               speaking: _speaking,
                               saved: _storySaved,
                               onSave: _storySaved ? null : _saveCurrentStory,
-                              onToggleSpeak: _story == null ? null : _toggleSpeak,
+                              onToggleSpeak:
+                                  _story == null ? null : _toggleSpeak,
                               onStopSpeak: _speaking ? _stopSpeaking : null,
                             )
                           : Column(
@@ -440,7 +447,7 @@ class _StoryHeroTitle extends StatelessWidget {
               shape: BoxShape.circle,
               boxShadow: [
                 BoxShadow(
-                  color: zs.ZenColors.deepSage.withValues(alpha: .14),
+                  color: zs.ZenColors.deepSage.withValue(alpha: .14),
                   blurRadius: 28,
                   spreadRadius: 2,
                   offset: const Offset(0, 6),
@@ -553,7 +560,8 @@ class _StoryGate extends StatelessWidget {
                         : () {
                             HapticFeedback.selectionClick();
                             Navigator.of(context).push(
-                              MaterialPageRoute(builder: (_) => const ReflectionScreen()),
+                              MaterialPageRoute(
+                                  builder: (_) => const ReflectionScreen()),
                             );
                           },
                     style: ElevatedButton.styleFrom(
@@ -591,7 +599,8 @@ class _DezenterCtaButton extends StatelessWidget {
   const _DezenterCtaButton({required this.label})
       : icon = null,
         onPressed = null;
-  const _DezenterCtaButton.icon({required this.icon, required this.label, this.onPressed});
+  const _DezenterCtaButton.icon(
+      {required this.icon, required this.label, this.onPressed});
 
   @override
   Widget build(BuildContext context) {
@@ -620,7 +629,8 @@ class _DezenterCtaButton extends StatelessWidget {
     return OutlinedButton(
       onPressed: onPressed,
       style: OutlinedButton.styleFrom(
-        side: BorderSide(color: zs.ZenColors.jade.withValues(alpha: .75), width: 1.1),
+        side: BorderSide(
+            color: zs.ZenColors.jade.withValue(alpha: .75), width: 1.1),
         foregroundColor: zs.ZenColors.jade,
         minimumSize: const Size(0, 52),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -656,18 +666,18 @@ class _CapsuleProgress extends StatelessWidget {
               margin: EdgeInsets.only(right: i == total - 1 ? 0 : 8),
               decoration: BoxDecoration(
                 color: filled[i]
-                    ? zs.ZenColors.jade.withValues(alpha: .22)
+                    ? zs.ZenColors.jade.withValue(alpha: .22)
                     : zs.ZenColors.surfaceAlt,
                 borderRadius: BorderRadius.circular(999),
                 border: Border.all(
                   color: filled[i]
-                      ? zs.ZenColors.jade.withValues(alpha: .55)
+                      ? zs.ZenColors.jade.withValue(alpha: .55)
                       : zs.ZenColors.outline,
                 ),
                 boxShadow: filled[i]
                     ? [
                         BoxShadow(
-                          color: Colors.black.withValues(alpha: .06),
+                          color: Colors.black.withValue(alpha: .06),
                           blurRadius: 6,
                           offset: const Offset(0, 2),
                         ),
@@ -690,7 +700,7 @@ class _LoadingOverlay extends StatelessWidget {
     return Positioned.fill(
       child: IgnorePointer(
         child: Container(
-          color: Colors.black.withValues(alpha: .06),
+          color: Colors.black.withValue(alpha: .06),
           alignment: Alignment.center,
           child: const zw.ZenGlassCard(
             borderRadius: BorderRadius.all(zs.ZenRadii.l),
@@ -709,7 +719,8 @@ class _LoadingOverlay extends StatelessWidget {
                 SizedBox(width: 10),
                 Text(
                   'ZenYourself holt sein Buch heraus …',
-                  style: TextStyle(fontSize: 14.5, color: zs.ZenColors.inkStrong),
+                  style:
+                      TextStyle(fontSize: 14.5, color: zs.ZenColors.inkStrong),
                 ),
               ],
             ),
@@ -783,20 +794,25 @@ class _StoryCard extends StatelessWidget {
             runSpacing: 10,
             children: [
               _StoryAction(
-                icon: saved ? Icons.bookmark_added_rounded : Icons.bookmark_add_rounded,
+                icon: saved
+                    ? Icons.bookmark_added_rounded
+                    : Icons.bookmark_add_rounded,
                 label: saved ? 'Gespeichert' : 'Kurzgeschichte speichern',
                 onTap: saved ? () {} : (onSave ?? () {}),
               ),
               _StoryAction(
                 icon: speaking ? Icons.stop_rounded : Icons.volume_up_rounded,
                 label: speaking ? 'Stopp' : 'Anhören',
-                onTap: speaking ? (onStopSpeak ?? () {}) : (onToggleSpeak ?? () {}),
+                onTap: speaking
+                    ? (onStopSpeak ?? () {})
+                    : (onToggleSpeak ?? () {}),
               ),
               _StoryAction(
                 icon: Icons.copy_rounded,
                 label: 'Kopieren',
                 onTap: () async {
-                  await Clipboard.setData(ClipboardData(text: '$title\n\n$body'));
+                  await Clipboard.setData(
+                      ClipboardData(text: '$title\n\n$body'));
                   if (context.mounted) {
                     zw.ZenToast.show(context, 'Text kopiert');
                   }
@@ -820,13 +836,15 @@ class _StoryCard extends StatelessWidget {
           const Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.info_outline_rounded, size: 16, color: zs.ZenColors.inkSubtle),
+              Icon(Icons.info_outline_rounded,
+                  size: 16, color: zs.ZenColors.inkSubtle),
               SizedBox(width: 6),
               Flexible(
                 child: Text(
                   'Tipp: Speichere die Kurzgeschichte ins Gedankenbuch – sonst ist sie später nicht mehr sichtbar.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 12.5, color: zs.ZenColors.inkSubtle),
+                  style:
+                      TextStyle(fontSize: 12.5, color: zs.ZenColors.inkSubtle),
                 ),
               ),
             ],
@@ -857,7 +875,8 @@ class _StoryAction extends StatelessWidget {
   final String label;
   final VoidCallback onTap;
 
-  const _StoryAction({required this.icon, required this.label, required this.onTap});
+  const _StoryAction(
+      {required this.icon, required this.label, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -878,7 +897,8 @@ class _StoryAction extends StatelessWidget {
           shape: const RoundedRectangleBorder(
             borderRadius: BorderRadius.all(zs.ZenRadii.m),
           ),
-          textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15.5),
+          textStyle:
+              const TextStyle(fontWeight: FontWeight.w700, fontSize: 15.5),
         ),
       ),
     );

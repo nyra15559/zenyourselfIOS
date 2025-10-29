@@ -12,9 +12,9 @@ import '../../core/memory/memory_store.dart';
 import '../../core/memory/memory_entry.dart';
 
 class InsightStats {
-  final double? avg;     // Durchschnitt (0..1 oder 0..100, je nach Quelle)
-  final double? delta;   // Veränderung ggü. Vorfenster
-  final int count;       // Anzahl berücksichtigter Werte (aktuelles Fenster)
+  final double? avg; // Durchschnitt (0..1 oder 0..100, je nach Quelle)
+  final double? delta; // Veränderung ggü. Vorfenster
+  final int count; // Anzahl berücksichtigter Werte (aktuelles Fenster)
 
   const InsightStats({this.avg, this.delta, required this.count});
 
@@ -38,7 +38,8 @@ class InsightTracker {
   final MemoryStore _store = MemoryStore.instance;
 
   /// Async-Statistik über die letzten [curWindow] Einträge + Vorfenster [prevWindow].
-  Future<InsightStats> compute({int curWindow = 12, int prevWindow = 12}) async {
+  Future<InsightStats> compute(
+      {int curWindow = 12, int prevWindow = 12}) async {
     final all = await _store.all();
     if (all.isEmpty) {
       return const InsightStats(avg: null, delta: null, count: 0);
@@ -85,7 +86,7 @@ class InsightTracker {
 
     // Fenster bilden
     final recent = vals.take(window).toList(growable: false);
-    final older  = vals.skip(window).take(window).toList(growable: false);
+    final older = vals.skip(window).take(window).toList(growable: false);
 
     double? avg(List<double> xs) =>
         xs.isEmpty ? null : xs.reduce((a, b) => a + b) / xs.length;
@@ -105,7 +106,7 @@ class InsightTracker {
     // Skalen-heuristik: nutze Spannweite der Gesamtdaten als Maßstab
     final scale = _scaleHint(vals);
     final threshSmall = max(0.01, 0.05 * scale);
-    final threshBig   = max(0.02, 0.15 * scale);
+    final threshBig = max(0.02, 0.15 * scale);
 
     if (ad < threshSmall) return 'Stabile Einsichten – ruhig weitermachen.';
     if (d > 0) {

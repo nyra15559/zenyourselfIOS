@@ -1,4 +1,4 @@
-//[BASELINE] lib/features/reflection/reflection_widgets.dart. (Stand: 28.10.) 
+// [BASELINE] lib/features/reflection/reflection_widgets.dart (Stand: 29.10., v6.3.2)
 // lib/features/reflection/reflection_widgets.dart
 // Part: UI-Widgets (library: reflection_screen)
 // -----------------------------------------------------------------------------
@@ -6,10 +6,11 @@
 // - Intro-Text angepasst (Hallo – wie geht es dir? … Schreib’s mir in 1–2 Sätzen …)
 // - Typing-Row: Punkte NACH dem Text, kein führendes „…“
 // - Leitfrage: gleicher ruhiger Stil wie Mirror (keine Bold-Überschrift)
-// - Memory/RecentTopics weiterhin vorhanden, aber Screen zeigt sie nicht an
+// - Memory/RecentTopics vorhanden (Kompat.), Screen zeigt sie aber nicht an
 // - Hope Slot integriert (kurzer, hoffnungsvoller Satz unter der Frage)
 // - v6.10.1: Hope-Compat (s.hopeText → s.hopeTextCompat()) + withValues-Fixes
 // - v6.11: Kleiner Dev-Indikator (nur Debug) – dezenter Punkt mit Tooltip
+// - v6.3.2 (29.10.): A11y/Copy-Tooltips verlässlich, leichte Const/Spacing-Polish
 // -----------------------------------------------------------------------------
 
 part of 'reflection_screen.dart';
@@ -246,7 +247,7 @@ class _RoundThread extends StatelessWidget {
                     color: Colors.white,
                     borderRadius: _kRadius18,
                     border: Border.all(
-                      color: Colors.black.withValues(alpha: .06),
+                      color: Colors.black.withValue(alpha: .06),
                       width: 1,
                     ),
                     boxShadow: const [
@@ -264,7 +265,7 @@ class _RoundThread extends StatelessWidget {
                       Text(
                         title,
                         style: tt.labelSmall?.copyWith(
-                          color: _kInk.withValues(alpha: .75),
+                          color: _kInk.withValue(alpha: .75),
                           fontWeight: FontWeight.w700,
                         ),
                       ),
@@ -520,7 +521,7 @@ class _DividerThin extends StatelessWidget {
     return Container(
       height: 1,
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: .10),
+        color: Colors.black.withValue(alpha: .10),
         borderRadius: BorderRadius.circular(1),
       ),
     );
@@ -698,7 +699,7 @@ class _InputBar extends StatelessWidget {
               offset: Offset(0, 4),
             ),
             BoxShadow(
-              color: _kJade.withValues(alpha: 0.30),
+              color: _kJade.withValue(alpha: 0.30),
               blurRadius: 22,
               spreadRadius: 1.2,
             ),
@@ -753,7 +754,7 @@ class _InputBar extends StatelessWidget {
                     decoration: InputDecoration(
                       hintText: hint,
                       hintStyle: tt.bodyMedium!
-                          .copyWith(color: _kInk.withValues(alpha: .55)),
+                          .copyWith(color: _kInk.withValue(alpha: .55)),
                       border: InputBorder.none,
                       isCollapsed: true,
                       suffixIconConstraints:
@@ -768,8 +769,8 @@ class _InputBar extends StatelessWidget {
                               style: tt.bodySmall!.copyWith(
                                 fontSize: 12,
                                 color: overSoft
-                                    ? Colors.redAccent.withValues(alpha: .85)
-                                    : _kInk.withValues(alpha: .65),
+                                    ? Colors.redAccent.withValue(alpha: .85)
+                                    : _kInk.withValue(alpha: .65),
                                 fontWeight: FontWeight.w600,
                               ),
                               child: Text(
@@ -799,7 +800,7 @@ class _InputBar extends StatelessWidget {
                               Icons.send_rounded,
                               color: (hasText && canSend && onSend != null)
                                   ? _kJade
-                                  : _kJade.withValues(alpha: 0.45),
+                                  : _kJade.withValue(alpha: 0.45),
                             ),
                           ),
                         ],
@@ -856,7 +857,7 @@ class _TypingDotsState extends State<_TypingDots>
                 height: 4 + 3 * n(0),
                 margin: const EdgeInsets.only(right: 3),
                 decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: op0),
+                  color: Colors.black.withValue(alpha: op0),
                   shape: BoxShape.circle,
                 ),
               ),
@@ -865,7 +866,7 @@ class _TypingDotsState extends State<_TypingDots>
                 height: 4 + 3 * n(1),
                 margin: const EdgeInsets.only(right: 3),
                 decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: op1),
+                  color: Colors.black.withValue(alpha: op1),
                   shape: BoxShape.circle,
                 ),
               ),
@@ -873,7 +874,7 @@ class _TypingDotsState extends State<_TypingDots>
                 width: 4,
                 height: 4 + 3 * n(2),
                 decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: op2),
+                  color: Colors.black.withValue(alpha: op2),
                   shape: BoxShape.circle,
                 ),
               ),
@@ -958,7 +959,8 @@ class PandaBridgeBubble extends StatelessWidget {
           child: Tooltip(
             message: tooltip,
             child: GestureDetector(
-              onLongPress: () => Clipboard.setData(ClipboardData(text: display)),
+              onLongPress: () =>
+                  Clipboard.setData(ClipboardData(text: display)),
               onSecondaryTap: () =>
                   Clipboard.setData(ClipboardData(text: display)),
               child: Semantics(
@@ -973,15 +975,16 @@ class PandaBridgeBubble extends StatelessWidget {
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        ExcludeSemantics(
-                          child: Icon(icon, size: 18, color: _kInk),
+                        const ExcludeSemantics(
+                          child:
+                              Icon(Icons.link_rounded, size: 18, color: _kInk),
                         ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: SelectableText(
                             display,
                             style: tt.bodyMedium?.copyWith(
-                              color: _kInk.withValues(alpha: .87),
+                              color: _kInk.withValue(alpha: .87),
                               height: 1.33,
                               fontWeight: FontWeight.w500,
                             ),
@@ -1020,7 +1023,7 @@ class _PandaCardInner extends StatelessWidget {
         SelectableText(
           s.mirror.trim(),
           style: tt.bodyMedium?.copyWith(
-            color: _kInk.withValues(alpha: .87),
+            color: _kInk.withValue(alpha: .87),
             height: 1.35,
             fontWeight: FontWeight.w500,
           ),
@@ -1036,7 +1039,7 @@ class _PandaCardInner extends StatelessWidget {
         SelectableText(
           t,
           style: tt.bodyMedium?.copyWith(
-            color: _kInk.withValues(alpha: .87),
+            color: _kInk.withValue(alpha: .87),
             height: 1.34,
             fontWeight: FontWeight.w400,
           ),
@@ -1077,7 +1080,7 @@ class _PandaCardInner extends StatelessWidget {
               child: SelectableText(
                 (s.helperSuggestion ?? '').trim(),
                 style: tt.bodySmall?.copyWith(
-                  color: _kInk.withValues(alpha: .87),
+                  color: _kInk.withValue(alpha: .87),
                   height: 1.30,
                   fontWeight: FontWeight.w500,
                 ),
@@ -1105,7 +1108,7 @@ class _PandaCardInner extends StatelessWidget {
               child: SelectableText(
                 (hope ?? '').trim(),
                 style: tt.bodySmall?.copyWith(
-                  color: _kInk.withValues(alpha: .87),
+                  color: _kInk.withValue(alpha: .87),
                   height: 1.30,
                   fontWeight: FontWeight.w600,
                 ),
@@ -1119,7 +1122,7 @@ class _PandaCardInner extends StatelessWidget {
     // Timestamp + (nur Debug) kleiner Dev-Indikator
     children.add(const SizedBox(height: 6));
     children.add(
-     const Row(
+      const Row(
         children: [
           _DevIndicator(), // zeigt in Release NICHTS
           Spacer(),
@@ -1175,7 +1178,7 @@ class _DevIndicator extends StatelessWidget {
     // Farb-Codierung: Risk > Helpers > Neutral
     final Color dotColor = risk
         ? Colors.orange
-        : (helpers > 0 ? _kJade : Colors.black.withValues(alpha: .45));
+        : (helpers > 0 ? _kJade : Colors.black.withValue(alpha: .45));
 
     final tooltip =
         'm:$mirrorLen  q:${hasQ ? 1 : 0}  h:$helpers  talk:$talk  hope:${hope ? 1 : 0}';
@@ -1191,7 +1194,7 @@ class _DevIndicator extends StatelessWidget {
             color: dotColor,
             shape: BoxShape.circle,
             border: Border.all(
-              color: Colors.black.withValues(alpha: .10),
+              color: Colors.black.withValue(alpha: .10),
               width: 1,
             ),
           ),
@@ -1218,7 +1221,7 @@ class _MoodIntroRow extends StatelessWidget {
           child: SelectableText(
             scope?.text ?? '',
             style: tt.bodyMedium?.copyWith(
-              color: _kInk.withValues(alpha: .87),
+              color: _kInk.withValue(alpha: .87),
               height: 1.35,
               fontWeight: FontWeight.w500,
             ),
@@ -1301,9 +1304,9 @@ class _GhostChip extends StatelessWidget {
     final child = Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: .66),
+        color: Colors.white.withValue(alpha: .66),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: _kJade.withValues(alpha: .65), width: 1.2),
+        border: Border.all(color: _kJade.withValue(alpha: .65), width: 1.2),
         boxShadow: const [
           BoxShadow(
             color: Color(0x0F000000),
@@ -1374,7 +1377,7 @@ class _RecentTopicsChips extends StatelessWidget {
               Text(
                 'Zuletzt bewegt:',
                 style: tt.labelSmall?.copyWith(
-                  color: _kInk.withValues(alpha: .75),
+                  color: _kInk.withValue(alpha: .75),
                   fontWeight: FontWeight.w700,
                 ),
               ),

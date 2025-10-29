@@ -1,6 +1,6 @@
 // [BASELINE] lib/features/reflection/reflection_logic.dart
 // ZenYourself — ReflectionLogic (Controller & Handler)
-// v12.1.3-baseline · 2025-10-29 · Europe/Zurich
+// v12.1.4-baseline · 2025-10-29 · Europe/Zurich
 // -----------------------------------------------------------------------------
 // Aufgaben (FilePlan 6.2.x + v6.3):
 // • Controller-Klasse (kein UI; ChangeNotifier)
@@ -8,7 +8,7 @@
 // • Action-Flow (Rate-Limit 1×/Session; Fallback tolerant)
 // • Hybrid-Note (typed + transcript, defensiv, gekappt)
 // • Debounce/Rate-Limit (min Gap zwischen Sends; sanft, ohne Exceptions)
-// • VM-Bau: answer_helpers-only, mind. 2 Chips, Talk≤2, Risk/Flow-Flags
+// • VM-Bau: answer_helpers-only, mind. 2 Chips, Talk≤2, Risk/Flow-Flags, Hope
 // -----------------------------------------------------------------------------
 // Leitlinien:
 // • Keine UI-Logik; reine Orchestrierung + State. View rendert nur 'vm'.
@@ -29,16 +29,16 @@ const Duration _kNetTimeout = Duration(seconds: 18);
 /// Öffentliche, render-fertige Sicht auf den aktuellen Turn.
 /// (Die View greift *nur* auf diese Felder zu – keine DTO-Abhängigkeit nötig.)
 class ReflectionVM {
-  final String mirror;               // Empathische Spiegelung (gekürzt)
-  final String question;             // Leitfrage (mit Fragezeichen)
-  final List<String> answerChips;    // max 3, min 2 (sanft ergänzt)
-  final List<String> talkLines;      // kleine Talk-Zeilen (≤2)
-  final String? helperSuggestion;    // 0–1 Satz unter der Frage
-  final bool risk;                   // true ⇒ CH-Risk-Actions einblenden
-  final bool allowClosure;           // Worker signalisiert Abschluss/Mood
-  final bool moodPrompt;             // Mood explizit fragen
-  final String? hopeText;            // kurzer, hoffnungsvoller Slot (optional)
-  final List<String> topicChips;     // Themen/Redirect-Ideen (optional)
+  final String mirror; // Empathische Spiegelung (gekürzt)
+  final String question; // Leitfrage (mit Fragezeichen)
+  final List<String> answerChips; // max 3, min 2 (sanft ergänzt)
+  final List<String> talkLines; // kleine Talk-Zeilen (≤2)
+  final String? helperSuggestion; // 0–1 Satz unter der Frage
+  final bool risk; // true ⇒ CH-Risk-Actions einblenden
+  final bool allowClosure; // Worker signalisiert Abschluss/Mood
+  final bool moodPrompt; // Mood explizit fragen
+  final String? hopeText; // kurzer, hoffnungsvoller Slot (optional)
+  final List<String> topicChips; // Themen/Redirect-Ideen (optional)
 
   const ReflectionVM({
     required this.mirror,
@@ -61,7 +61,12 @@ class ReflectionVM {
 class ReflectionController extends ChangeNotifier {
   ReflectionController({
     Duration sendMinGap = const Duration(milliseconds: 420),
-  }) : _sendMinGap = sendMinGap;
+  }) : _sendMinGap = sendMinGap {
+    // Default-Consent aus MemoryService übernehmen (best-effort, sync)
+    try {
+      _memoryConsent = MemoryService.instance.shareEnabled;
+    } catch (_) {/* ignore */}
+  }
 
   // ---------------- Public (readonly) state ----------------------------------
 
@@ -73,7 +78,7 @@ class ReflectionController extends ChangeNotifier {
   /// Optional: vom UI gesetzte Memories (werden an Full-Endpunkte durchgereicht).
   dynamic get memories => _memories;
 
-  /// Optional: Einwilligung, Memories an den Worker zu senden (Default: false).
+  /// Optional: Einwilligung, Memories an den Worker zu senden (Default: aus MemoryService).
   bool get memoryConsent => _memoryConsent;
 
   // ---------------- Private state --------------------------------------------
@@ -100,6 +105,10 @@ class ReflectionController extends ChangeNotifier {
   Future<void> prefetchBridge() async {
     try {
       final recall = await MemoryService.instance.recall(limit: 6);
+      // Consent still-update (falls sich der Nutzer zwischenzeitlich umentschied)
+      try {
+        _memoryConsent = MemoryService.instance.shareEnabled;
+      } catch (_) {/* ignore */}
       _bridgeText = _composeBridgeText(recall);
       notifyListeners();
     } catch (_) {/* never throw */}
@@ -116,6 +125,17 @@ class ReflectionController extends ChangeNotifier {
     _memories = memories;
   }
 
+  /// Setzt den Controller hart zurück (z. B. beim Screen-Wechsel).
+  void reset() {
+    _debounceCancel();
+    _loading = false;
+    _session = null;
+    _vm = null;
+    _bridgeText = null;
+    _actionUsedInThisSession = false;
+    notifyListeners();
+  }
+
   // ---------------- Sending ---------------------------------------------------
 
   /// Startet *neue* Session mit [text].
@@ -128,23 +148,22 @@ class ReflectionController extends ChangeNotifier {
 
     _setLoading(true);
     try {
-      final turn = await GuidanceService.instance
-          .startSessionFull(
-            text: text,
-            locale: 'de',
-            tz: 'Europe/Zurich',
-            memories: _memories,
-            memoryConsent: _memoryConsent,
-            clientContext: {
-              'mode': fromVoice ? 'voice' : 'text',
-              'source': 'reflection_screen',
-            },
-          )
-          .timeout(_kNetTimeout);
+      final turn = await GuidanceService.instance.startSessionFull(
+        text: text,
+        locale: 'de',
+        tz: 'Europe/Zurich',
+        memories: _memories,
+        memoryConsent: _memoryConsent,
+        clientContext: {
+          'mode': fromVoice ? 'voice' : 'text',
+          'source': 'reflection_screen',
+        },
+      ).timeout(_kNetTimeout);
 
       _session = _coerceSession(turn);
       _vm = _buildVM(turn);
-      _actionUsedInThisSession = false; // neue Session ⇒ Action-Rate-Limit reset
+      _actionUsedInThisSession =
+          false; // neue Session ⇒ Action-Rate-Limit reset
     } catch (_) {
       // sanfter Fallback-VM
       _vm = const ReflectionVM(
@@ -185,22 +204,19 @@ class ReflectionController extends ChangeNotifier {
         return;
       }
 
-      final turn = await GuidanceService.instance
-          .nextTurnFull(
-            session: _session!,
-            text: text,
-            locale: 'de',
-            tz: 'Europe/Zurich',
-            memories: _memories,               // v6.3.0: optional aktualisierte Memories
-            memoryConsent: _memoryConsent,     // v6.3.0: Consent mitgeben (tolerant)
-            clientContext: const {'mode': 'text', 'source': 'reflection_screen'},
-          )
-          .timeout(_kNetTimeout);
+      final turn = await GuidanceService.instance.nextTurnFull(
+        session: _session!,
+        text: text,
+        locale: 'de',
+        tz: 'Europe/Zurich',
+        memories: _memories, // v6.3.0: optionale aktualisierte Memories
+        memoryConsent: _memoryConsent, // v6.3.0: Consent mitgeben (tolerant)
+        clientContext: const {'mode': 'text', 'source': 'reflection_screen'},
+      ).timeout(_kNetTimeout);
 
       _session = _coerceSession(turn);
       _vm = _buildVM(turn);
-    } catch (_) {/* ignore, keep old vm */}
-    finally {
+    } catch (_) {/* ignore, keep old vm */} finally {
       _setLoading(false);
     }
   }
@@ -236,38 +252,36 @@ class ReflectionController extends ChangeNotifier {
           turn = await fut.timeout(_kNetTimeout);
         } else {
           // Fallback: minimaler "Action-Stich" via nextTurnFull ohne Text.
-          turn = await svc
-              .nextTurnFull(
-                session: _session!,
-                text: '',
-                locale: 'de',
-                tz: 'Europe/Zurich',
-                memories: _memories,
-                memoryConsent: _memoryConsent,
-                clientContext: const {'mode': 'text', 'source': 'reflection_screen'},
-              )
-              .timeout(_kNetTimeout);
+          turn = await svc.nextTurnFull(
+            session: _session!,
+            text: '',
+            locale: 'de',
+            tz: 'Europe/Zurich',
+            memories: _memories,
+            memoryConsent: _memoryConsent,
+            clientContext: const {
+              'mode': 'text',
+              'source': 'reflection_screen'
+            },
+          ).timeout(_kNetTimeout);
         }
       } catch (_) {
         // Fallback: minimaler "Action-Stich" via nextTurnFull ohne Text.
-        turn = await svc
-            .nextTurnFull(
-              session: _session!,
-              text: '',
-              locale: 'de',
-              tz: 'Europe/Zurich',
-              memories: _memories,
-              memoryConsent: _memoryConsent,
-              clientContext: const {'mode': 'text', 'source': 'reflection_screen'},
-            )
-            .timeout(_kNetTimeout);
+        turn = await svc.nextTurnFull(
+          session: _session!,
+          text: '',
+          locale: 'de',
+          tz: 'Europe/Zurich',
+          memories: _memories,
+          memoryConsent: _memoryConsent,
+          clientContext: const {'mode': 'text', 'source': 'reflection_screen'},
+        ).timeout(_kNetTimeout);
       }
 
       _session = _coerceSession(turn);
       _vm = _buildVM(turn);
       _actionUsedInThisSession = true;
-    } catch (_) {/* ignore */}
-    finally {
+    } catch (_) {/* ignore */} finally {
       _setLoading(false);
     }
   }
@@ -315,15 +329,13 @@ class ReflectionController extends ChangeNotifier {
         (t.flow?.recommendEnd == true) || (t.flow?.moodPrompt == true);
     final moodPrompt = (t.flow?.moodPrompt == true);
 
-    // Hope-Text: bevorzugt aus analysis.summary; sonst nichts.
-    final hopeText = (t.analysis?.summary?.trim().isNotEmpty ?? false)
-        ? t.analysis!.summary!.trim()
-        : null;
+    // Hope-Text: robust extrahieren (direct/aliases/speech_sequence/analysis)
+    final hopeText = _extractHopeText(t);
 
-    final topicChips = <String>[
-      ...t.topicSuggestions,
+    final topicChips = <String>{
+      ...t.topicSuggestions.map((s) => s.trim()).where((s) => s.isNotEmpty),
       ...(t.analysis?.topicSuggestions ?? const <String>[]),
-    ].map((s) => s.trim()).where((s) => s.isNotEmpty).toSet().toList();
+    }.toList();
 
     return ReflectionVM(
       mirror: mirror,
@@ -398,8 +410,9 @@ class ReflectionController extends ChangeNotifier {
     if (chips.length >= 2) return chips.take(3).toList();
     final List<String> out = List<String>.from(chips);
     // Neutraler, universeller Zusatz-Starter basierend auf der Leitfrage
-    final fallback =
-        (q.trim().isNotEmpty) ? 'Wichtig ist mir außerdem … ' : 'Noch etwas dazu … ';
+    final fallback = (q.trim().isNotEmpty)
+        ? 'Wichtig ist mir außerdem … '
+        : 'Noch etwas dazu … ';
     out.add(fallback);
     return out.take(3).toList();
   }
@@ -415,7 +428,8 @@ class ReflectionController extends ChangeNotifier {
     if (s.length <= maxChars) return s;
     final cut = s.substring(0, maxChars);
     final lastSpace = cut.lastIndexOf(' ');
-    final base = (lastSpace >= 40 ? cut.substring(0, lastSpace) : cut).trimRight();
+    final base =
+        (lastSpace >= 40 ? cut.substring(0, lastSpace) : cut).trimRight();
     return '$base…';
   }
 
@@ -436,9 +450,10 @@ class ReflectionController extends ChangeNotifier {
           addToken(it);
         } else if (it is Map) {
           addToken((it['topic'] ?? it['tag'] ?? '').toString());
-          final facets =
-              (it['facets'] as List?)?.map((e) => e?.toString() ?? '').toList() ??
-                  const [];
+          final facets = (it['facets'] as List?)
+                  ?.map((e) => e?.toString() ?? '')
+                  .toList() ??
+              const [];
           if (facets.isNotEmpty) addToken(facets.first);
           final line = (it['line'] ?? it['hint'] ?? '').toString();
           if (line.isNotEmpty && tokens.length < 2) addToken(line);
@@ -450,9 +465,62 @@ class ReflectionController extends ChangeNotifier {
     final t1 = tokens[0];
     final t2 = tokens.length >= 2 ? tokens[1] : null;
 
-    final body =
-        t2 == null ? 'Ich erinnere mich an **$t1**.' : 'Ich erinnere mich an **$t1** und **$t2**.';
+    final body = t2 == null
+        ? 'Ich erinnere mich an **$t1**.'
+        : 'Ich erinnere mich an **$t1** und **$t2**.';
     return '$body Falls das heute noch mitschwingt – magst du dort anknüpfen?';
+  }
+
+  /// Robust: extrahiert einen kurzen "Hope"-Text aus verschiedenen Feldern.
+  String? _extractHopeText(ReflectionTurn t) {
+    // 1) Direkt bekannte Felder
+    try {
+      final d = (t.hopeText ?? '').trim();
+      if (d.isNotEmpty) return d;
+    } catch (_) {/* ignore */}
+    try {
+      // Einige Worker-Versionen nutzen 'hope'
+      // ignore: avoid_dynamic_calls
+      final dyn = t as dynamic;
+      // ignore: avoid_dynamic_calls
+      final cand = (dyn.hope ?? dyn.hope_text)?.toString().trim();
+      if ((cand ?? '').isNotEmpty) return cand;
+    } catch (_) {/* ignore */}
+
+    // 2) speech_sequence[{type:'hope', text:'...'}]
+    try {
+      // ignore: avoid_dynamic_calls
+      final seq = (t as dynamic).speechSequence as List?;
+      if (seq != null) {
+        for (final e in seq) {
+          if (e is Map) {
+            final type = (e['type'] ?? '').toString().toLowerCase().trim();
+            final txt = (e['text'] ?? '').toString().trim();
+            if (type == 'hope' && txt.isNotEmpty) return txt;
+          } else {
+            try {
+              // ignore: avoid_dynamic_calls
+              final type = (e as dynamic).type?.toString().toLowerCase().trim();
+              // ignore: avoid_dynamic_calls
+              final txt = (e as dynamic).text?.toString().trim();
+              if (type == 'hope' && (txt ?? '').isNotEmpty) return txt;
+            } catch (_) {/* ignore */}
+          }
+        }
+      }
+    } catch (_) {/* ignore */}
+
+    // 3) analysis.hope (falls vorhanden) oder kurzer summary-Fallback
+    try {
+      final a = t.analysis;
+      // ignore: unnecessary_raw_strings
+      final hope = (a?.hope ?? '').toString().trim();
+      if (hope.isNotEmpty) return hope;
+      final sum = (a?.summary ?? '').toString().trim();
+      if (sum.isNotEmpty && sum.length <= 160) return sum;
+    } catch (_) {/* ignore */}
+
+    return null;
   }
 
   @override

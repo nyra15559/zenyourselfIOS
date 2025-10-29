@@ -113,9 +113,10 @@ class ReflectionEntry {
     }
 
     // Mood-Block lesen (optional): { mood: { icon, note } }
-    int? moodScore = _clampMood(_toInt(json['moodScore'] ?? json['mood_score']));
-    String? moodNote =
-        _asTrimmedOrNull(json['moodNote'] ?? json['mood_note'] ?? json['moodComment']);
+    int? moodScore =
+        _clampMood(_toInt(json['moodScore'] ?? json['mood_score']));
+    String? moodNote = _asTrimmedOrNull(
+        json['moodNote'] ?? json['mood_note'] ?? json['moodComment']);
     final moodObj = json['mood'];
     if (moodObj is Map) {
       final mm = Map<String, dynamic>.from(moodObj);
@@ -179,7 +180,9 @@ class ReflectionEntry {
   /// Export im neuen v5-Union-Shape eines JournalEntry (type:"reflection")
   Map<String, dynamic> toJsonV5() {
     final mode = (input?.mode ??
-            (audioPath != null && audioPath!.trim().isNotEmpty ? 'voice' : 'text'))
+            (audioPath != null && audioPath!.trim().isNotEmpty
+                ? 'voice'
+                : 'text'))
         .toString();
 
     final moodObj =
@@ -292,10 +295,11 @@ class ReflectionEntry {
     final ts = timestamp.toLocal();
     final isSameDay =
         now.year == ts.year && now.month == ts.month && now.day == ts.day;
-    final yesterday =
-        DateTime(now.year, now.month, now.day).subtract(const Duration(days: 1));
-    final isYesterday =
-        yesterday.year == ts.year && yesterday.month == ts.month && yesterday.day == ts.day;
+    final yesterday = DateTime(now.year, now.month, now.day)
+        .subtract(const Duration(days: 1));
+    final isYesterday = yesterday.year == ts.year &&
+        yesterday.month == ts.month &&
+        yesterday.day == ts.day;
     if (isSameDay) return 'Heute, $timeFormatted';
     if (isYesterday) return 'Gestern, $timeFormatted';
     return '$dateFormatted, $timeFormatted';
@@ -482,7 +486,8 @@ class ReflectionEntry {
       final n = v.toInt().abs();
       if (n < 1000000000000) {
         // Sekunden
-        return DateTime.fromMillisecondsSinceEpoch(n * 1000, isUtc: true).toLocal();
+        return DateTime.fromMillisecondsSinceEpoch(n * 1000, isUtc: true)
+            .toLocal();
       } else if (n < 10000000000000000) {
         // Millisekunden
         return DateTime.fromMillisecondsSinceEpoch(n, isUtc: true).toLocal();
@@ -525,7 +530,8 @@ class ReflectionEntry {
     if (v is List) return v.map((e) => e?.toString() ?? '').toList();
     if (v is String && v.trim().isNotEmpty) {
       // CSV oder ein einzelner Tag
-      final parts = v.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+      final parts =
+          v.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
       return parts;
     }
     return const [];
@@ -561,8 +567,10 @@ class InputMeta {
     return map;
   }
 
-  static InputMeta? fromMaybe(dynamic v, {String? fallbackContent, dynamic audioPath}) {
-    if (v == null && (fallbackContent == null && audioPath == null)) return null;
+  static InputMeta? fromMaybe(dynamic v,
+      {String? fallbackContent, dynamic audioPath}) {
+    if (v == null && (fallbackContent == null && audioPath == null))
+      return null;
     if (v is Map<String, dynamic>) {
       return InputMeta(
         mode: ReflectionEntry._asTrimmedOrNull(v['mode']),
@@ -619,9 +627,8 @@ class Analysis {
     if (v is Map<String, dynamic>) {
       // risk (bool) → risk_level
       final riskLevel = ReflectionEntry._asTrimmedOrNull(
-            v['risk_level'] ??
-                (v['risk'] == true ? 'high' : null),
-          );
+        v['risk_level'] ?? (v['risk'] == true ? 'high' : null),
+      );
       return Analysis(
         sorc: Sorc.fromMaybe(v['sorc']),
         levers: (v['levers'] is List)
@@ -757,7 +764,8 @@ class MiniChallenge {
         id: ReflectionEntry._asTrimmedOrNull(v['id']),
         title: ReflectionEntry._asTrimmedOrNull(v['title']),
         kind: ReflectionEntry._asTrimmedOrNull(v['kind']),
-        durationSec: ReflectionEntry._toInt(v['duration_sec'] ?? v['durationSec']),
+        durationSec:
+            ReflectionEntry._toInt(v['duration_sec'] ?? v['durationSec']),
         status: ReflectionEntry._asTrimmedOrNull(v['status']),
       );
     }
@@ -795,7 +803,8 @@ class ReflectionLinks {
     }
     if (v is Map<String, dynamic>) {
       return ReflectionLinks(
-        storyId: ReflectionEntry._asTrimmedOrNull(v['story_id'] ?? v['storyId']),
+        storyId:
+            ReflectionEntry._asTrimmedOrNull(v['story_id'] ?? v['storyId']),
       );
     }
     return null;
@@ -876,7 +885,8 @@ class Question {
         'id': id,
         'text': text,
         'isFollowUp': isFollowUp,
-        if (createdAt != null) 'createdAt': createdAt!.toUtc().toIso8601String(),
+        if (createdAt != null)
+          'createdAt': createdAt!.toUtc().toIso8601String(),
       };
 
   /// Alias
@@ -941,7 +951,8 @@ class Question {
     final s = v.toString().trim().toLowerCase();
     if (s.isEmpty) return null;
     if (const ['true', '1', 'yes', 'y', 'ja', 'wahr'].contains(s)) return true;
-    if (const ['false', '0', 'no', 'n', 'nein', 'falsch'].contains(s)) return false;
+    if (const ['false', '0', 'no', 'n', 'nein', 'falsch'].contains(s))
+      return false;
     return null;
   }
 
@@ -953,7 +964,8 @@ class Question {
       final n = v.toInt().abs();
       if (n < 1000000000000) {
         // Sekunden
-        return DateTime.fromMillisecondsSinceEpoch(v.toInt() * 1000, isUtc: true);
+        return DateTime.fromMillisecondsSinceEpoch(v.toInt() * 1000,
+            isUtc: true);
       } else if (n < 10000000000000000) {
         // Millisekunden
         return DateTime.fromMillisecondsSinceEpoch(v.toInt(), isUtc: true);

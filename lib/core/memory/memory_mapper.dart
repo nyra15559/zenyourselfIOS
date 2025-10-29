@@ -1,5 +1,4 @@
-//[BASELINE] lib/core/memory/memory_mapper.dart (Stand: 28.10.)
-// lib/core/memory/memory_mapper.dart
+// [BASELINE] lib/core/memory/memory_mapper.dart — v6.3.1 (Stand: 29.10.2025)
 //
 // MemoryMapper — toleranter Worker→MemoryEntry-Merger
 // ----------------------------------------------------
@@ -8,16 +7,18 @@
 // • Deduplizierte Facets (case-insensitive by key) — Hits werden zusammengeführt
 // • Liefert null, wenn *kein* relevantes Signal vorhanden ist
 //
-// Erfasste Signalquellen:
+// Erfasste Signalquellen (inkl. neuer Hint-Pfade):
 //   facets:
 //     • facets | context_facets
 //     • understanding.facets | analysis.context_facets | analysis.facets
 //     • context.memories.facets | context.memories.context_facets
+//     • context.memories.hint.facets | context.memories.hint.recent_facets
 //   topics → Facet-Fallback:
 //     • topics | topic_suggestions | analysis.topic_suggestions
 //     • understanding.topics
 //     • context.memories.recent_topics | context_hint.last_themes
 //     • context_hint.recent_facets (als Keys; Label = Key)
+//     • context.memories.hint.topics
 //   insight_score:
 //     • insight_score | understanding.insight_score | analysis.insight_score | flow.insight_score
 //     • insight.score  (camel/legacy)
@@ -199,9 +200,11 @@ class MemoryMapper {
       if (prev == null) {
         byKey[k] = f;
       } else {
-        final sumHits = (prev.hits <= 0 ? 1 : prev.hits) + (f.hits <= 0 ? 1 : f.hits);
-        final betterLabel =
-            (f.label.trim().length > prev.label.trim().length) ? f.label : prev.label;
+        final sumHits =
+            (prev.hits <= 0 ? 1 : prev.hits) + (f.hits <= 0 ? 1 : f.hits);
+        final betterLabel = (f.label.trim().length > prev.label.trim().length)
+            ? f.label
+            : prev.label;
         byKey[k] = Facet(key: k, label: betterLabel, hits: sumHits);
       }
     }
@@ -224,6 +227,8 @@ class MemoryMapper {
       ['session', 'threadId'],
       ['thread_id'],
       ['threadId'],
+      ['round', 'id'],
+      ['roundId'],
       ['sessionId'],
       ['id'],
     ]);
@@ -238,6 +243,8 @@ class MemoryMapper {
       ['analysis', 'facets'],
       ['context', 'memories', 'facets'],
       ['context', 'memories', 'context_facets'],
+      ['context', 'memories', 'hint', 'facets'],
+      ['context', 'memories', 'hint', 'recent_facets'],
     ]);
 
     // Optionaler Fallback: Themenlisten (Labels) in Facets konvertieren
@@ -250,6 +257,7 @@ class MemoryMapper {
         ['understanding', 'topics'],
         ['context', 'memories', 'recent_topics'],
         ['context_hint', 'last_themes'],
+        ['context', 'memories', 'hint', 'topics'],
       ]);
 
       // Falls nur „recent_facets“ (Keys) vorhanden sind, als Labels/Keys übernehmen

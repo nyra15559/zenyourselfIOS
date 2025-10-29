@@ -1,23 +1,25 @@
-//[BASELINE]lib/shared/zen_style.dart (Stand: 28.10.)
+// [BASELINE] lib/shared/zen_style.dart (Stand: 29.10.)
 // lib/shared/zen_style.dart
 //
 // ZenYourself — Oxford-Zen Design System (Tokens · Themes · Backdrop · Glass)
-// v8.3 — 2025-10-16 · Calm Styles + Panda Type + Charts + Send Tokens (withValue)
+// v8.4 — 2025-10-29 · Calm Styles + Panda Type + Charts + Send Tokens (withValue/withValues compat)
 // -----------------------------------------------------------------------------
-// • Kompatibler Alpha-Helper: .withValue(alpha: x) (singular) — Projekt-Standard
+// • Kompatible Alpha/Channel-Helper:
+//    – .withValue(alpha: x)  → Projekt-Standard (singular)
+//    – .withValue({alpha,red,green,blue}) → Shim für ältere SDKs (falls nicht vorhanden)
 // • Panda-Typografie (Header/Caption) für Panda-UI
-// • Bridge-/Hope-Styles für Reflection (ruhig, konsistent)
+// • Reflection-Textstile inkl. Presence/Bridge/Hope (ruhig, konsistent)
 // • Chart-Farbverläufe/-Farben (calm defaults)
-// • Radii/Spacing ergänzt (r14/r18), keine Breaking Changes
+// • Radii/Spacing/Shadow-Tokens (keine Breaking Changes)
 // • Ruhige Farben/Alphas in Themes & Glass-Primitives
-// • Send-Unterstütz-Style-Daten (Counter/Mic/Send/Pulse)
+// • Send-Unterstütz-Styles (Counter/Mic/Send/Pulse)
 
 import 'dart:ui' as ui show ImageFilter;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 
 // ==========================================================================
-// COMPAT — einheitlich `withValue(alpha: …)` auf allen SDKs
+// COMPAT — einheitlich `withValue(alpha: …)` + Shim für `withValues(...)`
 // ==========================================================================
 extension ZenColorCompat on Color {
   /// Setzt nur den Alpha-Kanal (0.0–1.0). RGB bleiben unverändert.
@@ -25,6 +27,24 @@ extension ZenColorCompat on Color {
     if (alpha == null) return this;
     final a01 = alpha.clamp(0.0, 1.0);
     return Color.fromARGB((a01 * 255).round(), red, green, blue);
+  }
+}
+
+/// Shim für ältere SDKs ohne `Color.withValue(...)`.
+/// Hat keinen Effekt auf neuere SDKs, dort gewinnt die eingebaute Methode.
+extension ZenColorCompatV2 on Color {
+  Color withValues({double? alpha, double? red, double? green, double? blue}) {
+    final a = alpha ?? (this.alpha / 255.0);
+    final r = red ?? (this.red / 255.0);
+    final g = green ?? (this.green / 255.0);
+    final b = blue ?? (this.blue / 255.0);
+    double _clamp01(double x) => x.clamp(0.0, 1.0);
+    return Color.fromARGB(
+      (_clamp01(a) * 255).round(),
+      (_clamp01(r) * 255).round(),
+      (_clamp01(g) * 255).round(),
+      (_clamp01(b) * 255).round(),
+    );
   }
 }
 
@@ -71,59 +91,59 @@ class ZenAppBar extends StatelessWidget implements PreferredSizeWidget {
 /// ==========================================================================
 class ZenColors {
   // Surfaces & Canvas
-  static const bg         = Color(0xFFF5EFE6); // Zen Beige
-  static const surface    = Color(0xFFFFFFFF); // Karten/Dialoge
+  static const bg = Color(0xFFF5EFE6); // Zen Beige
+  static const surface = Color(0xFFFFFFFF); // Karten/Dialoge
   static const surfaceAlt = Color(0xFFF7F1E8); // Inputs / leichte Flächen
 
   // Ink
-  static const inkStrong  = Color(0xFF14201B); // ruhiges, warmes Schwarzgrün
-  static const ink        = Color(0xFF1F2924);
-  static const inkSubtle  = Color(0xFF66726C);
+  static const inkStrong = Color(0xFF14201B); // ruhiges, warmes Schwarzgrün
+  static const ink = Color(0xFF1F2924);
+  static const inkSubtle = Color(0xFF66726C);
 
   // Greens
-  static const sage       = Color(0xFF6E8B74); // Sekundär
-  static const deepSage   = Color(0xFF2F5F49); // CTA/Highlights (Primary)
-  static const jade       = Color(0xFF3E7D67); // Akzent/Chips
-  static const jadeMid    = sage;              // COMPAT alias
+  static const sage = Color(0xFF6E8B74); // Sekundär
+  static const deepSage = Color(0xFF2F5F49); // CTA/Highlights (Primary)
+  static const jade = Color(0xFF3E7D67); // Akzent/Chips
+  static const jadeMid = sage; // COMPAT alias
 
   // CTA Family
-  static const cta        = deepSage;
-  static const ctaHover   = Color(0xFF275242);
+  static const cta = deepSage;
+  static const ctaHover = Color(0xFF275242);
   static const ctaPressed = Color(0xFF214538);
-  static const ctaDisabled= Color(0xFF7FA190);
+  static const ctaDisabled = Color(0xFF7FA190);
 
   // Lines / Focus
-  static const border  = Color(0xFFD9CCBA);
+  static const border = Color(0xFFD9CCBA);
   static const outline = Color(0xFFC8BBA8);
-  static const focus   = Color(0xFF78C2A4);
+  static const focus = Color(0xFF78C2A4);
 
   // Warm Glow
-  static const sunHaze    = Color(0xFFEADFAF);
+  static const sunHaze = Color(0xFFEADFAF);
   static const goldenMist = Color(0xFFE3D28A);
 
   // Semantic
   static const success = Color(0xFF2E7D4F);
-  static const error   = Color(0xFFB00020);
+  static const error = Color(0xFFB00020);
   static const warning = Color(0xFFC5901A);
-  static const info    = Color(0xFF2C6AA3);
+  static const info = Color(0xFF2C6AA3);
 
   // Misc / COMPAT
-  static const white   = Color(0xFFFFFFFF);
-  static const cloud   = Color(0xFFF0F3F5);
-  static const mist    = Color(0xFFEFEFEF);
-  static const gold    = Color(0xFFFFD580);
-  static const bamboo  = Color(0xFFA5CBA1);
-  static const cherry  = Color(0xFFD7263D);
+  static const white = Color(0xFFFFFFFF);
+  static const cloud = Color(0xFFF0F3F5);
+  static const mist = Color(0xFFEFEFEF);
+  static const gold = Color(0xFFFFD580);
+  static const bamboo = Color(0xFFA5CBA1);
+  static const cherry = Color(0xFFD7263D);
 }
 
 /// ==========================================================================
 /// RADII · SPACING · SHADOWS — Layout-Tokens
 /// ==========================================================================
 class ZenRadii {
-  static const s   = Radius.circular(8);
-  static const m   = Radius.circular(12);
-  static const l   = Radius.circular(16);
-  static const xl  = Radius.circular(20);
+  static const s = Radius.circular(8);
+  static const m = Radius.circular(12);
+  static const l = Radius.circular(16);
+  static const xl = Radius.circular(20);
   static const xxl = Radius.circular(28);
 
   // Ergänzungen (keine Breaking Changes)
@@ -133,11 +153,11 @@ class ZenRadii {
 
 class ZenSpacing {
   static const xxs = 4.0;
-  static const xs  = 8.0;
-  static const s   = 12.0;
-  static const m   = 16.0;
-  static const l   = 20.0;
-  static const xl  = 24.0;
+  static const xs = 8.0;
+  static const s = 12.0;
+  static const m = 16.0;
+  static const l = 20.0;
+  static const xl = 24.0;
   static const xxl = 32.0;
 
   // COMPAT
@@ -158,7 +178,9 @@ class ZenShadows {
   ];
 
   static const BoxShadow glow = BoxShadow(
-    color: Color(0x12000000), blurRadius: 18, offset: Offset(0, 6),
+    color: Color(0x12000000),
+    blurRadius: 18,
+    offset: Offset(0, 6),
   );
 
   static const List<BoxShadow> popover = [
@@ -236,6 +258,13 @@ class ZenReflectionText {
     color: ZenColors.inkStrong,
     height: 1.35,
   );
+
+  /// NEU: Presence-Text (sanfter Einstiegston vor der Frage)
+  static final presenceStyle = ZenTypography.body.copyWith(
+    fontWeight: FontWeight.w500,
+    color: ZenColors.ink.withValue(alpha: .85),
+    height: 1.33,
+  );
 }
 
 /// Bridge-/Hope-Styles (für BridgeBubble & Hope-Slot)
@@ -258,22 +287,22 @@ class ZenHopeText {
 
 /// Ruhige Textfarben (kontextfrei, ohne BuildContext)
 class ZenQuiet {
-  static final textMuted   = ZenColors.ink.withValue(alpha: .65);
-  static final textFaint   = ZenColors.ink.withValue(alpha: .55);
-  static final textStrong  = ZenColors.inkStrong;
-  static final lineSoft    = ZenColors.outline.withValue(alpha: .75);
+  static final textMuted = ZenColors.ink.withValue(alpha: .65);
+  static final textFaint = ZenColors.ink.withValue(alpha: .55);
+  static final textStrong = ZenColors.inkStrong;
+  static final lineSoft = ZenColors.outline.withValue(alpha: .75);
 }
 
 /// ==========================================================================
 /// CHARTS — ruhige Defaults (Linie + Area-Gradient, Grid/Fills)
 /// ==========================================================================
 class ZenCharts {
-  static final gridLine     = ZenColors.outline.withValue(alpha: .50);
-  static final axisLabel    = ZenColors.ink.withValue(alpha: .75);
+  static final gridLine = ZenColors.outline.withValue(alpha: .50);
+  static final axisLabel = ZenColors.ink.withValue(alpha: .75);
 
   // Primary Calm Line / Area
-  static final linePrimary  = ZenColors.jade.withValue(alpha: .95);
-  static final areaPrimary  = LinearGradient(
+  static final linePrimary = ZenColors.jade.withValue(alpha: .95);
+  static final areaPrimary = LinearGradient(
     begin: Alignment.topCenter,
     end: Alignment.bottomCenter,
     colors: [
@@ -285,8 +314,8 @@ class ZenCharts {
   );
 
   // Success / Risk Variants
-  static final lineSuccess  = ZenColors.success.withValue(alpha: .95);
-  static final areaSuccess  = LinearGradient(
+  static final lineSuccess = ZenColors.success.withValue(alpha: .95);
+  static final areaSuccess = LinearGradient(
     begin: Alignment.topCenter,
     end: Alignment.bottomCenter,
     colors: [
@@ -295,8 +324,8 @@ class ZenCharts {
     ],
   );
 
-  static final lineRisk     = ZenColors.cherry.withValue(alpha: .95);
-  static final areaRisk     = LinearGradient(
+  static final lineRisk = ZenColors.cherry.withValue(alpha: .95);
+  static final areaRisk = LinearGradient(
     begin: Alignment.topCenter,
     end: Alignment.bottomCenter,
     colors: [
@@ -311,17 +340,17 @@ class ZenCharts {
 /// ==========================================================================
 class ZenMotion {
   static const Duration short = Duration(milliseconds: 160);
-  static const Duration med   = Duration(milliseconds: 240);
-  static const Duration long  = Duration(milliseconds: 340);
+  static const Duration med = Duration(milliseconds: 240);
+  static const Duration long = Duration(milliseconds: 340);
 
-  static const Curve ease     = Curves.easeOutCubic;
-  static const Curve inOut    = Curves.fastOutSlowIn;
-  static const Curve fade     = Curves.linearToEaseOut;
+  static const Curve ease = Curves.easeOutCubic;
+  static const Curve inOut = Curves.fastOutSlowIn;
+  static const Curve fade = Curves.linearToEaseOut;
 }
 
 const animShort = ZenMotion.short;
-const animMed   = ZenMotion.med;
-const animLong  = ZenMotion.long;
+const animMed = ZenMotion.med;
+const animLong = ZenMotion.long;
 
 const zenMobileMaxWidth = 520.0;
 const zenTabletMaxWidth = 768.0;
@@ -330,18 +359,18 @@ const zenTabletMaxWidth = 768.0;
 /// THEMES (Light/Dark) — vollständige, stabile ThemeData-Konfiguration
 /// ==========================================================================
 ThemeData zenLightTheme() => _buildTheme(brightness: Brightness.light);
-ThemeData zenDarkTheme()  => _buildTheme(brightness: Brightness.dark);
+ThemeData zenDarkTheme() => _buildTheme(brightness: Brightness.dark);
 
 ThemeData _buildTheme({required Brightness brightness}) {
   final bool isDark = brightness == Brightness.dark;
 
   // Dark Palette (ruhig, nicht pechschwarz)
-  const bgDark         = Color(0xFF0F1211);
-  const surfaceDark    = Color(0xFF151917);
+  const bgDark = Color(0xFF0F1211);
+  const surfaceDark = Color(0xFF151917);
   const surfaceAltDark = Color(0xFF1B201D);
-  const inkDark        = Color(0xFFE6E4E0);
-  const borderDark     = Color(0xFF2A2E2B);
-  const outlineDark    = Color(0xFF3A403C);
+  const inkDark = Color(0xFFE6E4E0);
+  const borderDark = Color(0xFF2A2E2B);
+  const outlineDark = Color(0xFF3A403C);
 
   final base = ColorScheme.fromSeed(
     seedColor: ZenColors.deepSage,
@@ -349,18 +378,18 @@ ThemeData _buildTheme({required Brightness brightness}) {
   );
 
   final colorScheme = base.copyWith(
-    primary:      ZenColors.cta,
-    onPrimary:    Colors.white,
-    secondary:    ZenColors.jade,
-    onSecondary:  isDark ? bgDark : ZenColors.inkStrong,
-    surface:      isDark ? surfaceDark : ZenColors.surface,
-    onSurface:    isDark ? inkDark : ZenColors.ink,
-    error:        ZenColors.error,
-    onError:      Colors.white,
-    tertiary:     ZenColors.cta,
-    onTertiary:   Colors.white,
-    outline:      isDark ? outlineDark : ZenColors.outline,
-    surfaceTint:  ZenColors.cta,
+    primary: ZenColors.cta,
+    onPrimary: Colors.white,
+    secondary: ZenColors.jade,
+    onSecondary: isDark ? bgDark : ZenColors.inkStrong,
+    surface: isDark ? surfaceDark : ZenColors.surface,
+    onSurface: isDark ? inkDark : ZenColors.ink,
+    error: ZenColors.error,
+    onError: Colors.white,
+    tertiary: ZenColors.cta,
+    onTertiary: Colors.white,
+    outline: isDark ? outlineDark : ZenColors.outline,
+    surfaceTint: ZenColors.cta,
   );
 
   // AppBar
@@ -373,7 +402,8 @@ ThemeData _buildTheme({required Brightness brightness}) {
     titleTextStyle: ZenTypography.display.copyWith(
       color: isDark ? ZenColors.jade : ZenColors.inkStrong,
     ),
-    iconTheme: IconThemeData(color: isDark ? ZenColors.jade : ZenColors.inkStrong),
+    iconTheme:
+        IconThemeData(color: isDark ? ZenColors.jade : ZenColors.inkStrong),
   );
 
   // Buttons
@@ -381,8 +411,8 @@ ThemeData _buildTheme({required Brightness brightness}) {
     style: ButtonStyle(
       backgroundColor: WidgetStateProperty.resolveWith((states) {
         if (states.contains(WidgetState.disabled)) return ZenColors.ctaDisabled;
-        if (states.contains(WidgetState.pressed))  return ZenColors.ctaPressed;
-        if (states.contains(WidgetState.hovered))  return ZenColors.ctaHover;
+        if (states.contains(WidgetState.pressed)) return ZenColors.ctaPressed;
+        if (states.contains(WidgetState.hovered)) return ZenColors.ctaHover;
         return ZenColors.cta;
       }),
       foregroundColor: const WidgetStatePropertyAll(Colors.white),
@@ -404,7 +434,8 @@ ThemeData _buildTheme({required Brightness brightness}) {
       side: BorderSide(color: isDark ? outlineDark : ZenColors.outline),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       minimumSize: const Size(0, 48),
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.all(ZenRadii.l)),
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(ZenRadii.l)),
       textStyle: const TextStyle(fontWeight: FontWeight.w600),
       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
     ),
@@ -471,7 +502,8 @@ ThemeData _buildTheme({required Brightness brightness}) {
     iconColor: isDark ? inkDark : ZenColors.ink,
     textColor: isDark ? inkDark : ZenColors.ink,
     contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-    tileColor: (isDark ? surfaceAltDark : ZenColors.surface).withValue(alpha: .6),
+    tileColor:
+        (isDark ? surfaceAltDark : ZenColors.surface).withValue(alpha: .6),
   );
 
   // Tabs
@@ -540,7 +572,8 @@ ThemeData _buildTheme({required Brightness brightness}) {
   // SnackBar
   final snack = SnackBarThemeData(
     backgroundColor: ZenColors.deepSage,
-    contentTextStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+    contentTextStyle:
+        const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
     behavior: SnackBarBehavior.floating,
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
   );
@@ -549,7 +582,8 @@ ThemeData _buildTheme({required Brightness brightness}) {
   final bottomSheet = BottomSheetThemeData(
     backgroundColor: Colors.transparent,
     surfaceTintColor: Colors.transparent,
-    modalBackgroundColor: (isDark ? surfaceAltDark : ZenColors.surface).withValue(alpha: .92),
+    modalBackgroundColor:
+        (isDark ? surfaceAltDark : ZenColors.surface).withValue(alpha: .92),
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: ZenRadii.xl),
     ),
@@ -560,7 +594,8 @@ ThemeData _buildTheme({required Brightness brightness}) {
     color: (isDark ? surfaceAltDark : ZenColors.surface).withValue(alpha: .88),
     elevation: 0,
     margin: const EdgeInsets.all(0),
-    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.all(ZenRadii.l)),
+    shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.all(ZenRadii.l)),
     shadowColor: Colors.black.withValue(alpha: .08),
     surfaceTintColor: Colors.transparent,
   );
@@ -573,15 +608,20 @@ ThemeData _buildTheme({required Brightness brightness}) {
 
   // FAB / Bottom Nav
   const fabTheme = FloatingActionButtonThemeData(
-    elevation: 0, highlightElevation: 0,
+    elevation: 0,
+    highlightElevation: 0,
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.all(ZenRadii.l)),
   );
 
   final bottomNavTheme = BottomNavigationBarThemeData(
-    backgroundColor: (isDark ? surfaceDark : ZenColors.surface).withValue(alpha: .92),
+    backgroundColor:
+        (isDark ? surfaceDark : ZenColors.surface).withValue(alpha: .92),
     selectedItemColor: ZenColors.cta,
-    unselectedItemColor: (isDark ? inkDark : ZenColors.ink).withValue(alpha: .65),
-    showUnselectedLabels: false, type: BottomNavigationBarType.fixed, elevation: 0,
+    unselectedItemColor:
+        (isDark ? inkDark : ZenColors.ink).withValue(alpha: .65),
+    showUnselectedLabels: false,
+    type: BottomNavigationBarType.fixed,
+    elevation: 0,
   );
 
   // ThemeData
@@ -592,15 +632,14 @@ ThemeData _buildTheme({required Brightness brightness}) {
     colorScheme: colorScheme,
     scaffoldBackgroundColor: isDark ? bgDark : colorScheme.surface,
     fontFamily: 'NotoSans',
-
     appBarTheme: appBar,
     textTheme: TextTheme(
       bodyMedium: ZenTypography.body.copyWith(color: colorScheme.onSurface),
       titleMedium: ZenTypography.title.copyWith(color: colorScheme.onSurface),
-      headlineMedium: ZenTypography.display.copyWith(color: colorScheme.onSurface),
+      headlineMedium:
+          ZenTypography.display.copyWith(color: colorScheme.onSurface),
       labelLarge: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
     ),
-
     elevatedButtonTheme: elevated,
     outlinedButtonTheme: outlined,
     textButtonTheme: textButton,
@@ -620,13 +659,11 @@ ThemeData _buildTheme({required Brightness brightness}) {
     bottomNavigationBarTheme: bottomNavTheme,
     snackBarTheme: snack,
     bottomSheetTheme: bottomSheet,
-
     textSelectionTheme: const TextSelectionThemeData(
       cursorColor: ZenColors.jade,
       selectionColor: Color(0x223E7D67), // Jade ~13%
       selectionHandleColor: ZenColors.jade,
     ),
-
     dialogTheme: DialogThemeData(
       backgroundColor: colorScheme.surface,
       surfaceTintColor: Colors.transparent,
@@ -634,14 +671,13 @@ ThemeData _buildTheme({required Brightness brightness}) {
         borderRadius: BorderRadius.all(ZenRadii.l),
       ),
     ),
-
     pageTransitionsTheme: const PageTransitionsTheme(
       builders: {
         TargetPlatform.android: CupertinoPageTransitionsBuilder(),
-        TargetPlatform.iOS:     CupertinoPageTransitionsBuilder(),
-        TargetPlatform.macOS:   FadeUpwardsPageTransitionsBuilder(),
+        TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+        TargetPlatform.macOS: FadeUpwardsPageTransitionsBuilder(),
         TargetPlatform.windows: FadeUpwardsPageTransitionsBuilder(),
-        TargetPlatform.linux:   FadeUpwardsPageTransitionsBuilder(),
+        TargetPlatform.linux: FadeUpwardsPageTransitionsBuilder(),
         TargetPlatform.fuchsia: FadeUpwardsPageTransitionsBuilder(),
       },
     ),
@@ -650,7 +686,7 @@ ThemeData _buildTheme({required Brightness brightness}) {
 
 /// ==========================================================================
 /// GRADIENTS & OVERLAYS — visuelle Layer (screen/button, Glow/Haze/Fades)
-/// ==========================================================================
+// ==========================================================================
 class ZenGradients {
   static const LinearGradient screen = LinearGradient(
     begin: Alignment.topCenter,
@@ -697,7 +733,10 @@ class ZenOverlays {
       gradient: RadialGradient(
         center: Alignment(center.dx, center.dy),
         radius: .9,
-        colors: [ZenColors.goldenMist.withValue(alpha: opacity), Colors.transparent],
+        colors: [
+          ZenColors.goldenMist.withValue(alpha: opacity),
+          Colors.transparent
+        ],
         stops: const [.0, 1],
       ),
     );
@@ -706,13 +745,13 @@ class ZenOverlays {
 
 /// ==========================================================================
 /// ART ASSETS & BACKDROP PRESETS (optional, dank Safe-Loader niemals fatal)
-/// ==========================================================================
+// ==========================================================================
 class ZenArt {
   // Passe diese Pfade an dein Projekt an (oder ignoriere sie einfach).
-  static const start      = 'assets/bg/bg_start.png';
-  static const menu       = 'assets/bg/bg_menu.png';
+  static const start = 'assets/bg/bg_start.png';
+  static const menu = 'assets/bg/bg_menu.png';
   static const reflection = 'assets/bg/bg_reflection.png';
-  static const journal    = 'assets/bg/bg_journal.png';
+  static const journal = 'assets/bg/bg_journal.png';
 
   static const baseW = 2560.0;
   static const baseH = 1440.0;
@@ -727,8 +766,13 @@ class ZenBackdropPresets {
         alignment: ZenArt.alignRightSafe,
         artBaseWidth: ZenArt.baseW,
         artBaseHeight: ZenArt.baseH,
-        vignette: .10, glow: .24, enableHaze: true, hazeStrength: .10,
-        dimRight: false, saturation: .98, wash: .06,
+        vignette: .10,
+        glow: .24,
+        enableHaze: true,
+        hazeStrength: .10,
+        dimRight: false,
+        saturation: .98,
+        wash: .06,
       );
 
   static Widget menu({String? art}) => ZenBackdrop(
@@ -736,8 +780,13 @@ class ZenBackdropPresets {
         alignment: ZenArt.alignRightSafe,
         artBaseWidth: ZenArt.baseW,
         artBaseHeight: ZenArt.baseH,
-        vignette: .12, glow: .22, enableHaze: true, hazeStrength: .08,
-        dimRight: false, saturation: .96, wash: .04,
+        vignette: .12,
+        glow: .22,
+        enableHaze: true,
+        hazeStrength: .08,
+        dimRight: false,
+        saturation: .96,
+        wash: .04,
       );
 
   static Widget reflection({String? art}) => ZenBackdrop(
@@ -745,8 +794,13 @@ class ZenBackdropPresets {
         alignment: ZenArt.alignRightSafe,
         artBaseWidth: ZenArt.baseW,
         artBaseHeight: ZenArt.baseH,
-        vignette: .14, glow: .20, enableHaze: true, hazeStrength: .12,
-        dimRight: false, saturation: .94, wash: .03,
+        vignette: .14,
+        glow: .20,
+        enableHaze: true,
+        hazeStrength: .12,
+        dimRight: false,
+        saturation: .94,
+        wash: .03,
       );
 
   static Widget journal({String? art}) => ZenBackdrop(
@@ -754,8 +808,13 @@ class ZenBackdropPresets {
         alignment: ZenArt.alignRightSafe,
         artBaseWidth: ZenArt.baseW,
         artBaseHeight: ZenArt.baseH,
-        vignette: .10, glow: .26, enableHaze: true, hazeStrength: .10,
-        dimRight: false, saturation: .98, wash: .05,
+        vignette: .10,
+        glow: .26,
+        enableHaze: true,
+        hazeStrength: .10,
+        dimRight: false,
+        saturation: .98,
+        wash: .05,
       );
 }
 
@@ -778,7 +837,7 @@ class ZenBackdrop extends StatelessWidget {
 
   // Effekte
   final double vignette; // 0..1
-  final double glow;     // 0..1
+  final double glow; // 0..1
   final bool enableHaze;
   final double hazeStrength; // 0..1
   final bool dimRight;
@@ -786,7 +845,7 @@ class ZenBackdrop extends StatelessWidget {
 
   // Globale Entsättigung & Wash
   final double saturation; // 1.0 = original … 0.0 = grau
-  final double wash;       // 0.0 = aus … 0.12 = leichtes Weiß-Wash
+  final double wash; // 0.0 = aus … 0.12 = leichtes Weiß-Wash
 
   const ZenBackdrop({
     super.key,
@@ -816,16 +875,20 @@ class ZenBackdrop extends StatelessWidget {
     }
 
     return Stack(fit: StackFit.expand, children: [
-      const DecoratedBox(decoration: BoxDecoration(gradient: ZenGradients.screen)),
+      const DecoratedBox(
+          decoration: BoxDecoration(gradient: ZenGradients.screen)),
 
       // Blur-Fill als Unterfütterung
       applySaturation(
         ImageFiltered(
           imageFilter: ui.ImageFilter.blur(sigmaX: 24, sigmaY: 24),
           child: ColorFiltered(
-            colorFilter: ColorFilter.mode(Colors.white.withValue(alpha: 0.05), BlendMode.srcATop),
+            colorFilter: ColorFilter.mode(
+                Colors.white.withValue(alpha: 0.05), BlendMode.srcATop),
             child: _SafeAssetImage(
-              path: asset, fit: BoxFit.cover, alignment: Alignment.center,
+              path: asset,
+              fit: BoxFit.cover,
+              alignment: Alignment.center,
               filterQuality: FilterQuality.low,
             ),
           ),
@@ -842,16 +905,22 @@ class ZenBackdrop extends StatelessWidget {
                 alignment: alignment,
               )
             : _SafeAssetImage(
-                path: asset, fit: BoxFit.cover, alignment: alignment,
+                path: asset,
+                fit: BoxFit.cover,
+                alignment: alignment,
                 filterQuality: FilterQuality.high,
               ),
       ),
 
-      if (wash > 0) IgnorePointer(child: Container(color: Colors.white.withValue(alpha: wash))),
+      if (wash > 0)
+        IgnorePointer(
+            child: Container(color: Colors.white.withValue(alpha: wash))),
 
       // Gold-Grün Glow
-      IgnorePointer(child:
-        Container(decoration: ZenOverlays.radialGlow(center: const Offset(.50, -.05), opacity: glow)),
+      IgnorePointer(
+        child: Container(
+            decoration: ZenOverlays.radialGlow(
+                center: const Offset(.50, -.05), opacity: glow)),
       ),
 
       // Haze (optional)
@@ -860,7 +929,8 @@ class ZenBackdrop extends StatelessWidget {
           child: DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
-                begin: Alignment.topCenter, end: Alignment.bottomCenter,
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
                 colors: [
                   ZenColors.white.withValue(alpha: hazeStrength * 1.0),
                   ZenColors.surfaceAlt.withValue(alpha: hazeStrength * 0.75),
@@ -877,8 +947,12 @@ class ZenBackdrop extends StatelessWidget {
         child: DecoratedBox(
           decoration: BoxDecoration(
             gradient: RadialGradient(
-              center: Alignment.center, radius: 1.15,
-              colors: [Colors.transparent, Colors.black.withValue(alpha: vignette)],
+              center: Alignment.center,
+              radius: 1.15,
+              colors: [
+                Colors.transparent,
+                Colors.black.withValue(alpha: vignette)
+              ],
               stops: const [0.78, 1.0],
             ),
           ),
@@ -892,8 +966,12 @@ class ZenBackdrop extends StatelessWidget {
             child: DecoratedBox(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
-                  begin: Alignment.centerRight, end: Alignment.centerLeft,
-                  colors: [Colors.black.withValue(alpha: dimRightStrength), Colors.transparent],
+                  begin: Alignment.centerRight,
+                  end: Alignment.centerLeft,
+                  colors: [
+                    Colors.black.withValue(alpha: dimRightStrength),
+                    Colors.transparent
+                  ],
                   stops: const [0.0, 0.22],
                 ),
               ),
@@ -908,10 +986,26 @@ class ZenBackdrop extends StatelessWidget {
     const r = 0.2126, g = 0.7152, b = 0.0722;
     final a = (1 - s);
     return <double>[
-      r * a + s, g * a,     b * a,     0, 0,
-      r * a,     g * a + s, b * a,     0, 0,
-      r * a,     g * a,     b * a + s, 0, 0,
-      0,         0,         0,         1, 0,
+      r * a + s,
+      g * a,
+      b * a,
+      0,
+      0,
+      r * a,
+      g * a + s,
+      b * a,
+      0,
+      0,
+      r * a,
+      g * a,
+      b * a + s,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
     ];
   }
 }
@@ -951,7 +1045,10 @@ class _SafeAssetImage extends StatelessWidget {
         final ok = snap.data == true;
         if (!ok) return const SizedBox.shrink();
         return Image.asset(
-          path, fit: fit, alignment: alignment, filterQuality: filterQuality,
+          path,
+          fit: fit,
+          alignment: alignment,
+          filterQuality: filterQuality,
           errorBuilder: (_, __, ___) => const SizedBox.shrink(),
         );
       },
@@ -1044,7 +1141,7 @@ class ZenGlassCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final resolvedTopOpacity    = gradientTopOpacity ?? topOpacity;
+    final resolvedTopOpacity = gradientTopOpacity ?? topOpacity;
     final resolvedBottomOpacity = gradientBottomOpacity ?? bottomOpacity;
 
     return Container(
@@ -1056,20 +1153,27 @@ class ZenGlassCard extends StatelessWidget {
           filter: ui.ImageFilter.blur(sigmaX: blurSigmaX, sigmaY: blurSigmaY),
           child: Container(
             padding: padding ??
-                const EdgeInsets.symmetric(horizontal: ZenSpacing.l, vertical: ZenSpacing.l),
+                const EdgeInsets.symmetric(
+                    horizontal: ZenSpacing.l, vertical: ZenSpacing.l),
             decoration: BoxDecoration(
               gradient: LinearGradient(
-                begin: Alignment.topCenter, end: Alignment.bottomCenter,
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
                 colors: [
                   ZenColors.surface.withValue(alpha: resolvedTopOpacity),
                   ZenColors.surface.withValue(alpha: resolvedBottomOpacity),
                 ],
               ),
               borderRadius: borderRadius,
-              border: Border.all(color: Colors.white.withValue(alpha: borderOpacity), width: 1.0),
+              border: Border.all(
+                  color: Colors.white.withValue(alpha: borderOpacity),
+                  width: 1.0),
               boxShadow: const [
                 BoxShadow(
-                  color: Color(0x14000000), blurRadius: 18, spreadRadius: 1.2, offset: Offset(0, 5),
+                  color: Color(0x14000000),
+                  blurRadius: 18,
+                  spreadRadius: 1.2,
+                  offset: Offset(0, 5),
                 ),
               ],
             ),
@@ -1107,11 +1211,13 @@ class ZenGlassInput extends StatelessWidget {
           padding: padding ?? const EdgeInsets.fromLTRB(12, 8, 8, 8),
           decoration: BoxDecoration(
             gradient: const LinearGradient(
-              begin: Alignment.topCenter, end: Alignment.bottomCenter,
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
               colors: [Color(0x26FFFFFF), Color(0x1AFFFFFF)],
             ),
             borderRadius: borderRadius,
-            border: Border.all(color: Colors.white.withValue(alpha: 0.16), width: 1.0),
+            border: Border.all(
+                color: Colors.white.withValue(alpha: 0.16), width: 1.0),
             boxShadow: const [ZenShadows.glow],
           ),
           child: child,
@@ -1132,7 +1238,9 @@ class ZenDivider extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Divider(
-      height: height, thickness: 1, color: ZenColors.outline.withValue(alpha: opacity),
+      height: height,
+      thickness: 1,
+      color: ZenColors.outline.withValue(alpha: opacity),
     );
   }
 }
@@ -1167,7 +1275,9 @@ class ZenBadge extends StatelessWidget {
           Text(
             label,
             style: const TextStyle(
-              fontWeight: FontWeight.w700, fontSize: 14.5, color: ZenColors.jade,
+              fontWeight: FontWeight.w700,
+              fontSize: 14.5,
+              color: ZenColors.jade,
             ),
           ),
         ],
@@ -1179,19 +1289,23 @@ class ZenBadge extends StatelessWidget {
 /// Kontext-Extension & konsolidierte TextStyles
 extension ZenContext on BuildContext {
   ColorScheme get cs => Theme.of(this).colorScheme;
-  TextTheme  get tt => Theme.of(this).textTheme;
+  TextTheme get tt => Theme.of(this).textTheme;
   EdgeInsets get screenPad => const EdgeInsets.fromLTRB(16, 16, 16, 24);
 }
 
 class ZenTextStyles {
-  static final h1       = ZenTypography.display.copyWith(fontSize: 28);
-  static final h2       = ZenTypography.title.copyWith(fontSize: 22);
-  static final h3       = ZenTypography.title.copyWith(fontSize: 18, fontWeight: FontWeight.w700);
-  static const title    = ZenTypography.title;
-  static final subtitle = ZenTypography.body.copyWith(fontSize: 14.5, color: ZenColors.inkSubtle);
-  static const body     = ZenTypography.body;
-  static final caption  = ZenTypography.body.copyWith(fontSize: 12.5, color: ZenColors.inkSubtle);
-  static const button   = TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white);
+  static final h1 = ZenTypography.display.copyWith(fontSize: 28);
+  static final h2 = ZenTypography.title.copyWith(fontSize: 22);
+  static final h3 =
+      ZenTypography.title.copyWith(fontSize: 18, fontWeight: FontWeight.w700);
+  static const title = ZenTypography.title;
+  static final subtitle =
+      ZenTypography.body.copyWith(fontSize: 14.5, color: ZenColors.inkSubtle);
+  static const body = ZenTypography.body;
+  static final caption =
+      ZenTypography.body.copyWith(fontSize: 12.5, color: ZenColors.inkSubtle);
+  static const button =
+      TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white);
 
   static final sectionHeader = h3.copyWith(letterSpacing: .2);
   static final meta = caption.copyWith(fontStyle: FontStyle.italic);
@@ -1203,12 +1317,12 @@ class ZenTextStyles {
 class ZenSendTokens {
   static const inputSoftLimit = 420;
 
-  static final counter        = ZenColors.ink.withValue(alpha: .65);
-  static final counterOver    = Colors.redAccent.withValue(alpha: .85);
+  static final counter = ZenColors.ink.withValue(alpha: .65);
+  static final counterOver = Colors.redAccent.withValue(alpha: .85);
 
-  static final mic            = ZenColors.jade;
-  static final sendEnabled    = ZenColors.jade;
-  static final sendDisabled   = ZenColors.jade.withValue(alpha: .45);
+  static final mic = ZenColors.jade;
+  static final sendEnabled = ZenColors.jade;
+  static final sendDisabled = ZenColors.jade.withValue(alpha: .45);
 
   static List<BoxShadow> micPulse(bool active) => active
       ? [
@@ -1261,18 +1375,26 @@ class ZenFormat {
     return date(d);
   }
 
-  static DateTime gestern(DateTime today) => today.subtract(const Duration(days: 1));
+  static DateTime gestern(DateTime today) =>
+      today.subtract(const Duration(days: 1));
 
   /// Optional: Mood → Emoji
   static String moodEmoji(String mood) {
     switch (mood) {
-      case 'Glücklich': return '😊';
-      case 'Ruhig':     return '🧘';
-      case 'Neutral':   return '😐';
-      case 'Traurig':   return '😔';
-      case 'Gestresst': return '😱';
-      case 'Wütend':    return '😡';
-      default:          return '📝';
+      case 'Glücklich':
+        return '😊';
+      case 'Ruhig':
+        return '🧘';
+      case 'Neutral':
+        return '😐';
+      case 'Traurig':
+        return '😔';
+      case 'Gestresst':
+        return '😱';
+      case 'Wütend':
+        return '😡';
+      default:
+        return '📝';
     }
   }
 }

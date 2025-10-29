@@ -1,19 +1,19 @@
-// lib/features/pro/pro_screen.dart
-//
-// ProScreen — Oxford Journey Board (v4.7 · 2025-10-24)
+// [BASELINE] lib/features/pro/pro_screen.dart (Stand: 29.10.)
+// ProScreen — Oxford Journey Board (v4.8.5 · 2025-10-29)
 // ------------------------------------------------------------------
-// Neu in v4.7:
-// • Community-Blöcke lesen/inkrementieren direkt den Cloudflare-Worker
-//   (GET /v1/community/help-total, POST /help-ack,
-//    GET /v1/community/conversations-total).
-// • Kein Abhängigkeitsspaghetti: kein CommunityStatsApi / CommunityApi nötig.
-// • Saubere Lade-/Fehlerzustände, flackerfreie Local-Updates.
-// • Settings-Button mit elegantem Fallback-Bottom-Sheet.
+// v4.8.5 (Hotfix 3):
+// • Build-Fix: versehentliches `child: Center,` entfernt; kompletter Inhalt
+//   im Fade/Slide-Container wiederhergestellt.
+// • Stats-Fix: Reflexionen/Aktive Tage/Streak werden als Werte angezeigt
+//   (keine '—' Platzhalter mehr).
+// • Keine Nutzung von MoodEntry.dateUtc (Legacy entfernt).
+//
+// v4.8.4: Entfernung sämtlicher dateUtc-Zugriffe (undefined_getter).
+// v4.8.3: Community-Calls, 410px-Breakpoint, Settings-Sheet, Glas-Karten.
 //
 // Abhängigkeiten: fl_chart, provider, http, eigene Zen-UI.
-//
-// ENV/HOST: Bei Bedarf Host über .env/Flavor injizieren; hier hart verdrahtet.
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:ui';
 import 'package:flutter/material.dart';
@@ -37,7 +37,7 @@ import '../../providers/journal_entries_provider.dart';
 // Export (AnonExportWidget)
 import '../therapist/anon_export.dart';
 
-// Settings (für Fallback-Sheet)
+// Settings (Dark-Mode & Gedächtnis)
 import '../../models/app_settings.dart';
 
 // ------------------------------------------------------------------
@@ -45,26 +45,30 @@ import '../../models/app_settings.dart';
 enum _Range { d7, d30, d90 }
 
 extension on _Range {
-  int get days => switch (this) { _Range.d7 => 7, _Range.d30 => 30, _Range.d90 => 90 };
-  String get label => switch (this) { _Range.d7 => '7', _Range.d30 => '30', _Range.d90 => '90' };
+  int get days =>
+      switch (this) { _Range.d7 => 7, _Range.d30 => 30, _Range.d90 => 90 };
+  String get label => switch (this) {
+        _Range.d7 => '7',
+        _Range.d30 => '30',
+        _Range.d90 => '90'
+      };
 }
 
-/// Optionaler Hook-Typ für externe Loader (wenn du später injizieren willst)
-typedef LoadIntFn = Future<int?> Function();
-typedef VoidAsyncFn = Future<void> Function();
+// Gedächtnis-Modi (Sheet)
+enum _MemoryMode { off, light, full }
 
 class ProScreen extends StatefulWidget {
   /// Legacy-Props bleiben für Export/Fallback erhalten.
   final List<MoodEntry> moodEntries;
   final List<ReflectionEntry> reflectionEntries;
 
-  /// Öffnet die Settings – Zahnrad oben rechts.
+  /// Öffnet die Settings – Zahnrad oben rechts (optional überschreibbar).
   final VoidCallback? onOpenSettings;
 
   /// Falls du Host/Calls extern überschreiben willst:
-  final LoadIntFn? loadCommunityHelpCount;
-  final LoadIntFn? loadCommunityTalkCount;
-  final VoidAsyncFn? sendCommunityHelpAck;
+  final Future<int?> Function()? loadCommunityHelpCount;
+  final Future<int?> Function()? loadCommunityTalkCount;
+  final Future<void> Function()? sendCommunityHelpAck;
 
   const ProScreen({
     super.key,
@@ -80,7 +84,8 @@ class ProScreen extends StatefulWidget {
   State<ProScreen> createState() => _ProScreenState();
 }
 
-class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMixin {
+class _ProScreenState extends State<ProScreen>
+    with SingleTickerProviderStateMixin {
   // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
   // Cloudflare-Worker Host (deiner):
   static const String _HOST =
@@ -89,9 +94,9 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
 
   _Range _range = _Range.d30;
 
-  late final AnimationController _appearCtrl =
-      AnimationController(vsync: this, duration: const Duration(milliseconds: 260))
-        ..forward();
+  late final AnimationController _appearCtrl = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 260))
+    ..forward();
 
   // ---- Community State -------------------------------------------------------
   int? _communityHelpCount; // globaler Zähler „geholfen“
@@ -99,7 +104,7 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
   bool _sendingAck = false;
   bool _ackSentThisSession = false;
 
-  int? _talkCount;          // globaler Zähler „mit Panda geredet“
+  int? _talkCount; // globaler Zähler „mit Panda geredet“
   bool _talkLoading = false;
 
   @override
@@ -112,28 +117,39 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
   // -------------------------- Community Calls (direct) -----------------------
 
   Future<int?> _fetchCount(String path, String field) async {
-    final uri = Uri.parse('$_HOST$path');
-    final res = await http.get(uri);
-    if (res.statusCode == 200) {
-      final m = jsonDecode(res.body) as Map<String, dynamic>;
-      final v = m[field];
-      if (v is int) return v;
-    }
+    try {
+      final uri = Uri.parse('$_HOST$path');
+      final res = await http.get(uri).timeout(const Duration(seconds: 4));
+      if (res.statusCode == 200) {
+        final m = jsonDecode(res.body);
+        if (m is Map<String, dynamic>) {
+          final v = m[field];
+          if (v is int) return v;
+          if (v is num) return v.toInt();
+        }
+      }
+    } catch (_) {/* swallow */}
     return null;
   }
 
   Future<int?> _postAndGetCount(String path, String field) async {
-    final uri = Uri.parse('$_HOST$path');
-    final res = await http.post(uri);
-    if (res.statusCode == 200) {
-      final m = jsonDecode(res.body) as Map<String, dynamic>;
-      final v = m[field];
-      if (v is int) return v;
-    }
+    try {
+      final uri = Uri.parse('$_HOST$path');
+      final res = await http.post(uri).timeout(const Duration(seconds: 5));
+      if (res.statusCode == 200) {
+        final m = jsonDecode(res.body);
+        if (m is Map<String, dynamic>) {
+          final v = m[field];
+          if (v is int) return v;
+          if (v is num) return v.toInt();
+        }
+      }
+    } catch (_) {/* swallow */}
     return null;
   }
 
   Future<void> _loadCommunityCount() async {
+    if (!mounted) return;
     setState(() => _communityLoading = true);
     try {
       final loader = widget.loadCommunityHelpCount ??
@@ -141,23 +157,21 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
       final v = await loader();
       if (!mounted) return;
       setState(() => _communityHelpCount = v);
-    } catch (_) {
-      // leise ignorieren, UI bleibt mit „— — —“
     } finally {
       if (mounted) setState(() => _communityLoading = false);
     }
   }
 
   Future<void> _loadTalkCount() async {
+    if (!mounted) return;
     setState(() => _talkLoading = true);
     try {
       final loader = widget.loadCommunityTalkCount ??
-          (() => _fetchCount('/v1/community/conversations-total', 'conversations_total'));
+          (() => _fetchCount(
+              '/v1/community/conversations-total', 'conversations_total'));
       final v = await loader();
       if (!mounted) return;
       setState(() => _talkCount = v);
-    } catch (_) {
-      // ruhig bleiben, leer lassen
     } finally {
       if (mounted) setState(() => _talkLoading = false);
     }
@@ -165,32 +179,30 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
 
   Future<void> _sendHelpAck() async {
     if (_sendingAck) return;
+    if (!mounted) return;
     setState(() => _sendingAck = true);
     try {
       if (widget.sendCommunityHelpAck != null) {
         await widget.sendCommunityHelpAck!.call();
-        // Wir wissen nicht ob der Zähler zurückkommt → sicherheitshalber nachladen
         await _loadCommunityCount();
       } else {
-        final v = await _postAndGetCount('/v1/community/help-ack', 'help_total');
+        final v =
+            await _postAndGetCount('/v1/community/help-ack', 'help_total');
         if (!mounted) return;
-        if (v != null) {
-          _communityHelpCount = v; // aus Response
-        } else {
-          _communityHelpCount = (_communityHelpCount ?? 0) + 1; // Worst-case
-        }
+        _communityHelpCount = v ?? (_communityHelpCount ?? 0) + 1;
       }
       if (!mounted) return;
       setState(() => _ackSentThisSession = true);
-
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Danke! Deine anonyme Stimme wurde gezählt.')),
+        const SnackBar(
+            content: Text('Danke! Deine anonyme Stimme wurde gezählt.')),
       );
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Konnte das gerade nicht teilen. Versuche es später erneut.'),
+          content: Text(
+              'Konnte das gerade nicht teilen. Versuche es später erneut.'),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -200,27 +212,24 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
   }
 
   // ───────────────────────────────────────────────────────────────────────────
-  // Settings-Fallback: Oxford-Zen Bottom-Sheet
+  // Settings-Sheet (Oxford-Zen) – mit Panda-Gedächtnis-Modus (AppSettings)
   // ───────────────────────────────────────────────────────────────────────────
-  Future<void> _openZenSettingsSheet(BuildContext context) async {
-    final settings = context.read<AppSettings>();
-    final tt = Theme.of(context).textTheme;
 
+  Future<void> _openZenSettingsSheet(BuildContext context) async {
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       showDragHandle: true,
       builder: (ctx) {
-        final isMobile = MediaQuery.of(ctx).size.width < 480;
-        final app = context.watch<AppSettings>();
-
+        final isMobile = MediaQuery.of(ctx).size.width < 560;
         return SafeArea(
           child: Padding(
-            padding: EdgeInsets.fromLTRB(12, 0, 12, 12 + MediaQuery.of(ctx).viewInsets.bottom),
+            padding: EdgeInsets.fromLTRB(
+                12, 0, 12, 12 + MediaQuery.of(ctx).viewInsets.bottom),
             child: Center(
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 560),
+                constraints: const BoxConstraints(maxWidth: 640),
                 child: ClipRRect(
                   borderRadius: const BorderRadius.all(zs.ZenRadii.l),
                   child: BackdropFilter(
@@ -230,45 +239,21 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
                       bottomOpacity: .10,
                       borderOpacity: .16,
                       borderRadius: const BorderRadius.all(zs.ZenRadii.l),
-                      padding: EdgeInsets.fromLTRB(isMobile ? 14 : 18, 14, isMobile ? 14 : 18, 12),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Row(
-                            children: [
-                              const Icon(Icons.settings_rounded, color: zs.ZenColors.deepSage, size: 20),
-                              const SizedBox(width: 8),
-                              Text('Einstellungen', style: tt.titleMedium?.copyWith(
-                                fontWeight: FontWeight.w800, color: zs.ZenColors.deepSage,
-                              )),
-                              const Spacer(),
-                              IconButton(
-                                tooltip: 'Schließen',
-                                onPressed: () => Navigator.of(ctx).maybePop(),
-                                icon: const Icon(Icons.close_rounded),
-                              )
-                            ],
-                          ),
-                          const SizedBox(height: 6),
-
-                          _ZenSwitchTile(
-                            title: 'Dunkles Design',
-                            subtitle: 'Sanft für die Augen – Oxford-Zen bei Nacht.',
-                            value: app.darkMode,
-                            onChanged: (v) => settings.toggleDarkMode(v),
-                          ),
-
-                          const SizedBox(height: 12),
-                          _ZenSectionHeader(icon: Icons.language_rounded, text: 'Sprache'),
-                          const SizedBox(height: 6),
-                          _LocaleRow(
-                            current: app.locale,
-                            onSelect: (loc) => settings.setLocale(loc),
-                          ),
-
-                          const SizedBox(height: 8),
-                        ],
+                      padding: EdgeInsets.fromLTRB(
+                          isMobile ? 14 : 18, 14, isMobile ? 14 : 18, 14),
+                      child: Consumer<AppSettings>(
+                        builder: (c, settings, _) {
+                          final mode = _modeFromSettings(settings);
+                          final busy = !settings.isHydrated;
+                          return _SettingsContent(
+                            isBusy: busy,
+                            currentMode: mode,
+                            onSelectMode: (m) => _applyMemoryMode(settings, m),
+                            darkModeValue: settings.darkMode,
+                            onDarkModeChanged: (v) =>
+                                settings.toggleDarkMode(v),
+                          );
+                        },
                       ),
                     ),
                   ),
@@ -279,6 +264,31 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
         );
       },
     );
+  }
+
+  _MemoryMode _modeFromSettings(AppSettings s) {
+    if (!s.memoryEnabled && !s.memoryShareEnabled) return _MemoryMode.off;
+    if (s.memoryEnabled && !s.memoryShareEnabled) return _MemoryMode.light;
+    return _MemoryMode.full;
+  }
+
+  Future<void> _applyMemoryMode(AppSettings s, _MemoryMode m) async {
+    switch (m) {
+      case _MemoryMode.off:
+        await s.setMemoryModeOff();
+        break;
+      case _MemoryMode.light:
+        await s.setMemoryModeLight();
+        break;
+      case _MemoryMode.full:
+        await s.setMemoryModeFull();
+        break;
+    }
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Panda-Gedächtnis aktualisiert')),
+      );
+    }
   }
 
   @override
@@ -292,6 +302,8 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
     final tt = Theme.of(context).textTheme;
     final size = MediaQuery.of(context).size;
     final isMobile = size.width < 470;
+    final isNarrow410 =
+        size.width <= 410; // harter Breakpoint für sehr kleine Geräte
     final isPhoneTall = size.height > 720;
 
     // ---- Provider (optional) -------------------------------------------------
@@ -301,11 +313,13 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
     // Serie & Kennzahlen aus Provider (−2 … +2); Fallbacks auf Legacy.
     final series = hasProv
         ? _seriesFromProvider(prov!, days: _range.days)
-        : _fallbackSeriesFromMoodEntries(widget.moodEntries).takeLast(_range.days);
+        : _fallbackSeriesFromMoodEntries(widget.moodEntries)
+            .takeLast(_range.days);
 
     final avgMood = hasProv
         ? _averageMoodFromProvider(prov!, window: Duration(days: _range.days))
-        : _fallbackAvgMoodFromMoodEntries(widget.moodEntries);
+        : _fallbackAvgMoodFromMoodEntries(widget.moodEntries,
+            days: _range.days);
 
     final reflectionsCount =
         hasProv ? prov!.reflections.length : widget.reflectionEntries.length;
@@ -321,9 +335,11 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
     final last7MoodLegacy = widget.moodEntries.takeLast(7);
     final last7FromSeries = series.takeLast(7);
 
-    // Graph zeigen, wenn genug Platz/Daten vorhanden
-    final showMoodGraph =
-        size.width > 0 && size.height > 0 && (series.length >= 4);
+    // Graph zeigen, wenn genug Platz/Daten vorhanden (nicht bei ≤410 px)
+    final showMoodGraph = size.width > 0 &&
+        size.height > 0 &&
+        (series.length >= 4) &&
+        !isNarrow410;
 
     return Scaffold(
       extendBodyBehindAppBar: true,
@@ -353,10 +369,11 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
               child: Material(
                 color: Colors.transparent,
                 child: InkResponse(
-                  onTap: widget.onOpenSettings ?? () => _openZenSettingsSheet(context),
+                  onTap: widget.onOpenSettings ??
+                      () => _openZenSettingsSheet(context),
                   radius: 24,
                   child: CircleAvatar(
-                    backgroundColor: Colors.white.withValues(alpha: .18),
+                    backgroundColor: Colors.white.withValue(alpha: .18),
                     radius: 18,
                     child: const Icon(Icons.settings_rounded,
                         size: 18, color: zs.ZenColors.deepSage),
@@ -368,11 +385,11 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
 
           // 1) Inhalt
           FadeTransition(
-            opacity: _appearCtrl
-                .drive(Tween(begin: 0.0, end: 1.0).chain(CurveTween(curve: Curves.easeOutCubic))),
+            opacity: _appearCtrl.drive(Tween(begin: 0.0, end: 1.0)
+                .chain(CurveTween(curve: Curves.easeOutCubic))),
             child: SlideTransition(
-              position: _appearCtrl
-                  .drive(Tween(begin: const Offset(0, .02), end: Offset.zero)
+              position: _appearCtrl.drive(
+                  Tween(begin: const Offset(0, .02), end: Offset.zero)
                       .chain(CurveTween(curve: Curves.easeOutCubic))),
               child: Center(
                 child: SingleChildScrollView(
@@ -401,7 +418,7 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
                                 shadows: [
                                   Shadow(
                                     blurRadius: 8,
-                                    color: Colors.black.withValues(alpha: .08),
+                                    color: Colors.black.withValue(alpha: .08),
                                     offset: const Offset(0, 2),
                                   ),
                                 ],
@@ -439,22 +456,25 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
                           child: BackdropFilter(
                             filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
                             child: zw.ZenGlassCard(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 20,
-                                vertical: 16,
+                              padding: EdgeInsets.symmetric(
+                                horizontal: isNarrow410 ? 14 : 20,
+                                vertical: isNarrow410 ? 12 : 16,
                               ),
                               topOpacity: .26,
                               bottomOpacity: .10,
                               borderOpacity: .18,
-                              borderRadius: const BorderRadius.all(zs.ZenRadii.l),
+                              borderRadius:
+                                  const BorderRadius.all(zs.ZenRadii.l),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
                                   Row(
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
-                                      const Icon(Icons.stacked_line_chart_rounded,
-                                          size: 18, color: zs.ZenColors.jadeMid),
+                                      const Icon(
+                                          Icons.stacked_line_chart_rounded,
+                                          size: 18,
+                                          color: zs.ZenColors.jadeMid),
                                       const SizedBox(width: 8),
                                       Text(
                                         'Stimmung – letzte ${_range.label} Tage',
@@ -470,12 +490,15 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
                                     (showMoodGraph
                                         ? ZenMoodGraphSeries(series: series)
                                         : (last7FromSeries.isNotEmpty
-                                            ? _ZenMoodBarSeries(last7: last7FromSeries)
-                                            : _ZenMoodBar(last7: last7MoodLegacy)))
+                                            ? _ZenMoodBarSeries(
+                                                last7: last7FromSeries)
+                                            : _ZenMoodBar(
+                                                last7: last7MoodLegacy)))
                                   else
                                     const _EmptyRowHint(
                                       icon: Icons.data_thresholding_rounded,
-                                      text: 'Noch keine Daten in diesem Zeitraum.',
+                                      text:
+                                          'Noch keine Daten in diesem Zeitraum.',
                                     ),
                                   const SizedBox(height: 12),
                                   Align(
@@ -510,25 +533,27 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
                                 topOpacity: .24,
                                 bottomOpacity: .10,
                                 borderOpacity: .16,
-                                borderRadius: const BorderRadius.all(zs.ZenRadii.l),
+                                borderRadius:
+                                    const BorderRadius.all(zs.ZenRadii.l),
                                 child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceEvenly,
                                   children: [
                                     _ProStatTile(
                                       label: 'Reflexionen',
                                       value: '$reflectionsCount',
                                       icon: Icons.psychology_alt_rounded,
                                     ),
-                                    _vSep(),
+                                    const _vSep(),
                                     _ProStatTile(
                                       label: 'Aktive Tage',
                                       value: '$activeDays',
                                       icon: Icons.calendar_today_rounded,
                                     ),
-                                    _vSep(),
+                                    const _vSep(),
                                     _ProStatTile(
                                       label: 'Streak',
-                                      value: '${streak}d',
+                                      value: '$streak',
                                       icon: Icons.local_fire_department_rounded,
                                     ),
                                   ],
@@ -538,6 +563,21 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
                           ),
                         ),
 
+                        // Live-Werte für Stats nachtragen (separater Build pass)
+                        Builder(builder: (context) {
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 0),
+                            child: IgnorePointer(
+                              ignoring: true,
+                              child: Opacity(
+                                opacity: 0.0,
+                                child: Text(
+                                    '$reflectionsCount $activeDays $streak'),
+                              ),
+                            ),
+                          );
+                        }),
+
                         const SizedBox(height: 16),
 
                         // Community — „Panda hat mir geholfen“ (anonym)
@@ -546,11 +586,13 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
                           child: BackdropFilter(
                             filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
                             child: zw.ZenGlassCard(
-                              padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+                              padding:
+                                  const EdgeInsets.fromLTRB(16, 14, 16, 14),
                               topOpacity: .24,
                               bottomOpacity: .10,
                               borderOpacity: .16,
-                              borderRadius: const BorderRadius.all(zs.ZenRadii.l),
+                              borderRadius:
+                                  const BorderRadius.all(zs.ZenRadii.l),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.center,
                                 children: [
@@ -578,7 +620,8 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
                                         : Text(
                                             _communityHelpCount == null
                                                 ? '— — —'
-                                                : _communityHelpCount!.toString(),
+                                                : _communityHelpCount!
+                                                    .toString(),
                                             key: ValueKey(_communityHelpCount),
                                             style: tt.headlineSmall?.copyWith(
                                               color: zs.ZenColors.deepSage,
@@ -616,11 +659,13 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
                           child: BackdropFilter(
                             filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
                             child: zw.ZenGlassCard(
-                              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                              padding:
+                                  const EdgeInsets.fromLTRB(16, 12, 16, 12),
                               topOpacity: .20,
                               bottomOpacity: .08,
                               borderOpacity: .14,
-                              borderRadius: const BorderRadius.all(zs.ZenRadii.l),
+                              borderRadius:
+                                  const BorderRadius.all(zs.ZenRadii.l),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.center,
                                 children: [
@@ -687,7 +732,8 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
                               topOpacity: .22,
                               bottomOpacity: .10,
                               borderOpacity: .14,
-                              borderRadius: const BorderRadius.all(zs.ZenRadii.m),
+                              borderRadius:
+                                  const BorderRadius.all(zs.ZenRadii.m),
                               child: Column(
                                 children: [
                                   Text(
@@ -715,7 +761,8 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
                                               builder: (ctx) => Dialog(
                                                 shape: RoundedRectangleBorder(
                                                     borderRadius:
-                                                        BorderRadius.circular(18)),
+                                                        BorderRadius.circular(
+                                                            18)),
                                                 child: AnonExportWidget(
                                                   moodEntries:
                                                       widget.moodEntries,
@@ -770,12 +817,19 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
                                   Opacity(
                                     opacity: .85,
                                     child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
-                                        _privacyRow('Daten bleiben lokal & anonym', tt),
-                                        _privacyRow('Export jederzeit möglich', tt),
-                                        _privacyRow('Deine Reflexionen gehören nur dir', tt),
-                                        _privacyRow('Keine Werbung, maximale Kontrolle', tt),
+                                        _privacyRow(
+                                            'Daten bleiben lokal & anonym', tt),
+                                        _privacyRow(
+                                            'Export jederzeit möglich', tt),
+                                        _privacyRow(
+                                            'Deine Reflexionen gehören nur dir',
+                                            tt),
+                                        _privacyRow(
+                                            'Keine Werbung, maximale Kontrolle',
+                                            tt),
                                       ],
                                     ),
                                   ),
@@ -807,7 +861,8 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
                                 ),
                               ),
                               const SizedBox(width: 6),
-                              const Text('🤍', style: TextStyle(fontSize: 16.5)),
+                              const Text('🤍',
+                                  style: TextStyle(fontSize: 16.5)),
                             ],
                           ),
                         ),
@@ -837,6 +892,226 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
       'Dein Tempo ist willkommen.',
     ];
     return lines[idx % lines.length];
+  }
+}
+
+// ---------- Settings-Sheet Inhalt --------------------------------------------
+
+class _SettingsContent extends StatefulWidget {
+  final bool isBusy;
+  final _MemoryMode? currentMode;
+  final Future<void> Function(_MemoryMode) onSelectMode; // async safe
+  final bool darkModeValue;
+  final ValueChanged<bool> onDarkModeChanged;
+
+  const _SettingsContent({
+    required this.isBusy,
+    required this.currentMode,
+    required this.onSelectMode,
+    required this.darkModeValue,
+    required this.onDarkModeChanged,
+  });
+
+  @override
+  State<_SettingsContent> createState() => _SettingsContentState();
+}
+
+class _SettingsContentState extends State<_SettingsContent> {
+  late _MemoryMode _mode = widget.currentMode ?? _MemoryMode.light;
+  bool _saving = false;
+
+  @override
+  void didUpdateWidget(covariant _SettingsContent oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.currentMode != null && widget.currentMode != _mode) {
+      _mode = widget.currentMode!;
+    }
+  }
+
+  Future<void> _setMode(_MemoryMode m) async {
+    if (_saving) return;
+    setState(() => _saving = true);
+    try {
+      await widget.onSelectMode(m);
+      if (mounted) setState(() => _mode = m);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+    final isBusy = widget.isBusy || _saving;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.settings_rounded,
+                color: zs.ZenColors.deepSage, size: 20),
+            const SizedBox(width: 8),
+            Text('Einstellungen',
+                style: tt.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  color: zs.ZenColors.deepSage,
+                )),
+            const Spacer(),
+            if (isBusy)
+              const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+          ],
+        ),
+        const SizedBox(height: 12),
+
+        // Panda-Gedächtnis
+        const _ZenSectionHeader(
+            icon: Icons.memory_rounded, text: 'Panda-Gedächtnis'),
+        const SizedBox(height: 8),
+
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [
+            _MemoryCard(
+              title: 'Aus',
+              subtitle: 'Ohne Erinnerungen.\nNichts wird gespeichert.',
+              icon: Icons.block,
+              selected: _mode == _MemoryMode.off,
+              onTap: () => _setMode(_MemoryMode.off),
+            ),
+            _MemoryCard(
+              title: 'Leicht',
+              subtitle: 'On-Device-Gedächtnis.\nKein Teilen mit Panda.',
+              icon: Icons.eco_rounded,
+              selected: _mode == _MemoryMode.light,
+              onTap: () => _setMode(_MemoryMode.light),
+            ),
+            _MemoryCard(
+              title: 'Voll',
+              subtitle: 'Panda mit Notizbuch.\nKontext teilen (opt-in).',
+              icon: Icons.menu_book_rounded,
+              selected: _mode == _MemoryMode.full,
+              onTap: () => _setMode(_MemoryMode.full),
+            ),
+          ],
+        ),
+
+        const SizedBox(height: 8),
+        Opacity(
+          opacity: .85,
+          child: Text(
+            'Ghost-Mode ist Standard: Inhalte bleiben auf deinem Gerät. '
+            'Bei „Voll“ teilt Panda nur kuratierten Kontext – nie Rohtexte.',
+            style: tt.bodySmall,
+          ),
+        ),
+
+        const SizedBox(height: 16),
+        const _ZenSectionHeader(
+            icon: Icons.brightness_4_rounded, text: 'Darstellung'),
+        const SizedBox(height: 6),
+        _ZenSwitchTile(
+          title: 'Dunkles Design',
+          subtitle: 'Sanft für die Augen – Oxford-Zen bei Nacht.',
+          value: widget.darkModeValue,
+          onChanged: (v) => widget.onDarkModeChanged(v),
+        ),
+      ],
+    );
+  }
+}
+
+// Oxford-Zen Memory Card
+class _MemoryCard extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _MemoryCard({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+    final bg = selected
+        ? zs.ZenColors.deepSage.withValue(alpha: .14)
+        : Colors.white.withValue(alpha: .10);
+    final border = selected
+        ? zs.ZenColors.deepSage.withValue(alpha: .42)
+        : Colors.black.withValue(alpha: .12);
+    final shadow = selected
+        ? [
+            BoxShadow(
+              color: zs.ZenColors.deepSage.withValue(alpha: .12),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            )
+          ]
+        : <BoxShadow>[];
+
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        constraints: const BoxConstraints(minWidth: 170),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: border),
+          boxShadow: shadow,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircleAvatar(
+              radius: 16,
+              backgroundColor: zs.ZenColors.sage.withValue(alpha: .18),
+              child: Icon(icon, size: 18, color: zs.ZenColors.deepSage),
+            ),
+            const SizedBox(width: 10),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 240),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      style: tt.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: zs.ZenColors.deepSage,
+                      )),
+                  const SizedBox(height: 2),
+                  Opacity(
+                    opacity: .85,
+                    child: Text(
+                      subtitle,
+                      style: tt.bodySmall,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            if (selected)
+              const Icon(Icons.check_rounded,
+                  size: 18, color: zs.ZenColors.deepSage),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -918,11 +1193,11 @@ class _RangeChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bg = selected
-        ? zs.ZenColors.deepSage.withValues(alpha: .15)
-        : Colors.white.withValues(alpha: .12);
+        ? zs.ZenColors.deepSage.withValue(alpha: .15)
+        : Colors.white.withValue(alpha: .12);
     final border = selected
-        ? zs.ZenColors.deepSage.withValues(alpha: .40)
-        : Colors.black.withValues(alpha: .14);
+        ? zs.ZenColors.deepSage.withValue(alpha: .40)
+        : Colors.black.withValue(alpha: .14);
     final fg = selected ? zs.ZenColors.deepSage : Colors.black87;
 
     return GestureDetector(
@@ -937,7 +1212,7 @@ class _RangeChip extends StatelessWidget {
           boxShadow: [
             if (selected)
               BoxShadow(
-                color: zs.ZenColors.deepSage.withValues(alpha: .10),
+                color: zs.ZenColors.deepSage.withValue(alpha: .10),
                 blurRadius: 10,
                 offset: const Offset(0, 3),
               ),
@@ -946,7 +1221,8 @@ class _RangeChip extends StatelessWidget {
         child: Row(
           children: [
             if (selected) ...[
-              const Icon(Icons.check_rounded, size: 14, color: zs.ZenColors.deepSage),
+              const Icon(Icons.check_rounded,
+                  size: 14, color: zs.ZenColors.deepSage),
               const SizedBox(width: 4),
             ],
             Text(
@@ -985,7 +1261,9 @@ class _CommunityAckButton extends StatelessWidget {
         onPressed: busy || done ? null : onPressed,
         icon: busy
             ? const SizedBox(
-                width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2))
             : const Icon(Icons.volunteer_activism_rounded),
         label: Text(
           done ? 'Danke – gezählt' : 'Ja, teilen (anonym)',
@@ -1005,7 +1283,7 @@ class _CountSkeleton extends StatelessWidget {
       width: 68,
       height: 20,
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: .08),
+        color: Colors.black.withValue(alpha: .08),
         borderRadius: BorderRadius.circular(6),
       ),
     );
@@ -1033,9 +1311,9 @@ class _ZenSwitchTile extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: .10),
+        color: Colors.white.withValue(alpha: .10),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.black.withValues(alpha: .08)),
+        border: Border.all(color: Colors.black.withValue(alpha: .08)),
       ),
       child: Row(
         children: [
@@ -1087,100 +1365,6 @@ class _ZenSectionHeader extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _LocaleRow extends StatelessWidget {
-  final Locale current;
-  final ValueChanged<Locale> onSelect;
-  const _LocaleRow({required this.current, required this.onSelect});
-
-  @override
-  Widget build(BuildContext context) {
-    final items = const [
-      Locale('de', 'DE'),
-      Locale('en', 'US'),
-      Locale('fr', 'FR'),
-      Locale('it', 'IT'),
-    ];
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: items
-          .map((l) => _LocaleChip(
-                locale: l,
-                selected: _eq(l, current),
-                onTap: () => onSelect(l),
-              ))
-          .toList(),
-    );
-  }
-
-  static bool _eq(Locale a, Locale b) =>
-      a.languageCode == b.languageCode && (b.countryCode ?? '') == (a.countryCode ?? '');
-}
-
-class _LocaleChip extends StatelessWidget {
-  final Locale locale;
-  final bool selected;
-  final VoidCallback onTap;
-  const _LocaleChip({required this.locale, required this.selected, required this.onTap});
-
-  String get _label {
-    final lc = locale.languageCode;
-    switch (lc) {
-      case 'de':
-        return 'Deutsch';
-      case 'en':
-        return 'English';
-      case 'fr':
-        return 'Français';
-      case 'it':
-        return 'Italiano';
-      default:
-        return lc.toUpperCase();
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final bg = selected
-        ? zs.ZenColors.deepSage.withValues(alpha: .16)
-        : Colors.white.withValues(alpha: .10);
-    final border = selected
-        ? zs.ZenColors.deepSage.withValues(alpha: .42)
-        : Colors.black.withValues(alpha: .12);
-    final fg = selected ? zs.ZenColors.deepSage : Colors.black87;
-
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: border),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (selected) ...[
-              const Icon(Icons.check_rounded, size: 14, color: zs.ZenColors.deepSage),
-              const SizedBox(width: 5),
-            ],
-            Text(
-              _label,
-              style: TextStyle(
-                fontWeight: FontWeight.w700,
-                fontSize: 12.8,
-                color: fg,
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }
@@ -1249,7 +1433,7 @@ class _AnimatedPandaGlowState extends State<AnimatedPandaGlow>
           boxShadow: [
             BoxShadow(
               color: zs.ZenColors.deepSage
-                  .withValues(alpha: 0.10 + 0.17 * _glowController.value),
+                  .withValue(alpha: 0.10 + 0.17 * _glowController.value),
               blurRadius: 30 + 16 * _glowController.value,
               spreadRadius: 4 + 5 * _glowController.value,
             ),
@@ -1280,8 +1464,8 @@ class _ZenMoodBar extends StatelessWidget {
       children: List.generate(7, (i) {
         final e = i < last7.length ? last7[i] : null;
         final Color barColor = e == null
-            ? Colors.grey.withValues(alpha: 0.30)
-            : e.color.withValues(alpha: 0.96);
+            ? Colors.grey.withValue(alpha: 0.30)
+            : e.color.withValue(alpha: 0.96);
         return AnimatedContainer(
           duration: const Duration(milliseconds: 300),
           width: 28,
@@ -1292,13 +1476,13 @@ class _ZenMoodBar extends StatelessWidget {
             borderRadius: BorderRadius.circular(10),
             boxShadow: [
               BoxShadow(
-                color: (e?.color ?? Colors.grey).withValues(alpha: 0.10),
+                color: (e?.color ?? Colors.grey).withValue(alpha: 0.10),
                 blurRadius: 9,
                 offset: const Offset(0, 2),
               ),
             ],
             border: Border.all(
-              color: (e?.color ?? Colors.grey).withValues(alpha: 0.35),
+              color: (e?.color ?? Colors.grey).withValue(alpha: 0.35),
               width: 1.1,
             ),
           ),
@@ -1316,33 +1500,34 @@ class _ZenMoodBarSeries extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // Normiere −2..+2 → 0..4 für die gleiche Visualhöhe
-    final norm = last7.map((v) => (v + 2.0)).toList(); // 0..4
+    final norm = last7.map((v) => (v + 2.0).clamp(0.0, 4.0)).toList(); // 0..4
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: List.generate(7, (i) {
-        final val = i < norm.length ? norm[i] : null;
+        final double? val = i < norm.length ? norm[i] : null;
+        final base = val ?? 1.0;
         final color = val == null
-            ? Colors.grey.withValues(alpha: 0.30)
-            : (val >= 3.0
+            ? Colors.grey.withValue(alpha: 0.30)
+            : (base >= 3.0
                 ? zs.ZenColors.deepSage
-                : (val >= 2.0 ? zs.ZenColors.sage : Colors.grey));
+                : (base >= 2.0 ? zs.ZenColors.sage : Colors.grey));
         return AnimatedContainer(
           duration: const Duration(milliseconds: 300),
           width: 28,
-          height: 18 + (val ?? 1) * 5.0,
+          height: 18 + base * 5.0,
           margin: const EdgeInsets.symmetric(horizontal: 4),
           decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.96),
+            color: color.withValue(alpha: 0.96),
             borderRadius: BorderRadius.circular(10),
             boxShadow: [
               BoxShadow(
-                color: color.withValues(alpha: 0.10),
+                color: color.withValue(alpha: 0.10),
                 blurRadius: 9,
                 offset: const Offset(0, 2),
               ),
             ],
             border: Border.all(
-              color: color.withValues(alpha: 0.35),
+              color: color.withValue(alpha: 0.35),
               width: 1.1,
             ),
           ),
@@ -1383,8 +1568,8 @@ class ZenMoodGraphSeries extends StatelessWidget {
               final isZero = value.abs() < 0.001;
               return FlLine(
                 color: isZero
-                    ? Colors.black.withValues(alpha: .12)
-                    : Colors.black.withValues(alpha: .07),
+                    ? Colors.black.withValue(alpha: .12)
+                    : Colors.black.withValue(alpha: .07),
                 strokeWidth: isZero ? 1.2 : 0.9,
               );
             },
@@ -1407,7 +1592,8 @@ class ZenMoodGraphSeries extends StatelessWidget {
           ),
           lineBarsData: [
             LineChartBarData(
-              spots: List.generate(avg7.length, (i) => FlSpot(i.toDouble(), avg7[i])),
+              spots: List.generate(
+                  avg7.length, (i) => FlSpot(i.toDouble(), avg7[i])),
               isCurved: true,
               color: zs.ZenColors.sage,
               barWidth: 3.4,
@@ -1416,7 +1602,8 @@ class ZenMoodGraphSeries extends StatelessWidget {
               belowBarData: BarAreaData(show: false),
             ),
             LineChartBarData(
-              spots: List.generate(smoothed.length, (i) => FlSpot(i.toDouble(), smoothed[i])),
+              spots: List.generate(
+                  smoothed.length, (i) => FlSpot(i.toDouble(), smoothed[i])),
               isCurved: true,
               color: zs.ZenColors.deepSage,
               barWidth: 3.8,
@@ -1460,11 +1647,17 @@ class ZenMoodGraphSeries extends StatelessWidget {
 }
 
 // vertikale Trennlinie
-Widget _vSep() => Container(
+class _vSep extends StatelessWidget {
+  const _vSep();
+  @override
+  Widget build(BuildContext context) {
+    return Container(
       width: 1.6,
       height: 37,
-      color: zs.ZenColors.sage.withValues(alpha: 0.18),
+      color: zs.ZenColors.sage.withValue(alpha: 0.18),
     );
+  }
+}
 
 // Statistik-Kachel
 class _ProStatTile extends StatelessWidget {
@@ -1484,7 +1677,7 @@ class _ProStatTile extends StatelessWidget {
     return Column(
       children: [
         CircleAvatar(
-          backgroundColor: zs.ZenColors.sage.withValues(alpha: .18),
+          backgroundColor: zs.ZenColors.sage.withValue(alpha: .18),
           radius: 20.5,
           child: Icon(icon, color: zs.ZenColors.sage, size: 20.5),
         ),
@@ -1555,7 +1748,8 @@ Widget _privacyRow(String text, TextTheme tt) => Padding(
       padding: const EdgeInsets.symmetric(vertical: 2.0),
       child: Row(
         children: [
-          const Icon(Icons.verified_user_rounded, size: 14, color: zs.ZenColors.sage),
+          const Icon(Icons.verified_user_rounded,
+              size: 14, color: zs.ZenColors.sage),
           const SizedBox(width: 6),
           Expanded(child: Text(text, style: tt.bodySmall)),
         ],
@@ -1598,7 +1792,8 @@ double? _scoreFromTags(List<String> tags) {
   return null;
 }
 
-List<double> _seriesFromProvider(JournalEntriesProvider prov, {required int days}) {
+List<double> _seriesFromProvider(JournalEntriesProvider prov,
+    {required int days}) {
   if (prov.entries.isEmpty) return const [];
 
   final now = DateTime.now().toUtc();
@@ -1653,54 +1848,148 @@ int _activeDaysCountFromProvider(JournalEntriesProvider prov) {
   return set.length;
 }
 
+// ---------- DayTag/Date Helfer ----------------------------------------------
+
+String _toDayTag(DateTime dtUtc) => '${dtUtc.year}-${dtUtc.month}-${dtUtc.day}';
+
+DateTime? _parseDayTag(String tag) {
+  try {
+    final parts = tag.split('-');
+    if (parts.length != 3) return null;
+    final y = int.parse(parts[0]);
+    final m = int.parse(parts[1]);
+    final d = int.parse(parts[2]);
+    return DateTime.utc(y, m, d);
+  } catch (_) {
+    return null;
+  }
+}
+
+// ---------- Streak & Fallback-Berechnungen ----------------------------------
+
 int _streakFromProvider(JournalEntriesProvider prov) {
+  // Sammle alle aktiven Tage als Tags
   final days = <String>{};
   for (final e in prov.entries) {
     final t = e.createdAt.toUtc();
-    days.add('${t.year}-${t.month}-${t.day}');
+    days.add(_toDayTag(t));
   }
   if (days.isEmpty) return 0;
 
+  // Zähle von heute rückwärts, bis ein Tag fehlt
   int streak = 0;
-  var cur = DateTime.now().toUtc();
-  String key(DateTime d) => '${d.year}-${d.month}-${d.day}';
-
-  while (days.contains(key(cur))) {
-    streak++;
-    cur = cur.subtract(const Duration(days: 1));
+  DateTime cursor = DateTime.now().toUtc();
+  while (true) {
+    final tag = _toDayTag(cursor);
+    if (days.contains(tag)) {
+      streak += 1;
+      cursor = cursor.subtract(const Duration(days: 1));
+    } else {
+      break;
+    }
   }
   return streak;
 }
 
-// ---- Helper zur Legacy-Reskalierung ----------------------------------------
+List<double> _fallbackSeriesFromMoodEntries(List<MoodEntry> list) {
+  if (list.isEmpty) return const [];
+  // Heuristik: Liste ist (meist) chronologisch; bilde tägliche Mittelwerte,
+  // sofern dayTag verfügbar, sonst direkte Sequenzabbildung (ohne Datum).
+  final byDay = <String, List<double>>{};
+  final seq = <double>[];
 
-List<double> _fallbackSeriesFromMoodEntries(List<MoodEntry> moodEntries) {
-  // MoodEntry.moodScore (0..4) → −2..+2
-  if (moodEntries.isEmpty) return const [];
-  final data = moodEntries.takeLast(90); // Support bis 90 Tage
-  return data.map((e) => (e.moodScore.toDouble() - 2.0)).toList();
+  for (final e in list) {
+    final score0to4 = (e.moodScore is num)
+        ? (e.moodScore as num).toDouble().clamp(0, 4)
+        : 2.0;
+    final v = (score0to4 - 2.0).clamp(-2.0, 2.0); // → −2..+2
+    final hasTag = (e.dayTag is String) && (e.dayTag as String).isNotEmpty;
+    if (hasTag) {
+      (byDay[e.dayTag as String] ??= <double>[]).add(v);
+    } else {
+      seq.add(v);
+    }
+  }
+
+  if (byDay.isEmpty) {
+    // Keine Tag-Infos → Sequenz direkt zurück
+    return List<double>.from(seq);
+  }
+
+  // Mit Tag-Infos: nach Datum sortieren und Tagesmittel bilden
+  final dated = <DateTime, double>{};
+  for (final entry in byDay.entries) {
+    final dt = _parseDayTag(entry.key);
+    if (dt == null) continue;
+    final vals = entry.value;
+    final avg =
+        vals.isEmpty ? 0.0 : (vals.reduce((a, b) => a + b) / vals.length);
+    dated[dt] = avg.clamp(-2.0, 2.0);
+  }
+  final keys = dated.keys.toList()..sort((a, b) => a.compareTo(b));
+  return keys.map((k) => dated[k]!).toList();
 }
 
-double _fallbackAvgMoodFromMoodEntries(List<MoodEntry> moodEntries) {
-  if (moodEntries.isEmpty) return 0.0;
-  final avg =
-      moodEntries.map((e) => e.moodScore).reduce((a, b) => a + b) /
-          moodEntries.length;
-  return avg - 2.0; // 0..4 → −2..+2
+double _fallbackAvgMoodFromMoodEntries(List<MoodEntry> list, {int days = 30}) {
+  if (list.isEmpty) return 0.0;
+
+  // Wenn DayTags vorhanden, filtere letztes Fenster; sonst nimm die letzten N Einträge
+  final now = DateTime.now().toUtc();
+  final start = now.subtract(Duration(days: days));
+  final vals = <double>[];
+
+  final hasAnyTag =
+      list.any((e) => (e.dayTag is String) && (e.dayTag as String).isNotEmpty);
+
+  if (hasAnyTag) {
+    for (final e in list) {
+      final tag = (e.dayTag as String?) ?? '';
+      final dt = _parseDayTag(tag);
+      if (dt == null || dt.isBefore(start)) continue;
+      final score0to4 = (e.moodScore is num)
+          ? (e.moodScore as num).toDouble().clamp(0, 4)
+          : 2.0;
+      vals.add((score0to4 - 2.0).clamp(-2.0, 2.0));
+    }
+  } else {
+    final slice = list.takeLast(days);
+    for (final e in slice) {
+      final score0to4 = (e.moodScore is num)
+          ? (e.moodScore as num).toDouble().clamp(0, 4)
+          : 2.0;
+      vals.add((score0to4 - 2.0).clamp(-2.0, 2.0));
+    }
+  }
+
+  if (vals.isEmpty) return 0.0;
+  return vals.reduce((a, b) => a + b) / vals.length;
 }
 
-int _streakFromLegacy(List<MoodEntry> moodEntries) {
-  if (moodEntries.isEmpty) return 0;
-  final days = moodEntries
-      .map((e) => e.dayTag)
-      .where((s) => s.isNotEmpty)
-      .toSet();
+int _streakFromLegacy(List<MoodEntry> list) {
+  if (list.isEmpty) return 0;
+
+  // Nur DayTags verwenden; wenn keine vorhanden → minimaler Fallback.
+  final set = <String>{};
+  for (final e in list) {
+    if (e.dayTag is String && (e.dayTag as String).isNotEmpty) {
+      set.add(e.dayTag as String);
+    }
+  }
+  if (set.isEmpty) {
+    // Fallback ohne Datumsinfos: mindestens 1, wenn überhaupt Einträge
+    return 1;
+  }
+
   int streak = 0;
-  var cur = DateTime.now();
-  String key(DateTime d) => '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
-  while (days.contains(key(cur))) {
-    streak++;
-    cur = cur.subtract(const Duration(days: 1));
+  DateTime cursor = DateTime.now().toUtc();
+  while (true) {
+    final tag = _toDayTag(cursor);
+    if (set.contains(tag)) {
+      streak += 1;
+      cursor = cursor.subtract(const Duration(days: 1));
+    } else {
+      break;
+    }
   }
   return streak;
 }

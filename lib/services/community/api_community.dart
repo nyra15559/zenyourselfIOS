@@ -26,16 +26,17 @@ class CommunityHeaders {
   static const signature = 'X-Signature';
   static const timestamp = 'X-Timestamp';
   static const client = 'X-Client';
-  static const responseSignature = 'X-Signature-Response'; // optional serverseitig
+  static const responseSignature =
+      'X-Signature-Response'; // optional serverseitig
 }
 
 /// Datenträger: Help-Flower (minimal, PII-frei).
 class HelpFlower {
-  final String topic;               // z. B. "Schlafroutine"
-  final String summary;             // kurze neutrale Beschreibung
-  final List<String> tags;          // max 8 empfohlen
-  final String locale;              // "de-CH" / "de" / ...
-  final DateTime createdAt;         // Clientzeitpunkt
+  final String topic; // z. B. "Schlafroutine"
+  final String summary; // kurze neutrale Beschreibung
+  final List<String> tags; // max 8 empfohlen
+  final String locale; // "de-CH" / "de" / ...
+  final DateTime createdAt; // Clientzeitpunkt
   final Map<String, dynamic>? meta; // optionale, PII-freie Metadaten
 
   // WICHTIG: nicht const, damit DateTime.now() erlaubt ist.
@@ -51,7 +52,10 @@ class HelpFlower {
   Map<String, dynamic> toJson() => <String, dynamic>{
         'topic': topic.trim(),
         'summary': summary.trim(),
-        'tags': tags.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList(),
+        'tags': tags
+            .map((e) => e.toString().trim())
+            .where((e) => e.isNotEmpty)
+            .toList(),
         'locale': locale,
         'created_at': createdAt.toUtc().toIso8601String(),
         if (meta != null && meta!.isNotEmpty) 'meta': meta,
@@ -65,7 +69,8 @@ class CommunityResult {
   final Map<String, dynamic>? data;
   final String? error;
 
-  const CommunityResult._({required this.ok, required this.status, this.data, this.error});
+  const CommunityResult._(
+      {required this.ok, required this.status, this.data, this.error});
 
   factory CommunityResult.success(int status, Map<String, dynamic>? data) =>
       CommunityResult._(ok: true, status: status, data: data);
@@ -74,11 +79,13 @@ class CommunityResult {
       CommunityResult._(ok: false, status: status, error: message);
 
   @override
-  String toString() => 'CommunityResult(ok=$ok, status=$status, error=$error, data=$data)';
+  String toString() =>
+      'CommunityResult(ok=$ok, status=$status, error=$error, data=$data)';
 }
 
 /// Einfache Offline-Queue-Funktion: wird mit (kind, payload) aufgerufen.
-typedef EnqueueFn = Future<void> Function(String kind, Map<String, dynamic> payload);
+typedef EnqueueFn = Future<void> Function(
+    String kind, Map<String, dynamic> payload);
 
 /// Request-Invoker (für Tests/Web austauschbar).
 typedef InvokeFn = Future<_InvokeResponse> Function(_InvokeRequest req);
@@ -102,7 +109,8 @@ class _InvokeResponse {
   final int status;
   final Map<String, String> headers;
   final List<int> bodyBytes;
-  const _InvokeResponse({required this.status, required this.headers, required this.bodyBytes});
+  const _InvokeResponse(
+      {required this.status, required this.headers, required this.bodyBytes});
 
   String get bodyString => utf8.decode(bodyBytes);
   Map<String, dynamic>? get jsonOrNull {
@@ -165,7 +173,8 @@ class CommunityApi {
         throw const _NetError('Simulierte Störung');
       }
       if (_apiKey.isEmpty || _hmacSecret.isEmpty) {
-        return CommunityResult.failure(0, 'CommunityApi nicht konfiguriert (apiKey/secret fehlen).');
+        return CommunityResult.failure(
+            0, 'CommunityApi nicht konfiguriert (apiKey/secret fehlen).');
       }
 
       final url = Uri.parse('$_baseUrl$path');
@@ -181,7 +190,8 @@ class CommunityApi {
       final bodyBytes = utf8.encode(json.encode(payload));
 
       final ts = DateTime.now().toUtc().toIso8601String();
-      final sig = _signRequest(method: 'POST', path: path, timestamp: ts, bodyBytes: bodyBytes);
+      final sig = _signRequest(
+          method: 'POST', path: path, timestamp: ts, bodyBytes: bodyBytes);
 
       final headers = <String, String>{
         'Content-Type': 'application/json; charset=utf-8',
@@ -203,7 +213,8 @@ class CommunityApi {
       );
 
       // Optional: Response-Signatur prüfen, wenn Header vorhanden
-      _maybeVerifyResponseSignature(resp, secret: _responseHmacSecret ?? _hmacSecret);
+      _maybeVerifyResponseSignature(resp,
+          secret: _responseHmacSecret ?? _hmacSecret);
 
       if (resp.status >= 200 && resp.status < 300) {
         return CommunityResult.success(resp.status, resp.jsonOrNull);
@@ -265,7 +276,8 @@ class CommunityApi {
     return sig;
   }
 
-  void _maybeVerifyResponseSignature(_InvokeResponse resp, {required String secret}) {
+  void _maybeVerifyResponseSignature(_InvokeResponse resp,
+      {required String secret}) {
     final header = resp.headers[CommunityHeaders.responseSignature];
     if (header == null || header.isEmpty) return;
     try {
@@ -275,7 +287,8 @@ class CommunityApi {
       final h = Hmac(sha256, utf8.encode(secret));
       final expected = h.convert(utf8.encode(signString)).toString();
       if (expected != header) {
-        debugPrint('[CommunityApi] Response-Signatur ungültig (Header != expected).');
+        debugPrint(
+            '[CommunityApi] Response-Signatur ungültig (Header != expected).');
       }
     } catch (e) {
       debugPrint('[CommunityApi] Response-Signatur-Check fehlgeschlagen: $e');
@@ -301,21 +314,54 @@ class CommunityApi {
     final redacted = <String, dynamic>{};
 
     const deny = <String>{
-      'name','fullName','vorname','nachname',
-      'email','e-mail','mail',
-      'phone','telefon','mobile','handy',
-      'address','adresse','strasse','plz','ort',
-      'ip','ipv4','ipv6',
-      'lat','lng','latitude','longitude','geolocation',
-      'birthdate','geburtstag',
-      'userId','user_id','accountId','account_id',
-      'sessionId','session_id',
+      'name',
+      'fullName',
+      'vorname',
+      'nachname',
+      'email',
+      'e-mail',
+      'mail',
+      'phone',
+      'telefon',
+      'mobile',
+      'handy',
+      'address',
+      'adresse',
+      'strasse',
+      'plz',
+      'ort',
+      'ip',
+      'ipv4',
+      'ipv6',
+      'lat',
+      'lng',
+      'latitude',
+      'longitude',
+      'geolocation',
+      'birthdate',
+      'geburtstag',
+      'userId',
+      'user_id',
+      'accountId',
+      'account_id',
+      'sessionId',
+      'session_id',
     };
 
     const allow = <String>{
-      'app_version','build','platform','os','device_class',
-      'locale','tz','screen','theme','feature_flags',
-      'network','retry_count','queue_len',
+      'app_version',
+      'build',
+      'platform',
+      'os',
+      'device_class',
+      'locale',
+      'tz',
+      'screen',
+      'theme',
+      'feature_flags',
+      'network',
+      'retry_count',
+      'queue_len',
     };
 
     t.forEach((k, v) {
@@ -356,18 +402,19 @@ class CommunityApi {
 
     final client = HttpClient()..connectionTimeout = req.timeout;
     try {
-      final r = await client
-          .openUrl(req.method, req.url)
-          .timeout(req.timeout, onTimeout: () => throw _NetTimeout('Zeitüberschreitung beim Verbindungsaufbau.'));
+      final r = await client.openUrl(req.method, req.url).timeout(req.timeout,
+          onTimeout: () =>
+              throw _NetTimeout('Zeitüberschreitung beim Verbindungsaufbau.'));
 
       req.headers.forEach(r.headers.add);
       r.headers.contentType = ContentType.json;
       r.add(req.bodyBytes);
 
       final res = await r.close().timeout(
-        req.timeout,
-        onTimeout: () => throw _NetTimeout('Zeitüberschreitung beim Lesen.'),
-      );
+            req.timeout,
+            onTimeout: () =>
+                throw _NetTimeout('Zeitüberschreitung beim Lesen.'),
+          );
 
       final bytes = await res.fold<List<int>>(<int>[], (p, e) => p..addAll(e));
       final headers = <String, String>{};
@@ -375,7 +422,8 @@ class CommunityApi {
         if (values.isNotEmpty) headers[name] = values.join(',');
       });
 
-      return _InvokeResponse(status: res.statusCode, headers: headers, bodyBytes: bytes);
+      return _InvokeResponse(
+          status: res.statusCode, headers: headers, bodyBytes: bytes);
     } on _NetTimeout {
       rethrow;
     } catch (e) {

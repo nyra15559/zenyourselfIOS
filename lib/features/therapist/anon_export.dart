@@ -165,7 +165,8 @@ class _AnonExportWidgetState extends State<AnonExportWidget> {
 
   Future<void> _prefillLastExportPath() async {
     try {
-      final last = await _Memorystore.loadLastExport(); // nutzt die Methode → kein Lint
+      final last =
+          await _Memorystore.loadLastExport(); // nutzt die Methode → kein Lint
       if (!mounted) return;
       setState(() {
         _lastPath = last['path'];
@@ -237,8 +238,9 @@ class _AnonExportWidgetState extends State<AnonExportWidget> {
                   OutlinedButton.icon(
                     icon: const Icon(Icons.close_rounded),
                     label: const Text('Schließen'),
-                    onPressed:
-                        _exporting ? null : () => Navigator.of(context).maybePop(),
+                    onPressed: _exporting
+                        ? null
+                        : () => Navigator.of(context).maybePop(),
                   ),
                 ],
               ),
@@ -252,13 +254,13 @@ class _AnonExportWidgetState extends State<AnonExportWidget> {
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
                     color: _exportMsg!.startsWith('Fehler')
-                        ? Colors.red.withValues(alpha: 0.08)
-                        : ZenColors.bamboo.withValues(alpha: 0.08),
+                        ? Colors.red.withValue(alpha: 0.08)
+                        : ZenColors.bamboo.withValue(alpha: 0.08),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
                       color: _exportMsg!.startsWith('Fehler')
-                          ? Colors.red.withValues(alpha: 0.32)
-                          : ZenColors.bamboo.withValues(alpha: 0.25),
+                          ? Colors.red.withValue(alpha: 0.32)
+                          : ZenColors.bamboo.withValue(alpha: 0.25),
                     ),
                   ),
                   child: Text(
@@ -276,7 +278,8 @@ class _AnonExportWidgetState extends State<AnonExportWidget> {
                 const SizedBox(height: 8),
                 Text(
                   'Gespeichert unter:',
-                  style: ZenTextStyles.caption.copyWith(color: ZenColors.inkSubtle),
+                  style: ZenTextStyles.caption
+                      .copyWith(color: ZenColors.inkSubtle),
                 ),
                 const SizedBox(height: 4),
                 SelectableText(
@@ -293,7 +296,8 @@ class _AnonExportWidgetState extends State<AnonExportWidget> {
               const SizedBox(height: 8),
               Text(
                 PrivacyTexts.chDisclaimerShort,
-                style: ZenTextStyles.caption.copyWith(color: ZenColors.inkSubtle),
+                style:
+                    ZenTextStyles.caption.copyWith(color: ZenColors.inkSubtle),
               ),
             ],
           ),
@@ -372,7 +376,8 @@ class _AnonExportWidgetState extends State<AnonExportWidget> {
         final jsonStr = payload['json'] as String;
         metrics = payload['metrics'] as Map<String, Object?>;
 
-        file = await _saveFile(jsonStr, _timestamped('zenyourself_export', 'json'));
+        file = await _saveFile(
+            jsonStr, _timestamped('zenyourself_export', 'json'));
       }
 
       final topFacet = (metrics['topFacet'] as Map?)?['label'] as String?;
@@ -465,7 +470,7 @@ class _MetricsInline extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: ZenColors.white.withValues(alpha: .72),
+        color: ZenColors.white.withValue(alpha: .72),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: ZenColors.border),
       ),
@@ -485,7 +490,9 @@ class _MetricsInline extends StatelessWidget {
   Widget _kv(String k, String v) => Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text('$k: ', style: ZenTextStyles.caption.copyWith(fontWeight: FontWeight.w700)),
+          Text('$k: ',
+              style:
+                  ZenTextStyles.caption.copyWith(fontWeight: FontWeight.w700)),
           Text(v, style: ZenTextStyles.caption),
         ],
       );
@@ -661,7 +668,7 @@ Map<String, Object?> _buildRedactedMetrics(Map<String, Object?> args) {
           },
   };
 }
- 
+
 // -------------------------------- UI-Subwidget: Export-Auswahl --------------------------------
 
 class _ExportSelector extends StatelessWidget {

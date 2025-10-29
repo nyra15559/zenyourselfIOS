@@ -1,4 +1,4 @@
-//[BASELINE]lib/features/reflection/reflection_view.dart(Stand: 28.10.) 
+// [BASELINE] lib/features/reflection/reflection_view.dart (Stand: 29.10.)
 // lib/features/reflection/reflection_view.dart
 //
 // ReflectionView — reine Layout-Schicht (Plan v6.2.2 + v6.3.x VM-Wiring)
@@ -29,20 +29,20 @@ class ReflectionViewProps {
   final String pandaAsset;
 
   // Bubbles oben
-  final String? introText;   // Pitch/Intro (oben, pinned-ähnlich)
-  final String? bridgeText;  // Bridge/Recall (optional, unter Intro)
+  final String? introText; // Pitch/Intro (oben, pinned-ähnlich)
+  final String? bridgeText; // Bridge/Recall (optional, unter Intro)
 
   // Leitfrage-Block (neu v6.3)
-  final String? question;            // Leitfrage (mit Fragezeichen)
-  final String? helperSuggestion;    // 0–1 Satz unter der Frage
-  final List<String> talkLines;      // kleine Talk-Zeilen (≤2)
+  final String? question; // Leitfrage (mit Fragezeichen)
+  final String? helperSuggestion; // 0–1 Satz unter der Frage
+  final List<String> talkLines; // kleine Talk-Zeilen (≤2)
 
   // Verlauf (bereits vorgerendert vom Orchestrator)
   final List<Widget> thread;
 
   // Chips
-  final List<String> chips;          // Answer-Chips (insert-only)
-  final List<String> topicChips;     // Redirect-Themen (optional)
+  final List<String> chips; // Answer-Chips (insert-only)
+  final List<String> topicChips; // Redirect-Themen (optional)
   final ValueChanged<String>? onChipTap; // optional: externer Chip-Tap-Handler
 
   // Composer unten
@@ -62,8 +62,8 @@ class ReflectionViewProps {
   final bool risk;
 
   // Hope-Slot (kleiner, warmer Hinweis unter den Chips)
-  final String? hopeText;    // einfacher Text
-  final Widget? hopeWidget;  // alternativ: kompletter Widget-Slot
+  final String? hopeText; // einfacher Text
+  final Widget? hopeWidget; // alternativ: kompletter Widget-Slot
 
   // Footer-Disclaimer
   final String footerDisclaimer;
@@ -111,7 +111,8 @@ class ReflectionView extends StatelessWidget {
   bool get _showQuestion => (props.question ?? '').trim().isNotEmpty;
   bool get _showChips => props.chips.isNotEmpty;
   bool get _showTopicChips => props.topicChips.isNotEmpty;
-  bool get _showHope  => (props.hopeText ?? '').trim().isNotEmpty || props.hopeWidget != null;
+  bool get _showHope =>
+      (props.hopeText ?? '').trim().isNotEmpty || props.hopeWidget != null;
   bool get _showClosureCta => props.allowClosure || props.moodPrompt;
 
   @override
@@ -126,7 +127,7 @@ class ReflectionView extends StatelessWidget {
       body: Stack(
         children: [
           // Sanfter Hintergrund
-          const Positioned.fill(
+          const Positioned-fill(
             child: ZenBackdrop(
               asset: 'assets/flusspanda.png',
               alignment: Alignment.centerRight,
@@ -151,7 +152,9 @@ class ReflectionView extends StatelessWidget {
                       keyboardDismissBehavior:
                           ScrollViewKeyboardDismissBehavior.onDrag,
                       padding: EdgeInsets.fromLTRB(
-                        0, 0, 0,
+                        0,
+                        0,
+                        0,
                         12 + _kInputReserve + bottomInset,
                       ),
                       children: [
@@ -196,7 +199,9 @@ class ReflectionView extends StatelessWidget {
                                 child: _QuestionCard(
                                   question: props.question!.trim(),
                                   helperSuggestion:
-                                      (props.helperSuggestion ?? '').trim().isNotEmpty
+                                      (props.helperSuggestion ?? '')
+                                              .trim()
+                                              .isNotEmpty
                                           ? props.helperSuggestion!.trim()
                                           : null,
                                   talkLines: props.talkLines.take(2).toList(),
@@ -210,7 +215,8 @@ class ReflectionView extends StatelessWidget {
                               padding: const EdgeInsets.only(top: 8),
                               child: Center(
                                 child: ConstrainedBox(
-                                  constraints: BoxConstraints(maxWidth: cardMaxW),
+                                  constraints:
+                                      BoxConstraints(maxWidth: cardMaxW),
                                   child: w,
                                 ),
                               ),
@@ -256,7 +262,8 @@ class ReflectionView extends StatelessWidget {
                                             .textTheme
                                             .labelLarge
                                             ?.copyWith(
-                                              color: Colors.black.withValues(alpha: .74),
+                                              color: Colors.black
+                                                  .withValues(alpha: .74),
                                             ),
                                       ),
                                     ),
@@ -267,7 +274,8 @@ class ReflectionView extends StatelessWidget {
                                         for (final t in props.topicChips)
                                           ZenChipGhost(
                                             label: _normalizeChip(t),
-                                            onPressed: () => _onTapTopicChip(context, t),
+                                            onPressed: () =>
+                                                _onTapTopicChip(context, t),
                                           ),
                                       ],
                                     ),
@@ -301,7 +309,8 @@ class ReflectionView extends StatelessWidget {
                                   width: double.infinity,
                                   child: ElevatedButton.icon(
                                     onPressed: props.onClosureTap,
-                                    icon: const Icon(Icons.emoji_emotions_rounded),
+                                    icon: const Icon(
+                                        Icons.emoji_emotions_rounded),
                                     label: Text(
                                       props.moodPrompt
                                           ? 'Stimmung teilen'
@@ -339,7 +348,8 @@ class ReflectionView extends StatelessWidget {
                                     .bodySmall
                                     ?.copyWith(
                                       height: 1.25,
-                                      color: Colors.black.withValues(alpha: .72),
+                                      color: Colors.black
+                                          .withValues(alpha: .72),
                                     ),
                               ),
                             ),
@@ -393,7 +403,8 @@ class ReflectionView extends StatelessWidget {
     final next = (needsSpace ? '$cur ' : cur) + withEllipsis;
     props.controller
       ..text = next
-      ..selection = TextSelection.fromPosition(TextPosition(offset: next.length));
+      ..selection =
+          TextSelection.fromPosition(TextPosition(offset: next.length));
     if (props.focusNode != null) {
       FocusScope.of(context).requestFocus(props.focusNode);
     }
@@ -619,7 +630,10 @@ class _HopeBubble extends StatelessWidget {
           Expanded(
             child: Text(
               text,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.35),
+              style: Theme.of(context)
+                  .textTheme
+                  .bodyMedium
+                  ?.copyWith(height: 1.35),
             ),
           ),
         ],
@@ -657,7 +671,8 @@ class _ComposerBar extends StatelessWidget {
         children: [
           // Mic
           IconButton(
-            tooltip: isRecording ? 'Aufnahme stoppen' : 'Sprachaufnahme starten',
+            tooltip:
+                isRecording ? 'Aufnahme stoppen' : 'Sprachaufnahme starten',
             onPressed: onMicTap,
             icon: Icon(
               isRecording ? Icons.mic_rounded : Icons.mic_none_rounded,

@@ -103,7 +103,8 @@ Future<void> main() async {
       await MemoryService.instance.init();
       debugPrint('✅ MemoryService initialized (context memory ready).');
     } catch (e, st) {
-      debugPrint('⚠️  MemoryService init failed (continuing without memory): $e\n$st');
+      debugPrint(
+          '⚠️  MemoryService init failed (continuing without memory): $e\n$st');
     }
 
     // Fehlerabfang (Flutter/UI)
@@ -159,7 +160,8 @@ void _setupZenApi() {
 
       debugPrint('✅ GuidanceService HTTP enabled → $url');
       if (token.isEmpty) {
-        debugPrint('⚠️  Guidance: Kein APP_TOKEN gesetzt – dein Worker könnte 401/403 liefern.');
+        debugPrint(
+            '⚠️  Guidance: Kein APP_TOKEN gesetzt – dein Worker könnte 401/403 liefern.');
       } else {
         debugPrint('ℹ️ Guidance: Auth=Bearer (Token vorhanden).');
       }
@@ -205,7 +207,8 @@ void _setupCommunityApis() {
     );
 
     if (_kCommApiKey.isEmpty || _kCommHmacSecret.isEmpty) {
-      debugPrint('⚠️ CommunityApi: API_KEY/HMAC fehlen – POST-Acks werden scheitern (UI fängt es ab).');
+      debugPrint(
+          '⚠️ CommunityApi: API_KEY/HMAC fehlen – POST-Acks werden scheitern (UI fängt es ab).');
     }
 
     debugPrint('✅ Community APIs enabled → ${_kCommUrl}');
@@ -218,29 +221,34 @@ void _setupCommunityApis() {
 void _printRuntimeSummaryAndCliHints() {
   // Guidance
   final String gUrl = (_kApiUrl.isNotEmpty ? _kApiUrl : ZenEnv.apiUrl);
-  final bool gEnabled = (_kApiUrl.isNotEmpty || _kApiToken.isNotEmpty || !_kApiEnabled)
-      ? _kApiEnabled
-      : ZenEnv.apiEnabled;
+  final bool gEnabled =
+      (_kApiUrl.isNotEmpty || _kApiToken.isNotEmpty || !_kApiEnabled)
+          ? _kApiEnabled
+          : ZenEnv.apiEnabled;
   final bool gHasToken = (_kApiToken.isNotEmpty || ZenEnv.appToken.isNotEmpty);
 
   debugPrint('— — — RUNTIME SUMMARY — — —');
-  debugPrint('Guidance: enabled=$gEnabled, url=${gUrl.isEmpty ? "<leer>" : gUrl}, auth=${gHasToken ? "Bearer" : "none"}');
+  debugPrint(
+      'Guidance: enabled=$gEnabled, url=${gUrl.isEmpty ? "<leer>" : gUrl}, auth=${gHasToken ? "Bearer" : "none"}');
 
   // Community
   final bool cEnabled = _kCommEnabled && _kCommUrl.isNotEmpty;
-  debugPrint('Community: enabled=$cEnabled, url=${_kCommUrl.isEmpty ? "<leer>" : _kCommUrl}, '
+  debugPrint(
+      'Community: enabled=$cEnabled, url=${_kCommUrl.isEmpty ? "<leer>" : _kCommUrl}, '
       'postAuth=${(_kCommApiKey.isNotEmpty && _kCommHmacSecret.isNotEmpty) ? "API_KEY+HMAC" : "none"}');
 
   // CLI-Hints (maskiert)
   if (gUrl.isNotEmpty) {
-    final maskedToken = _mask(_kApiToken.isNotEmpty ? _kApiToken : ZenEnv.appToken);
+    final maskedToken =
+        _mask(_kApiToken.isNotEmpty ? _kApiToken : ZenEnv.appToken);
     final maskedApiKey = _mask(_kCommApiKey);
     final maskedHmac = _mask(_kCommHmacSecret);
 
     debugPrint('— — — CLI HINTS (copy/paste) — — —');
     debugPrint('export ZEN_GUIDANCE="$gUrl"');
     if (gHasToken) {
-      debugPrint('# Bearer (App-Token, maskiert): ${maskedToken.isEmpty ? "<none>" : maskedToken}');
+      debugPrint(
+          '# Bearer (App-Token, maskiert): ${maskedToken.isEmpty ? "<none>" : maskedToken}');
       debugPrint('export ZEN_APP_TOKEN="<DEIN_BEARER_TOKEN_HIER>"');
     } else {
       debugPrint('# Kein Bearer-Token in der App-Konfiguration gefunden.');

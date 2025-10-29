@@ -75,7 +75,8 @@ class Question {
         'id': id,
         'text': text,
         'isFollowUp': isFollowUp,
-        if (createdAt != null) 'createdAt': createdAt!.toUtc().toIso8601String(),
+        if (createdAt != null)
+          'createdAt': createdAt!.toUtc().toIso8601String(),
       };
 
   /// Alias
@@ -140,7 +141,8 @@ class Question {
     final s = v.toString().trim().toLowerCase();
     if (s.isEmpty) return null;
     if (const ['true', '1', 'yes', 'y', 'ja', 'wahr'].contains(s)) return true;
-    if (const ['false', '0', 'no', 'n', 'nein', 'falsch'].contains(s)) return false;
+    if (const ['false', '0', 'no', 'n', 'nein', 'falsch'].contains(s))
+      return false;
     return null;
   }
 
@@ -152,7 +154,8 @@ class Question {
       final n = v.toInt().abs();
       if (n < 1000000000000) {
         // Sekunden
-        return DateTime.fromMillisecondsSinceEpoch(v.toInt() * 1000, isUtc: true);
+        return DateTime.fromMillisecondsSinceEpoch(v.toInt() * 1000,
+            isUtc: true);
       } else if (n < 10000000000000000) {
         // Millisekunden
         return DateTime.fromMillisecondsSinceEpoch(v.toInt(), isUtc: true);

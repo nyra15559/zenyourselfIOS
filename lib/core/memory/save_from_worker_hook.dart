@@ -1,18 +1,23 @@
-//[BASELINE]lib/core/memory/save_from_worker_hook.dart(Stand: 28.10.)
+// [BASELINE] lib/core/memory/save_from_worker_hook.dart (Stand: 29.10.2025)
 // lib/core/memory/save_from_worker_hook.dart
 //
-// SaveFromWorkerHook — Panda v1.2
+// SaveFromWorkerHook — Panda v1.3 (kompatibel mit MemoryService v6.3.3+hotfix1)
 // -----------------------------------------------------------------------------
 // Kleiner, toleranter Sammel-Hook, der Worker-Antworten zentral an das lokale
 // Memory weiterreicht. Zwei Pfade:
-//   1) mergeFacts(...) — extrahiert „Fakten/Insights/Themen“ aus dem Turn
-//   2) recordAcknowledge(...) — bestätigt Einsicht, aber nur bei Themen-Overlap
+//   1) mergeFacts(...)  → jetzt via MemoryService.saveFromWorker(payload, source:'hook')
+//   2) recordAcknowledge(...) → MemoryService.recordAcknowledge(ackMap)
 //
 // Eigenschaften:
 // • Zero-crash/tolerant: arbeitet defensiv mit dynamic + try/catch
 // • Keine UI-Abhängigkeit, kein State: reine Utility-Funktionen
 // • Themen-Overlap: vermeidet Memory-Spam (nur bei Schnittmenge)
 // • Akzeptiert *jede* Turn-Form (Map oder typed), liest robust verschachtelte Felder
+//
+// Änderungen v1.3:
+// • Entfernt reflektive store-Aufrufe (mergeFacts/recordAcknowledge) zugunsten
+//   der garantierten Public-APIs von MemoryService (saveFromWorker/recordAcknowledge).
+// • Payload/Ack-Maps sauber gebaut (snake_case), inkl. session/thread_id/turn_index.
 //
 // Einbindung (Beispiel): … (gekürzt)
 
@@ -37,14 +42,15 @@ class SaveFromWorkerHook {
     final Map<String, dynamic> m = _coerceMap(turn);
 
     final session = _coerceSession(m);
-    final flow    = _coerceFlow(m);
-    final risk    = _riskLevel(m); // 'high' | 'mild' | 'none'
+    final flow = _coerceFlow(m);
+    final risk = _riskLevel(m); // 'high' | 'mild' | 'none'
 
-    final facts   = _extractFacts(m);
+    final facts = _extractFacts(m);
     final topicsW = _extractWorkerTopics(m);
-    final score   = flow['insight_score'] is num ? (flow['insight_score'] as num).toDouble() : null;
-    final bool insightFlag =
-        _asBool(m['insight']) ||
+    final score = flow['insight_score'] is num
+        ? (flow['insight_score'] as num).toDouble()
+        : null;
+    final bool insightFlag = _asBool(m['insight']) ||
         _asBool(_path(m, const ['understanding', 'insight'])) ||
         (score != null && score >= 0.60);
 
@@ -78,7 +84,7 @@ class SaveFromWorkerHook {
     }
   }
 
-  // -------- Interna: Calls (tolerant) ---------------------------------------
+  // -------- Interna: Calls (MemoryService Public-APIs) ----------------------
 
   static Future<void> _callMergeFacts({
     required List<String> facts,
@@ -88,35 +94,25 @@ class SaveFromWorkerHook {
     required bool debug,
   }) async {
     try {
-      final svc = mem.MemoryService.instance;
-      final storeDyn = (svc as dynamic).store ?? svc;
+      // Wir geben die extrahierten Facts/Topics + Session/Risk als angereichertes
+      // Objekt an MemoryService.saveFromWorker — der Mapper nimmt tolerant, was er braucht.
+      final payload = <String, dynamic>{
+        'session': session, // {thread_id, turn_index, max_turns}
+        'risk_level': risk, // 'high' | 'mild' | 'none'
+        'facts': facts, // Liste kurzer Fakten/Insights
+        'topics': topics, // Worker-Themen/Fassetten (Strings)
+        'origin': 'reflection', // Telemetrie-Hinweis
+      };
 
-      try {
-        await storeDyn.mergeFacts?.call(
-          facts: facts,
-          topics: topics,
-          session: session,
-          risk: risk,
-          origin: 'reflection',
-        );
-        if (debug && kDebugMode) {
-          debugPrint('[SaveFromWorkerHook] mergeFacts(facts:${facts.length}) ✓');
-        }
-        return;
-      } catch (_) {
-        await storeDyn.mergeFacts?.call(
-          items: facts,
-          topics: topics,
-          session: session,
-          origin: 'reflection',
-        );
-        if (debug && kDebugMode) {
-          debugPrint('[SaveFromWorkerHook] mergeFacts(items:${facts.length}) ✓');
-        }
+      await mem.MemoryService.instance.saveFromWorker(payload, source: 'hook');
+
+      if (debug && kDebugMode) {
+        debugPrint(
+            '[SaveFromWorkerHook] saveFromWorker(facts:${facts.length}) ✓');
       }
     } catch (e) {
       if (debug && kDebugMode) {
-        debugPrint('[SaveFromWorkerHook] mergeFacts error: $e');
+        debugPrint('[SaveFromWorkerHook] saveFromWorker error: $e');
       }
     }
   }
@@ -127,24 +123,19 @@ class SaveFromWorkerHook {
     required bool debug,
   }) async {
     try {
-      final svc = mem.MemoryService.instance;
-      final storeDyn = (svc as dynamic).store ?? svc;
+      final ack = <String, dynamic>{
+        'session_id': (session['thread_id'] ?? '').toString(),
+        'turn': session['turn_index'] ?? 0,
+        'facet_keys': topics, // wir verwenden die Topics als Facet-Keys/Labels
+        'ts': DateTime.now().toUtc().toIso8601String(),
+        'origin': 'reflection',
+      };
 
-      try {
-        await storeDyn.recordAcknowledge?.call(
-          topics: topics,
-          session: session,
-          origin: 'reflection',
-        );
-        if (debug && kDebugMode) {
-          debugPrint('[SaveFromWorkerHook] recordAcknowledge(topics:${topics.length}) ✓');
-        }
-        return;
-      } catch (_) {
-        await storeDyn.recordAcknowledge?.call();
-        if (debug && kDebugMode) {
-          debugPrint('[SaveFromWorkerHook] recordAcknowledge() ✓ (fallback)');
-        }
+      await mem.MemoryService.instance.recordAcknowledge(ack);
+
+      if (debug && kDebugMode) {
+        debugPrint(
+            '[SaveFromWorkerHook] recordAcknowledge(${topics.length}) ✓');
       }
     } catch (e) {
       if (debug && kDebugMode) {
@@ -166,9 +157,13 @@ class SaveFromWorkerHook {
   }
 
   static Map<String, dynamic> _coerceSession(Map<String, dynamic> m) {
-    final raw = (m['session'] is Map) ? Map<String, dynamic>.from(m['session']) : <String, dynamic>{};
-    final threadId = _firstNonEmpty([raw['thread_id'], raw['id'], raw['threadId']]);
-    final turnIdx = _coerceInt(raw['turn_index'] ?? raw['turn'] ?? raw['turnIndex']) ?? 0;
+    final raw = (m['session'] is Map)
+        ? Map<String, dynamic>.from(m['session'])
+        : <String, dynamic>{};
+    final threadId =
+        _firstNonEmpty([raw['thread_id'], raw['id'], raw['threadId']]);
+    final turnIdx =
+        _coerceInt(raw['turn_index'] ?? raw['turn'] ?? raw['turnIndex']) ?? 0;
     final maxTurns = _coerceInt(raw['max_turns'] ?? raw['maxTurns']) ?? 3;
     return {
       'thread_id': '$threadId',
@@ -178,9 +173,13 @@ class SaveFromWorkerHook {
   }
 
   static Map<String, dynamic> _coerceFlow(Map<String, dynamic> m) {
-    final f = (m['flow'] is Map) ? Map<String, dynamic>.from(m['flow']) : <String, dynamic>{};
+    final f = (m['flow'] is Map)
+        ? Map<String, dynamic>.from(m['flow'])
+        : <String, dynamic>{};
     final recommendEnd = _asBool(f['recommend_end']);
-    final moodPrompt   = _asBool(f['mood_prompt']) || recommendEnd || _asBool(_path(m, const ['mood','prompt']));
+    final moodPrompt = _asBool(f['mood_prompt']) ||
+        recommendEnd ||
+        _asBool(_path(m, const ['mood', 'prompt']));
     final q = _firstNonEmpty([
       f['question'],
       _firstOfList(_asStringList(f['questions'])),
@@ -190,7 +189,8 @@ class SaveFromWorkerHook {
     return {
       'mood_prompt': moodPrompt,
       'recommend_end': recommendEnd,
-      if ((q ?? '').toString().trim().isNotEmpty) 'question': (q as String).trim(),
+      if ((q ?? '').toString().trim().isNotEmpty)
+        'question': (q as String).trim(),
       if (iscore != null) 'insight_score': iscore,
     };
   }
@@ -210,9 +210,8 @@ class SaveFromWorkerHook {
     void addAll(dynamic v) {
       if (v is List) {
         for (final e in v) {
-          final s = (e is Map)
-              ? _asString(e['text']).trim()
-              : _asString(e).trim();
+          final s =
+              (e is Map) ? _asString(e['text']).trim() : _asString(e).trim();
           if (s.isNotEmpty) out.add(_cap(s, 180));
         }
       } else if (v is String) {
@@ -243,9 +242,9 @@ class SaveFromWorkerHook {
   static List<String> _extractWorkerTopics(Map<String, dynamic> m) {
     final out = <String>[
       ..._asStringList(m['tags']),
-      ..._asStringList(_path(m, const ['context','topics'])),
-      ..._asStringList(_path(m, const ['understanding','facets'])),
-      ..._asStringList(_path(m, const ['flow','facets'])),
+      ..._asStringList(_path(m, const ['context', 'topics'])),
+      ..._asStringList(_path(m, const ['understanding', 'facets'])),
+      ..._asStringList(_path(m, const ['flow', 'facets'])),
       ..._asStringList(m['topics']),
       ..._asStringList(m['recent_facets']),
       ..._asStringList(m['recent_tags']),
@@ -267,7 +266,9 @@ class SaveFromWorkerHook {
     if (seed.isEmpty) {
       try {
         final hint = mem.MemoryService.instance.buildContextHint(
-          maxFacets: 3, maxTags: 5, maxAgeDays: 14,
+          maxFacets: 3,
+          maxTags: 5,
+          maxAgeDays: 14,
         );
         if (hint != null) {
           final facetsDyn = (hint as dynamic).facets;
@@ -323,7 +324,8 @@ class SaveFromWorkerHook {
 
   static List<String> _overlap(List<String> a, List<String> b) {
     if (a.isEmpty || b.isEmpty) return const <String>[];
-    final A = a.map((e) => e.toLowerCase().trim()).where((e) => e.isNotEmpty).toSet();
+    final A =
+        a.map((e) => e.toLowerCase().trim()).where((e) => e.isNotEmpty).toSet();
     final res = <String>[];
     for (final t in b) {
       final k = t.toLowerCase().trim();
