@@ -1,3 +1,4 @@
+//[BASELINE] lib/shared/ui/zen_widgets.dart (Stand: 28.10.)
 // lib/shared/ui/zen_widgets.dart
 //
 // Oxford–Zen UI Widgets (v6.95 · 2025-10-23)

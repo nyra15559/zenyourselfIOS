@@ -1,21 +1,25 @@
+//[BASELINE]lib/features/reflection/reflection_screen.dart(Stand: 28.10.) 
 // lib/features/reflection/reflection_screen.dart
 //
-// ReflectionScreen — Panda v3.24.0 (Oxford level; CH risk actions; no auto-nav)
+// ReflectionScreen — Panda v3.24.3 (Oxford level; CH risk actions; no auto-nav)
 // -----------------------------------------------------------------------------
 // In diesem Build:
 // • Meta-Ebene: Alle Worker-Calls (start/next/closure) bekommen ein `meta`-Objekt
 //   mitgegeben (Memory-Bridge/Recall, UI/Session/Safety/Telemetry).
 // • **Memory-Integration (Phase 1):**
-//   – Vor jedem Call wird best-effort `MemoryStore.pickFor(userInput)` (oder
+//   – Vor jedem Call wird best-effort `MemoryStore.pickFor(userText)` (oder
 //     Fallback via MemoryService) aufgerufen und als `memories` + `memoryConsent`
 //     an den Worker durchgereicht (snake_case).
 //   – Nach dem Turn wird – **nur bei Themen-Overlap** und **nur bei Einsicht** –
 //     `recordAcknowledge()` (best-effort) getriggert, um kein Memory-Spam zu erzeugen.
 //   – Keine PII im Logging/Meta (nur anonyme Zähler / Flags).
+// • Mini-Einbau Name-Lernen (lokal, on-device):
+//   – Beim Start der Runde:     unawaited(MemoryService.instance.learnNameFromText(userText));
+//   – Beim Fortsetzen/Antwort:  unawaited(MemoryService.instance.learnNameFromText(userAnswer));
 // • Fallbacks bleiben erhalten: Wenn die API keine `meta`/`memories`/`memoryConsent`
 //   kennt, wird automatisch auf die alte Signatur zurückgefallen (NoSuchMethodError).
-// • Intro-Bubble "pinned", Save→Mood-Flow deterministisch, min. 2 Antwortchips,
-//   CH-Hotlines, Enter-/Shift+Enter-Handling, kein Auto-Navigate.
+// • Fixes: DTO-Session verwenden, PandaMood-Score aus valence → 0..4,
+//   fehlende Methoden ergänzt: _maybeAskMood, _onPressSaveRound, _deleteRound.
 // -----------------------------------------------------------------------------
 library reflection_screen;
 
@@ -56,7 +60,7 @@ import '../../providers/journal_entries_provider.dart';
 // Services
 import '../../services/guidance_service.dart';
 import '../../services/speech_service.dart';
-// (entfernt) import '../../services/whisper_service.dart'; // STT-Engine
+import '../../services/whisper_service.dart'; // STT-Engine (re-aktiviert)
 import '../../services/core/api_service.dart'; // Mood speichern
 
 // Memory-Layer
@@ -66,7 +70,7 @@ import '../../core/memory/memory_store.dart' show MemoryStore; // pickFor()/enab
 // CH Hotlines (Call-Buttons) + Launcher-Utilities
 import '../../widgets/hotline_widget.dart'; // SwissHotlineCard / Section
 
-// Parts
+// Parts (belassen)
 part 'reflection_models.dart';
 part 'reflection_widgets.dart';
 
@@ -250,7 +254,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     return {
       'ui': {
         'screen': 'reflection',
-        'version': '3.24.0',
+        'version': '3.24.3',
         'platform': kIsWeb ? 'web' : 'flutter',
         'is_desktop': _isDesktop,
         'chip_mode': _chipMode.name,
@@ -449,6 +453,9 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       _scrollToBottom();
       _focusInput();
       HapticFeedback.lightImpact();
+
+      // NEU: lokales Namenslernen aus der Antwort (best-effort)
+      unawaited(MemoryService.instance.learnNameFromText(text));
 
       unawaited(
         _continueReflectionFromWorker(round: _current!, userAnswer: text),
@@ -692,6 +699,9 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       _isMoodOpen = false;
     });
 
+    // NEU (Mini-Einbau): Name aus dem User-Text lokal lernen (best-effort)
+    unawaited(MemoryService.instance.learnNameFromText(userText));
+
     // NEU: Memories picken (best-effort)
     final _PickedMem? picked = await _pickMemoriesFor(userText);
 
@@ -815,6 +825,9 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     if (!mounted) return;
     setState(() => loading = true);
     _scrollToBottom();
+
+    // NEU (Mini-Einbau): Name aus der Antwort lokal lernen (best-effort)
+    unawaited(MemoryService.instance.learnNameFromText(userAnswer));
 
     // NEU: Memories picken für die Antwort (aktualisierte Achse)
     final _PickedMem? picked = await _pickMemoriesFor(userAnswer);
@@ -1692,8 +1705,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                                     },
                                   ),
                                 ),
-
-                              // ------------------ (Bridge bewusst entfernt) ------------------
 
                               // Hinweis – nur wenn Frage offen & kein Abschluss
                               AnimatedSize(

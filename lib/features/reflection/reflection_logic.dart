@@ -1,30 +1,26 @@
-// lib/features/reflection/reflection_logic.dart
-//
-// ReflectionLogic — Controller & Handler (v6.3.0, Memory-Integration)
+// [BASELINE] lib/features/reflection/reflection_logic.dart
+// ZenYourself — ReflectionLogic (Controller & Handler)
+// v12.1.3-baseline · 2025-10-29 · Europe/Zurich
 // -----------------------------------------------------------------------------
-// Aufgaben gemäß FilePlan 6.2.2 (Punkt 6) + v6.3.0-Erweiterungen:
-// • Controller-Klasse bauen
-// • Senden-Handler implementieren
-// • Action-Handler implementieren (UserAction {type, note})
-// • Hybrid-Note unterstützen (typed + transcript, defensiv)
-// • Debounce und Rate-Limit (min. Gap zwischen Sends, Action ≤1/Session)
-// • NEU (v6.3.0): optionale Memories + Memory-Consent an Full-Endpunkte durchreichen
-//                 (startSessionFull / nextTurnFull). Fallback bei Action nutzt das auch.
+// Aufgaben (FilePlan 6.2.x + v6.3):
+// • Controller-Klasse (kein UI; ChangeNotifier)
+// • Start/Senden-Flow (Full-Endpunkte; Memories/Consent durchreichen)
+// • Action-Flow (Rate-Limit 1×/Session; Fallback tolerant)
+// • Hybrid-Note (typed + transcript, defensiv, gekappt)
+// • Debounce/Rate-Limit (min Gap zwischen Sends; sanft, ohne Exceptions)
+// • VM-Bau: answer_helpers-only, mind. 2 Chips, Talk≤2, Risk/Flow-Flags
 // -----------------------------------------------------------------------------
 // Leitlinien:
-// • Keine UI-Logik; reine Orchestrierung + State. View rendert nur Werte.
-// • Defensive Defaults; niemals Exceptions nach außen werfen.
-// • Tolerant gegenüber (noch) fehlender GuidanceService-Action-API.
-// • Kompatibel zu ReflectionTurn (answerHelpers ≤3, moodPrompt etc.).
+// • Keine UI-Logik; reine Orchestrierung + State. View rendert nur 'vm'.
+// • Niemals Exceptions nach außen werfen (defensiv, timeouts).
+// • Analyzer-clean; keine Abhängigkeit von Screen/Widgets.
 // -----------------------------------------------------------------------------
 
 import 'dart:async';
-
 import 'package:flutter/foundation.dart';
 
 import '../../services/guidance/dtos.dart'
     show ReflectionTurn, ReflectionSession, UserAction;
-
 import '../../services/guidance_service.dart';
 import '../../core/memory/memory_service.dart';
 
@@ -350,7 +346,7 @@ class ReflectionController extends ChangeNotifier {
   String _sanitizeInput(String s) {
     var x = (s).trim();
     if (x.isEmpty) return '';
-    // Hartes Limit spiegelt UI (Screen) – defensiv hier nochmal:
+    // Hartes Limit spiegelt UI – defensiv hier nochmal:
     x = _cap(x, 800);
     // Kompakte Whitespaces
     x = x.replaceAll(RegExp(r'\s+'), ' ').trim();
@@ -389,7 +385,7 @@ class ReflectionController extends ChangeNotifier {
     if (s.isEmpty) return '';
     // 2) Keine Fragen als Chips
     s = s.replaceAll(RegExp(r'[?？]+$'), '');
-    // 3) Alle Endzeichen (Doppelpunkt, Punkt, Ellipsis, Spaces) entfernen
+    // 3) Endzeichen (Doppelpunkt, Punkt, Ellipsis, Spaces) entfernen
     s = s.replaceAll(RegExp(r'\s*[:：.。…]+\s*$'), '').trim();
     // 4) Max-Länge
     if (s.length > 72) s = '${s.substring(0, 72).trimRight()}…';

@@ -323,7 +323,7 @@ class _ProScreenState extends State<ProScreen> with SingleTickerProviderStateMix
 
     // Graph zeigen, wenn genug Platz/Daten vorhanden
     final showMoodGraph =
-        size.width > 410 && size.height > 670 && (series.length >= 4);
+        size.width > 0 && size.height > 0 && (series.length >= 4);
 
     return Scaffold(
       extendBodyBehindAppBar: true,

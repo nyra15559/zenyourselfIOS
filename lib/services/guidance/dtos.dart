@@ -1,3 +1,4 @@
+//[BASELINE]lib/services/guidance/dtos.dart(Stand: 28.10.) 
 // lib/services/guidance/dtos.dart
 //
 // DTOs & Value-Types für Guidance-Service (standalone, ohne Api-Abhängigkeit)

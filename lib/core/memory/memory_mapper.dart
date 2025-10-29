@@ -1,3 +1,4 @@
+//[BASELINE] lib/core/memory/memory_mapper.dart (Stand: 28.10.)
 // lib/core/memory/memory_mapper.dart
 //
 // MemoryMapper — toleranter Worker→MemoryEntry-Merger

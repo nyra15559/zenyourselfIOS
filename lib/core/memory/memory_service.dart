@@ -1,17 +1,26 @@
-// lib/core/memory/memory_service.dart
+// [BASELINE] lib/core/memory/memory_service.dart — v6.3.1 (Stand: 29.10.2025)
+// ZenYourself — MemoryService (Lokales Kontext-Gedächtnis, Ghost-Mode by default)
+// -----------------------------------------------------------------------------
+// Leitprinzipien:
+// • Passives Gedächtnis (Regel 46): keine proaktive Aufzählung, nur kontextual nutzen
+// • Ghost-Mode: keine PII ohne explizites Opt-in (Therapist-Mode = shareEnabled)
+// • UI darf nie blockieren: schwere Pfade async/best-effort, sync nur Tiny-Hints/Bytes
+// • Snake-Case für Payload-Brücken (context.memories{...}, memory_consent)
+// • Tolerant gegenüber Store-Implementierungen (reflektive Calls mit Fallbacks)
 //
-// MemoryService — Worker-Kontext-Recall (nicht UI-blockierend)
-// ------------------------------------------------------------
-// • Flags (enabled/shareEnabled) mit Persistenz via MemoryStore (best-effort)
-// • saveFromWorker(): tolerant, fängt Fehler ab, aktualisiert leichten Hint-Cache
-// • Read-APIs: latest(), topFacets(), recentTopics() — alle async
-// • buildContextHint(): SYNCHRON, nutzt kleinen In-Memory-Cache (TTL)
-// • recall(): sanfte, asynchrone Vorschläge (Labels), deduped
-// • Byte-Kontext (sync, klein): tryGetByteContext/exportByteContext/byteContext
-// • Warmup-Hooks: warmup()/preload() (best-effort, ohne UI zu blockieren)
+// In diesem Modul:
+// • Flags: enabled (lokal), shareEnabled (Opt-in)
+// • Identity: saveIdentityName()/loadGreetingName()/forgetIdentityName()/learnNameFromText(...)
+// • Konversation: saveUserTurn()/savePandaTurn() (best-effort Append)
+// • Worker-Integration: saveFromWorker(workerResponse) + leichter Sync-Hint-Cache
+// • Read-APIs: latest(), topFacets(), latestTopics()/recentTopics(), recall()
+// • Hints/Memories: buildContextHint() (sync, klein, TTL), buildContextMemories(consent:)
+// • Byte-Kontext: tryGetByteContext()/exportByteContext()/byteContext()
+// • Warmup/Init: init()/warmup()/preload()
+// • Fehlerbehandlung: niemals Exceptions nach außen; still/ignore in catch-Blöcken
 //
-// Leitlinie: Memory darf die UI nie blockieren. Alle schweren Pfade sind async,
-// der synchrone Hint nutzt nur kleine In-Memory-Daten.
+// Abhängigkeiten: insight_models.dart (Facet), MemoryEntry/Mapper/Store
+// -----------------------------------------------------------------------------
 
 import 'dart:convert' show jsonEncode, utf8;
 
@@ -20,14 +29,20 @@ import 'memory_entry.dart';
 import 'memory_mapper.dart';
 import 'memory_store.dart';
 
-/// Leichte, synchrone Hint-Struktur für den Worker.
+/// Leichte, synchrone Hint-Struktur für den Worker (keine PII).
 /// Wird von ApiService._appendMemoryHints() genutzt.
-/// Alle Felder optional; leere/nicht vorhandene Felder werden nicht gesendet.
+/// Alle Felder optional; leere Felder werden nicht gesendet.
 class MemoryContextHint {
-  final List<String>? facets; // z. B. Facet-Keys (stabil)
-  final List<String>? tags;   // optional (derzeit nicht gepflegt)
-  final List<String>? topics; // human labels (z. B. Facet-Labels)
+  final List<String>? facets; // stabile Facet-Keys
+  final List<String>? tags;   // optional
+  final List<String>? topics; // human labels der Facetten
   const MemoryContextHint({this.facets, this.tags, this.topics});
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        if (facets != null && facets!.isNotEmpty) 'facets': facets,
+        if (tags != null && tags!.isNotOrEmpty) 'tags': tags,
+        if (topics != null && topics!.isNotEmpty) 'topics': topics,
+      };
 }
 
 class MemoryService {
@@ -36,8 +51,9 @@ class MemoryService {
 
   final MemoryStore _store = MemoryStore.instance;
 
-  bool _enabled = true;       // „Kontext-Gedächtnis“ (Ghost-Mode)
-  bool _shareEnabled = false; // Opt-in Share (Therapist-Mode) – Flag, Logik extern
+  // Flags
+  bool _enabled = true;        // Ghost-Mode (lokales Gedächtnis)
+  bool _shareEnabled = false;  // Therapist-Mode (Opt-in)
 
   bool get enabled => _enabled;
   bool get shareEnabled => _shareEnabled;
@@ -46,17 +62,21 @@ class MemoryService {
   MemoryContextHint? _lastHint;
   DateTime? _lastHintTs;
 
-  // Optionale weiche Caches (kurzer TTL, wenige Elemente)
+  // Weiche Caches (kurzer TTL)
   List<String>? _latestTopicsCache;
   DateTime? _latestTopicsTs;
-
   List<Facet>? _topFacetsCache;
   DateTime? _topFacetsTs;
 
-  // TTLs (kurz halten, damit nichts „alt“ wird)
+  // TTLs
   static const _hintTtlDays = 14;
   static const _topicsTtlSec = 30;
   static const _facetsTtlSec = 30;
+
+  // Storage-Keys (nur lokal)
+  static const String _kIdentityName = 'identity.name';
+  static const String _kIdentityGreetByName = 'identity.greet_by_name';
+  static const String _kShareEnabled = 'share_enabled';
 
   // ---------------- Lifecycle / Flags ----------------------------------------
 
@@ -65,43 +85,16 @@ class MemoryService {
       await _store.init();
       _enabled = _store.isEnabled;
 
-      // shareEnabled best-effort lesen (mehrere mögliche Store-APIs, sicher nacheinander testen)
-      bool enabled = false;
-      // Variante 1: boolesches Feld/Getter 'isShareEnabled'
-      try {
-        final dyn = _store as dynamic;
-        final v = dyn.isShareEnabled; // kann NoSuchMethod werfen
-        if (v is bool) {
-          enabled = v;
-        }
-      } catch (_) {/* ignore */}
-
-      // Variante 2: Methode/Getter 'getShareEnabled()'
-      if (!enabled) {
-        try {
-          final dyn = _store as dynamic;
-          final res = dyn.getShareEnabled(); // kann NoSuchMethod werfen
-          if (res is bool) {
-            enabled = res;
-          } else if (res is Future) {
-            final v = await res;
-            if (v is bool) enabled = v;
-          }
-        } catch (_) {/* ignore */}
-      }
-
-      _shareEnabled = enabled;
+      final se = await _getOptBool(_kShareEnabled);
+      _shareEnabled = se ?? _tryReadShareEnabledReflective() ?? false;
     } catch (_) {
-      // Niemals UI blockieren; Flags bleiben bei Defaults.
+      // Defaults beibehalten
     }
   }
 
-  /// Best-effort: initialisiert Store & wärmt leichte Caches an.
-  /// Wird vom ApiService opportunistisch (ohne await) aufgerufen.
   Future<void> warmup() async {
     try {
       await init();
-      // kleine, häufig benutzte Reads anstoßen (aber nicht kritisch)
       try {
         await topFacets(limit: 8);
         await latestTopics(limit: 6);
@@ -109,64 +102,152 @@ class MemoryService {
     } catch (_) {/* ignore */}
   }
 
-  /// Fire-and-forget-Anschubser (keine Abhängigkeit auf unawaited()).
   void preload() {
-    // bewusst ohne await — Analyzer-Warnung ist ok; Fehler intern abgefangen
+    // fire-and-forget
+    // ignore: discarded_futures
     warmup();
   }
 
   Future<void> setEnabled(bool v) async {
     _enabled = v;
-    try {
-      await _store.setEnabled(v);
-    } catch (_) {/* ignore */}
+    try { await _store.setEnabled(v); } catch (_) {/* ignore */}
   }
 
   Future<void> setShareEnabled(bool v) async {
     _shareEnabled = v;
-    // Best-effort Persistenz, ohne das konkrete Store-Interface vorauszusetzen.
-    // Wichtig: Jede Variante in einem eigenen try/catch – damit ein NoSuchMethod
-    // nicht die folgenden Fallbacks verhindert.
+    try { await _setOptBool(_kShareEnabled, v); } catch (_) {/* ignore */}
+  }
+
+  // ---------------- Identity (lokal, nur bei Opt-in nutzbar) -----------------
+
+  /// Speichert Name lokal (PII). greetByName steuert, ob Panda den Namen
+  /// verwenden darf. Kein Versand ohne Consent.
+  Future<void> saveIdentityName(String name, {bool greetByName = true}) async {
+    try {
+      final n = name.trim();
+      if (n.isEmpty) return;
+      await _setOptString(_kIdentityName, n);
+      await _setOptBool(_kIdentityGreetByName, greetByName);
+    } catch (_) {/* ignore */}
+  }
+
+  /// Löscht den lokal gespeicherten Namen (PII) und setzt greet_by_name=false.
+  Future<void> forgetIdentityName() async {
     try {
       final dyn = _store as dynamic;
-      final r = dyn.setShareEnabled(v); // bevorzugte Methode
-      if (r is Future) await r;
-      return;
-    } catch (_) {/* try next */}
+      try {
+        final r = dyn.removeOpt?.call(_kIdentityName);
+        if (r is Future) await r;
+      } catch (_) {/* try next */}
+      try {
+        final r = dyn.setOptBool?.call(_kIdentityGreetByName, false);
+        if (r is Future) await r;
+      } catch (_) {/* ignore */}
+    } catch (_) {/* ignore */}
+  }
+
+  /// Optionale Sammellöschung aller PII-Fakten (z. B. für Privacy-Screen).
+  Future<void> forgetAllPII() async {
     try {
       final dyn = _store as dynamic;
-      final r = dyn.setFlag('share_enabled', v); // generischer Flag-Setter
-      if (r is Future) await r;
-      return;
-    } catch (_) {/* try next */}
+      try {
+        final r = dyn.forgetAllPII?.call();
+        if (r is Future) await r;
+        return;
+      } catch (_) {/* try next */}
+      await forgetIdentityName();
+    } catch (_) {/* ignore */}
+  }
+
+  /// Liefert (Name, greetByName). Ist greetByName != true → Name NICHT verwenden.
+  Future<({String? name, bool greetByName})> loadGreetingName() async {
     try {
-      final dyn = _store as dynamic;
-      final r = dyn.setOpt('share_enabled', v); // alternative Option-API
-      if (r is Future) await r;
-      return;
+      final name = await _getOptString(_kIdentityName);
+      final greet = await _getOptBool(_kIdentityGreetByName) ?? false;
+      final trimmed = (name?.trim().isEmpty ?? true) ? null : name!.trim();
+      return (name: trimmed, greetByName: greet);
     } catch (_) {
-      // still – niemals UI blockieren
+      return (name: null, greetByName: false);
     }
   }
 
-  // ---------------- Write -----------------------------------------------------
+  /// Extrahiert aus natürlichem Text einen Vornamen und speichert ihn (Opt-in default true).
+  /// Beispiele:
+  ///  - „ich heiße matthias“, „mein name ist lea“, „nenn mich alex“,
+  ///  - „ich bin sara“, „mein vorname ist tom“, „man nennt mich lio“, „ja einfach matthias“
+  Future<void> learnNameFromText(String text, {bool greetByName = true}) async {
+    if (!_enabled) return;
+    try {
+      final t = text.trim();
+      if (t.isEmpty) return;
+
+      final lower = t.toLowerCase();
+
+      String? candidate;
+
+      // klassische & erweiterte Muster
+      final patterns = <RegExp>[
+        RegExp(r"\bich\s+hei(?:ß|ss|s)e\s+([a-zäöüß\-\' ]+)", caseSensitive: false),
+        RegExp(r"\bmein\s+name\s+ist\s+([a-zäöüß\-\' ]+)", caseSensitive: false),
+        RegExp(r"\bmein\s+vorname\s+ist\s+([a-zäöüß\-\' ]+)", caseSensitive: false),
+        RegExp(r"\bich\s+bin\s+([a-zäöüß\-\' ]+)", caseSensitive: false),
+        RegExp(r"\bnenn\s+mich\s+([a-zäöüß\-\' ]+)", caseSensitive: false),
+        RegExp(r"\bman\s+nennt\s+mich\s+([a-zäöüß\-\' ]+)", caseSensitive: false),
+        RegExp(r"\bdu\s+kannst\s+mich\s+([a-zäöüß\-\' ]+)\s+nennen", caseSensitive: false),
+        RegExp(r"\bja(?:,\s*)?\s*einfach\s+([a-zäöüß\-\' ]+)\b", caseSensitive: false),
+      ];
+
+      for (final re in patterns) {
+        final m = re.firstMatch(lower);
+        if (m != null && m.groupCount >= 1) {
+          candidate = m.group(1);
+          break;
+        }
+      }
+
+      // fallback: Einzelwort nach "heiße/Name ist"
+      candidate ??= () {
+        final m = RegExp(r"\b(hei(?:ß|ss|s)e|name\s+ist)\b\s+([a-zäöüß\-\' ]+)")
+            .firstMatch(lower);
+        return (m != null && m.groupCount >= 2) ? m.group(2) : null;
+      }();
+
+      if (candidate == null) return;
+
+      // auf erstes Token reduzieren (z. B. "matthias k." → "matthias")
+      final firstToken = candidate.split(RegExp(r"\s+")).first;
+
+      // säubern & in Title-Case (Apostroph bleibt erlaubt)
+      String clean = firstToken.replaceAll(RegExp(r"[^a-zA-ZäöüÄÖÜß\-' ]"), '');
+      clean = clean.replaceAll(' ', '');
+      if (clean.length < 2) return;
+      clean = clean[0].toUpperCase() + clean.substring(1);
+
+      // Ausschlüsse
+      const banned = {'einfach','ja','okay','ok','nein'};
+      if (banned.contains(clean.toLowerCase())) return;
+
+      await saveIdentityName(clean, greetByName: greetByName);
+    } catch (_) {/* ignore */}
+  }
+
+  // ---------------- Write: Konversation & Worker-Save ------------------------
 
   /// Speichert tolerant aus einer Worker-Response (no-op, wenn disabled).
-  /// [source] ist optional (Telemetrie: z. B. "reflect_full", "next_turn_full").
+  /// [source] optional (Telemetrie).
   Future<void> saveFromWorker(dynamic workerResponse, {String? source}) async {
     if (!_enabled) return;
     try {
-      if (workerResponse is! Map) return; // wir erwarten eine Map vom Worker
+      if (workerResponse is! Map) return;
       final map = Map<String, dynamic>.from(workerResponse);
 
-      final entry = MemoryMapper.fromWorker(map); // <- nullable
-      if (entry == null) return;                  // kein Signal -> still
+      final entry = MemoryMapper.fromWorker(map); // nullable
+      if (entry == null) return;
 
       await _store.save(entry);
 
-      // --------- Kleinen Sync-Hint-Cache aktualisieren -----------------------
+      // leichten Sync-Hint aktualisieren
       if (entry.contextFacets.isNotEmpty) {
-        // Sortiere nach hits (desc), dann by label asc – defensiv
         final sorted = [...entry.contextFacets]..sort((a, b) {
           final byHits = (b.hits).compareTo(a.hits);
           if (byHits != 0) return byHits;
@@ -177,22 +258,117 @@ class MemoryService {
         final facetLabels = sorted.map((f) => f.label).where((s) => s.trim().isNotEmpty).toList();
 
         _lastHint = MemoryContextHint(
-          facets: facetKeys.take(6).toList(growable: false),  // defensiv begrenzen
-          tags: null,                                         // optional später
+          facets: facetKeys.take(6).toList(growable: false),
+          tags: null,
           topics: facetLabels.take(6).toList(growable: false),
         );
         _lastHintTs = DateTime.now();
       }
 
-      // Weiche UI-Caches invalidieren (best effort, keine Garantien)
-      _latestTopicsCache = null;
-      _latestTopicsTs = null;
-      _topFacetsCache = null;
-      _topFacetsTs = null;
-
+      _invalidateSoftCaches();
     } catch (_) {
-      // still – Memory darf niemals die Hauptlogik stören
+      // still
     }
+  }
+
+  /// Konversationszeile des Nutzers lokal protokollieren (best-effort).
+  Future<void> saveUserTurn(String text, {Map<String, dynamic>? meta}) async {
+    await _saveLine('user', text, meta: meta);
+  }
+
+  /// Konversationszeile des Panda lokal protokollieren (best-effort).
+  Future<void> savePandaTurn(String text, {Map<String, dynamic>? meta}) async {
+    await _saveLine('panda', text, meta: meta);
+  }
+
+  /// Acknowledge-Ereignis bei Einsicht & Themen-Overlap registrieren (best-effort).
+  /// Erwartet z. B. {round_id, session_id, insight_score, ts, facet_keys:[]}
+  Future<void> recordAcknowledge(Map<String, dynamic> ack) async {
+    if (!_enabled) return;
+    try {
+      final safeAck = Map<String, dynamic>.from(ack);
+      final dyn = _store as dynamic;
+
+      // 1) Spezifische Store-Methode
+      try {
+        final r = dyn.recordAcknowledge(safeAck);
+        if (r is Future) await r;
+        return;
+      } catch (_) {/* try next */}
+
+      // 2) Alternative Namensvarianten
+      try {
+        final r = dyn.saveAck?.call(safeAck);
+        if (r is Future) await r;
+        return;
+      } catch (_) {/* try next */}
+
+      // 3) Fallback: generische Map-Speicherung mit kind:'ack'
+      safeAck.putIfAbsent('kind', () => 'ack');
+      safeAck.putIfAbsent('ts', () => DateTime.now().toUtc().toIso8601String());
+      try {
+        final r = dyn.saveMap?.call(safeAck);
+        if (r is Future) await r;
+        return;
+      } catch (_) {/* try next */}
+      try {
+        final r = dyn.save?.call(safeAck);
+        if (r is Future) await r;
+      } catch (_) {/* ignore */}
+    } catch (_) {/* ignore */}
+  }
+
+  /// Zentrale, compile-sichere Line-Save-Kaskade ohne statische MemoryEntry-Factories.
+  Future<void> _saveLine(String role, String text, {Map<String, dynamic>? meta}) async {
+    if (!_enabled) return;
+    try {
+      final m = meta ?? const <String, dynamic>{};
+      final dyn = _store as dynamic;
+
+      // 1) Spezifische Methoden (falls vorhanden)
+      try {
+        if (role == 'user') {
+          final r = dyn.saveUserLine(text, m);
+          if (r is Future) await r;
+          return;
+        } else {
+          final r = dyn.savePandaLine(text, m);
+          if (r is Future) await r;
+          return;
+        }
+      } catch (_) {/* try next */}
+
+      // 2) Generische Append/SaveLine-Varianten
+      try {
+        final r = dyn.appendLine(role, text, m);
+        if (r is Future) await r;
+        return;
+      } catch (_) {/* try next */}
+      try {
+        final r = dyn.saveLine(role: role, text: text, meta: m);
+        if (r is Future) await r;
+        return;
+      } catch (_) {/* try next */}
+
+      // 3) Map-Fallback (einige Stores akzeptieren Map-Objekte)
+      final map = {
+        'kind': 'line',
+        'role': role,
+        'text': text,
+        'meta': m,
+        'ts': DateTime.now().toUtc().toIso8601String(),
+      };
+      try {
+        final r = dyn.saveMap(map);
+        if (r is Future) await r;
+        return;
+      } catch (_) {/* try next */}
+      try {
+        final r = dyn.save(map);
+        if (r is Future) await r;
+        return;
+      } catch (_) {/* swallow */}
+    } catch (_) {/* ignore */}
   }
 
   Future<void> clear() async {
@@ -202,9 +378,7 @@ class MemoryService {
     _latestTopicsTs = null;
     _topFacetsCache = null;
     _topFacetsTs = null;
-    try {
-      await _store.clearAll();
-    } catch (_) {/* ignore */}
+    try { await _store.clearAll(); } catch (_) {/* ignore */}
   }
 
   // ---------------- Read ------------------------------------------------------
@@ -220,7 +394,6 @@ class MemoryService {
   /// Aggregiert Top-Facetten (als Facet-Objekte mit 'hits').
   Future<List<Facet>> topFacets({int limit = 8}) async {
     try {
-      // kurzer Cache (vermeidet häufige SharedPrefs-Reads in UI-Schleifen)
       if (_topFacetsCache != null &&
           _topFacetsTs != null &&
           DateTime.now().difference(_topFacetsTs!).inSeconds <= _facetsTtlSec) {
@@ -228,7 +401,7 @@ class MemoryService {
       }
 
       final all = await _store.all();
-      if (all.isEmpty) return const [];
+      if (all.isEmpty) return const <Facet>[];
       final counts = <String, int>{};
       final labels = <String, String>{};
 
@@ -244,15 +417,13 @@ class MemoryService {
         ..sort((a, b) {
           final byCount = (counts[b] ?? 0).compareTo(counts[a] ?? 0);
           if (byCount != 0) return byCount;
-          // leichte Recency-Präferenz: erster Index im Verlauf
           final aIdx = all.indexWhere((e) => e.contextFacets.any((f) => f.key == a));
           final bIdx = all.indexWhere((e) => e.contextFacets.any((f) => f.key == b));
           return aIdx.compareTo(bIdx);
         });
 
       final result = keys.take(limit).map((k) =>
-        Facet(key: k, label: labels[k] ?? k, hits: counts[k] ?? 1)
-      ).toList(growable: false);
+          Facet(key: k, label: labels[k] ?? k, hits: counts[k] ?? 1)).toList(growable: false);
 
       _topFacetsCache = result;
       _topFacetsTs = DateTime.now();
@@ -265,7 +436,6 @@ class MemoryService {
   /// Human-friendly „Letzte Themen“ (nur Labels, deduped, neueste zuerst).
   Future<List<String>> latestTopics({int limit = 6}) async {
     try {
-      // kurzer Cache
       if (_latestTopicsCache != null &&
           _latestTopicsTs != null &&
           DateTime.now().difference(_latestTopicsTs!).inSeconds <= _topicsTtlSec) {
@@ -299,31 +469,24 @@ class MemoryService {
   /// Alias (für ApiService.recentTopics)
   Future<List<String>> recentTopics({int limit = 6}) => latestTopics(limit: limit);
 
-  /// Liefert eine kompakte Recall-Liste für UI-Brücken.
-  /// Rückgabe: Liste aus Labels (Strings). Typ bleibt bewusst `List<dynamic>`,
-  /// damit bestehende Call-Sites ohne Cast funktionieren.
-  ///
-  /// Strategie:
-  /// 1) Nimm die jüngsten Themenlabels (latestTopics), dedupe, leicht
-  ///    priorisiert nach topicHint (Prefix > Teiltreffer).
-  /// 2) Falls leer → Fallback auf Facetten-Labels (topFacets).
+  /// Liefert kompakte Recall-Liste (Labels) für UI-Brücken.
+  /// Hinweis: UI soll aktuell **keine** „Letzten Themen“-Chips anzeigen; diese API
+  /// dient nur internen Bridges/Experimenten.
   Future<List<dynamic>> recall({int limit = 6, String? topicHint}) async {
     try {
-      // 1) Neueste Themen laden (etwas großzügiger, dann dedupen & schneiden)
       final int takeN = (limit * 2).clamp(6, 24).toInt();
       final rawTopics = await latestTopics(limit: takeN);
       final seen = <String>{};
       final ranked = <String>[];
 
-      // Optionales weiches Re-Ranking nach topicHint
       final hint = (topicHint ?? '').trim().toLowerCase();
       final tmp = [...rawTopics];
 
       if (hint.isNotEmpty) {
         int score(String s) {
           final t = s.toLowerCase();
-          if (t.startsWith(hint)) return 2; // Prefix-Booster
-          if (t.contains(hint)) return 1;   // Teiltreffer
+          if (t.startsWith(hint)) return 2;
+          if (t.contains(hint)) return 1;
           return 0;
         }
         tmp.sort((a, b) => score(b).compareTo(score(a)));
@@ -340,11 +503,9 @@ class MemoryService {
       }
 
       if (ranked.isNotEmpty) {
-        // Strings genügen für die Bridge-Composer-Logik
         return List<dynamic>.from(ranked);
       }
 
-      // 2) Fallback: Facetten-Labels
       final facets = await topFacets(limit: limit);
       final viaFacets = facets
           .map((f) => f.label.trim())
@@ -353,19 +514,13 @@ class MemoryService {
 
       return List<dynamic>.from(viaFacets);
     } catch (_) {
-      // Memory darf niemals die Hauptlogik stören
       return const <dynamic>[];
     }
   }
 
-  // ---------------- Sync-Hints für ApiService -------------------------------
+  // ---------------- Sync-Hints & Memories für ApiService ---------------------
 
-  /// Liefert eine **synchrone**, leichte Hint-Struktur für den Worker.
-  /// ApiService ruft das innerhalb des Payload-Baus auf (kein await möglich).
-  ///
-  /// Aktuell nutzen wir einen kleinen lokalen Cache (_lastHint), der bei
-  /// saveFromWorker() aktualisiert wird. Ist nichts im Cache oder zu alt,
-  /// geben wir null zurück (ApiService sendet dann keinen context_hint).
+  /// **Synchroner** Hint für den Worker (klein, aus Cache).
   MemoryContextHint? buildContextHint({
     int maxFacets = 3,
     int maxTags = 5,
@@ -376,25 +531,21 @@ class MemoryService {
       final hint = _lastHint;
       if (hint == null) return null;
 
-      // Altersprüfung (grob, Tagesgenauigkeit reicht hier völlig)
       if (_lastHintTs != null && maxAgeDays > 0) {
         final ageDays = DateTime.now().difference(_lastHintTs!).inDays;
         if (ageDays > maxAgeDays) return null;
       }
 
-      // Begrenzen ohne Seiteneffekte
       final facets = (hint.facets == null)
           ? null
           : hint.facets!.take(maxFacets).toList(growable: false);
       final tags = (hint.tags == null)
           ? null
           : hint.tags!.take(maxTags).toList(growable: false);
-      // topics defensiv auf 5 begrenzen (UI/Worker: human labels)
       final topics = (hint.topics == null)
           ? null
           : hint.topics!.take(5).toList(growable: false);
 
-      // Nichts Sinnvolles? → null
       if ((facets == null || facets.isEmpty) &&
           (tags == null || tags.isEmpty) &&
           (topics == null || topics.isEmpty)) {
@@ -407,12 +558,35 @@ class MemoryService {
     }
   }
 
-  // ---------------- Byte-Kontext (sync, klein) ------------------------------
-  // Diese Hooks werden vom ApiService per dynamic optional aufgerufen.
-  // Sie sind bewusst leichtgewichtig und nutzen nur den lokalen Hint-Cache.
+  /// **Memories-Block** für ApiService (nur bei Consent verwenden!).
+  Future<Map<String, dynamic>> buildContextMemories({required bool consent}) async {
+    try {
+      if (!_enabled || !consent) return const <String, dynamic>{};
 
-  /// Bevorzugter Hook: gibt bis zu [maxBytes] Kontext-Bytes zurück (oder null).
-  /// Inhalt: kompaktes JSON mit Facet-Keys & Topic-Labels aus dem Hint-Cache.
+      final out = <String, dynamic>{};
+
+      final id = await loadGreetingName();
+      if (id.greetByName && id.name != null && id.name!.isNotEmpty) {
+        out['identity'] = <String, dynamic>{'name': id.name};
+      }
+
+      final hint = buildContextHint();
+      if (hint != null) {
+        out['hint'] = hint.toJson();
+      }
+
+      if (_shareEnabled) {
+        out['share'] = true;
+      }
+
+      return out;
+    } catch (_) {
+      return const <String, dynamic>{};
+    }
+  }
+
+  // ---------------- Byte-Kontext (sync, klein) ------------------------------
+
   List<int>? tryGetByteContext([int maxBytes = 2048]) {
     try {
       if (_lastHint == null) return null;
@@ -432,9 +606,137 @@ class MemoryService {
     }
   }
 
-  /// Alternative Hook-Name (kompatibel zu ApiService): identisch zu tryGetByteContext.
   List<int>? exportByteContext([int maxBytes = 2048]) => tryGetByteContext(maxBytes);
-
-  /// Minimaler Fallback-Name (kompatibel): identisch zu tryGetByteContext.
   List<int>? byteContext([int maxBytes = 2048]) => tryGetByteContext(maxBytes);
+
+  // ---------------- interne Helfer ------------------------------------------
+
+  void _invalidateSoftCaches() {
+    _latestTopicsCache = null;
+    _latestTopicsTs = null;
+    _topFacetsCache = null;
+    _topFacetsTs = null;
+  }
+
+  bool? _tryReadShareEnabledReflective() {
+    try {
+      final dyn = _store as dynamic;
+      final v = dyn.isShareEnabled;
+      if (v is bool) return v;
+    } catch (_) {/* ignore */}
+    try {
+      final dyn = _store as dynamic;
+      final res = dyn.getShareEnabled();
+      if (res is bool) return res;
+    } catch (_) {/* ignore */}
+    return null;
+  }
+
+  Future<void> _setOptString(String key, String value) async {
+    try {
+      final dyn = _store as dynamic;
+      final r = dyn.setOptString(key, value);
+      if (r is Future) await r;
+      return;
+    } catch (_) {/* try next */}
+    try {
+      final dyn = _store as dynamic;
+      final r = dyn.setOpt(key, value);
+      if (r is Future) await r;
+      return;
+    } catch (_) {/* try next */}
+    try {
+      final dyn = _store as dynamic;
+      final r = dyn.setKey(key, value);
+      if (r is Future) await r;
+    } catch (_) {/* ignore */}
+  }
+
+  Future<String?> _getOptString(String key) async {
+    try {
+      final dyn = _store as dynamic;
+      final r = dyn.getOptString(key);
+      if (r is String) return r;
+      if (r is Future) {
+        final v = await r;
+        if (v is String) return v;
+      }
+    } catch (_) {/* try next */}
+    try {
+      final dyn = _store as dynamic;
+      final r = dyn.getOpt(key);
+      if (r is String) return r;
+      if (r is Future) {
+        final v = await r;
+        if (v is String) return v;
+      }
+    } catch (_) {/* try next */}
+    try {
+      final dyn = _store as dynamic;
+      final r = dyn.getKey(key);
+      if (r is String) return r;
+      if (r is Future) {
+        final v = await r;
+        if (v is String) return v;
+      }
+    } catch (_) {/* ignore */}
+    return null;
+  }
+
+  Future<void> _setOptBool(String key, bool value) async {
+    try {
+      final dyn = _store as dynamic;
+      final r = dyn.setOptBool(key, value);
+      if (r is Future) await r;
+      return;
+    } catch (_) {/* try next */}
+    try {
+      final dyn = _store as dynamic;
+      final r = dyn.setOpt(key, value);
+      if (r is Future) await r;
+      return;
+    } catch (_) {/* try next */}
+    try {
+      final dyn = _store as dynamic;
+      final r = dyn.setFlag(key, value);
+      if (r is Future) await r;
+    } catch (_) {/* ignore */}
+  }
+
+  Future<bool?> _getOptBool(String key) async {
+    try {
+      final dyn = _store as dynamic;
+      final r = dyn.getOptBool(key);
+      if (r is bool) return r;
+      if (r is Future) {
+        final v = await r;
+        if (v is bool) return v;
+      }
+    } catch (_) {/* try next */}
+    try {
+      final dyn = _store as dynamic;
+      final r = dyn.getOpt(key);
+      if (r is bool) return r;
+      if (r is Future) {
+        final v = await r;
+        if (v is bool) return v;
+      }
+    } catch (_) {/* try next */}
+    try {
+      final dyn = _store as dynamic;
+      final r = dyn.getFlag(key);
+      if (r is bool) return r;
+      if (r is Future) {
+        final v = await r;
+        if (v is bool) return v;
+      }
+    } catch (_) {/* ignore */}
+    return null;
+  }
+}
+
+// ---------------- kleine Extension-Helfer ------------------------------------
+
+extension _ListX<T> on List<T>? {
+  bool get isNotEmpty => (this != null && this!.isNotEmpty);
 }

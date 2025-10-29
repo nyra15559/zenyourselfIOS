@@ -1,3 +1,5 @@
+//[BASELINE] lib/core/memory/memory_entry.dart  (Stand: 28.10.)
+
 // lib/core/memory/memory_entry.dart
 //
 // MemoryEntry v2.2 — DTO für lokales Kontext-Gedächtnis (snake_case-Maps).

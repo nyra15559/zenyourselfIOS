@@ -1,3 +1,4 @@
+//[BASELINE]lib/features/reflection/reflection_view.dart(Stand: 28.10.) 
 // lib/features/reflection/reflection_view.dart
 //
 // ReflectionView — reine Layout-Schicht (Plan v6.2.2 + v6.3.x VM-Wiring)

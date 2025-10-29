@@ -1,4 +1,4 @@
-// lib/features/reflection/reflection_models.dart
+//[BASELINE] lib/features/reflection/reflection_models.dart(Stand: 29.10.)
 // Part: Modelle/Typen/Utils (library: reflection_screen)
 // -----------------------------------------------------------------------------
 // v3.25.1 — Worker v15.x Alignment (Oxford style, +Flow/Session-Checks, fixes)

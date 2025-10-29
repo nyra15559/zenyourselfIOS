@@ -1,28 +1,5 @@
-// lib/services/core/api_service.dart
-//
-// ZenYourself — Core ApiService (server+offline, Samfring optional)
-// -----------------------------------------------------------------------------
-// - Einheitlicher HTTP/Retries/Fallbacks (_tryEndpoints / _postMaybe)
-// - Zentrale Payload-Builder (_buildSessionMap / _basePayload)
-// - Memory-Hooks & Byte-Kontext (best-effort, ohne await)
-// - Light Contact-Tints (Header + Payload), Samfring=optional
-// - Out-Soft-Gate: kleiner Start-Blocker; blockiert NIE Offline-Flows
-// - Parser & Offline-Heuristiken bleiben erhalten (kompatibel)
-// - v6.3.1:
-//     • reflectFull/nextTurnFull(..., memories, memoryConsent) → sendet
-//       context.memories{...} (snake_case) + memory_consent:true/false,
-//       tolerant gegen fehlende Memory-Typen (dynamic/toMap/toJson/Map)
-//     • nextTurnAction(session, action, ...) → eigener Endpoint mit Fallback
-//     • Legacy-Fallback: insight_score aus Top-Level/flow wird – falls keine
-//       TurnAnalysis vorhanden – in eine minimalistische TurnAnalysis übernommen.
-// - v6.3.2 (robustness):
-//     • Risk-Mapping akzeptiert zusätzlich Legacy 'level'
-//     • Flow: verschachteltes mood: { prompt: true } wird erkannt
-//     • Session-Felder aus Strings toleriert (turn/turn_index/max_turns)
-// - v6.3.3 (choices parsing):
-//     • _contentFromChoices versteht OpenAI- und Anthropic-Varianten (message.content
-//       als String ODER als Liste mit {type:"text", text:{value:"..."}})
-// -----------------------------------------------------------------------------
+//[BASELINE] lib/services/core/api_service.dart  (Stand: 28.10.)
+// lib/services/core/api_service.dart  
 
 import 'dart:async';
 import 'dart:convert';
@@ -32,7 +9,6 @@ import 'package:collection/collection.dart';
 import 'package:http/http.dart' as http;
 import 'package:uuid/uuid.dart';
 
-// Wichtig: DTOs importieren – explizit nur die genutzten Typen
 import '../guidance/dtos.dart'
     show
         AnalyzeResult,
@@ -47,14 +23,10 @@ import '../guidance/dtos.dart'
         StructuredThoughtResult,
         IfEmptyX,
         UserAction,
-        TurnAnalysis; // NEU: für Legacy-Fallback von insight_score
+        TurnAnalysis;
 
-// ReflectionEntry & Co; hier VERMEIDEN wir den Typ Analysis aus diesem File:
 import '../../data/reflection_entry.dart' as re hide Analysis;
-
 import '../../models/question.dart';
-
-// **Memory-Layer (Backend-only)**
 import '../../core/memory/memory_service.dart';
 
 typedef HttpInvoker = Future<Map<String, dynamic>> Function(
@@ -73,21 +45,99 @@ class ApiService {
   String? _baseUrl;
   Duration _timeout = const Duration(seconds: 25);
 
-  // Outbound Soft-Gate (startet geschlossen, öffnet sich nach kurzem Delay)
-  bool _outGateOpen = true; // standardmäßig offen – wird durch configure* kurz geschlossen
+  bool _outGateOpen = true;
   bool _outGatePrimed = false;
 
-  // Branding
   static const String _brand = 'ZenYourself';
   static const String _channel = 'app';
   static const String _samfring = 'optional';
   static const String loadingHint = '$_brand zählt die Blümchen …';
 
-  // **Fester Fehlertext (fix)**
   static const String errorHint =
       'ZenYourself hat die Blümchen nicht gefunden. Bitte Verbindung prüfen.';
 
+  // ---- Memory/Consent Best-Effort Helpers ---------------------------------
+  bool _memoryConsentDefault() {
+    try {
+      final dyn = MemoryService.instance;
+      // ignore: avoid_dynamic_calls
+      return dyn.shareEnabled == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  void _saveUserTurnBestEffort(String text) {
+    try {
+      final mem = MemoryService.instance as dynamic;
+      // ignore: avoid_dynamic_calls
+      mem.saveUserTurn?.call(text);
+    } catch (_) {/* never block */}
+  }
+
+  // robuste Helper-Funktion: trifft 1 Arg, 2 Args oder benannten Param
+  void _invokeSaveIdentityName(dynamic mem, String name) {
+    try {
+      final fn = (mem as dynamic).saveIdentityName;
+      if (fn is Function) {
+        // 1) häufigster Fall: nur (name)
+        try { fn(name); return; } catch (_) {}
+
+        // 2) benannter Parameter: greetByName
+        try {
+          Function.apply(
+            fn,
+            [name],
+            {#greetByName: true}, // named arg
+          );
+          return;
+        } catch (_) {}
+
+        // 3) optional: zweites positions-Argument
+        try { fn(name, true); return; } catch (_) {}
+      }
+    } catch (_) {/* swallow */}
+  }
+
+  void _maybeLearnName(String text) {
+    try {
+      final raw = text.trim();
+      if (raw.isEmpty) return;
+
+      final lc = raw.toLowerCase();
+      final re = RegExp(
+        r"\b(ich heiße|ich heisse|mein name ist|ich bin)\s+([a-zäöüß\-' ]+)",
+        caseSensitive: false,
+      );
+      final m = re.firstMatch(lc);
+      if (m == null) return;
+
+      var seg = (m.group(2) ?? '').trim();
+      seg = seg.split(RegExp(r'[.,;:!?]')).first.trim();
+      if (seg.isEmpty) return;
+
+      final parts = seg.split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
+      if (parts.isEmpty) return;
+      var first = parts.first;
+      if (['der', 'die', 'das'].contains(first)) {
+        if (parts.length < 2) return;
+        first = parts[1];
+      }
+      if (first.length < 2 || first.length > 28) return;
+
+      String cap(String s) => s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
+      final name = cap(first);
+
+      final mem = MemoryService.instance;
+      _invokeSaveIdentityName(mem, name);
+      // Optional: mini-Log zur Verifikation (kannst du rausnehmen)
+      // // print('[ApiService] learned name: $name');
+    } catch (_) {/* never block */}
+  }
+
   // ---------------- Config ----------------
+
+
   void configureHttp({HttpInvoker? invoker, String? baseUrl, Duration? timeout}) {
     _http = invoker;
     if (baseUrl != null && baseUrl.trim().isNotEmpty) {
@@ -139,6 +189,34 @@ class ApiService {
 
       // Byte-Kontext best-effort (ohne await)
       _appendByteContext(enriched);
+
+      // v6.4.0: **On-Device Memories automatisch anreichern**, falls Consent==true
+      // und Caller noch KEINE context.memories gesetzt hat.
+      try {
+        final bool consent =
+            (enriched['memory_consent'] == true) ||
+            (((enriched['context'] as Map?)?['memory_consent']) == true);
+        final hasCtx = (enriched['context'] is Map);
+        final Map<String, dynamic> ctx =
+            hasCtx ? Map<String, dynamic>.from(enriched['context'] as Map) : <String, dynamic>{};
+        final bool hasMemoriesAlready = (ctx['memories'] is Map) || (enriched['memories'] is Map);
+
+        if (consent && !hasMemoriesAlready) {
+          final mem = await MemoryService.instance.buildContextMemories(consent: true);
+          if (mem.isNotEmpty) {
+            // in context.memories einhängen
+            ctx['memories'] = {...mem};
+            enriched['context'] = {
+              if (hasCtx) ...Map<String, dynamic>.from(enriched['context'] as Map),
+              ...ctx,
+            };
+            // Legacy-Kompat: außerdem auf Top-Level spiegeln
+            enriched['memories'] = {...mem};
+          }
+        }
+      } catch (_) {
+        // still – niemals blockieren
+      }
 
       // kleiner Start-Blocker, aber NUR für Outbound
       if (!_outGateOpen && !_isHealthPath(path)) {
@@ -1394,7 +1472,7 @@ class ApiService {
       riskNotice: dtoBase?.flow?.riskNotice ?? flowCompat.riskNotice,
       sessionTurn: dtoBase?.flow?.sessionTurn ?? flowCompat.sessionTurn,
       talkOnly: (dtoBase?.flow?.talkOnly ?? false) || flowCompat.talkOnly,
-      allowReflect: dtoBase?.flow?.allowReflect ?? flowCompat.allowReflect,
+      allowReflect: (dtoBase?.flow?.allowReflect ?? true) && flowCompat.allowReflect,
       moodPrompt: (dtoBase?.flow?.moodPrompt ?? false) || flowCompat.moodPrompt,
     );
 
@@ -1967,6 +2045,10 @@ class ApiService {
     UserAction? userAction,                  // v6.2.2 optional
     Map<String, dynamic>? clientContext,     // v6.2.2 optional
   }) {
+    // Best-effort: lokalen Turn speichern & Namen lernen
+    _saveUserTurnBestEffort(text);
+    _maybeLearnName(text);
+
     final payload = <String, dynamic>{
       'text': text,
       'messages': messages,
@@ -1978,6 +2060,10 @@ class ApiService {
       if (clientContext != null && clientContext.isNotEmpty)
         'client_context': _sanitizeClientContext(clientContext),
     };
+
+    // Consent automatisch aus MemoryService übernehmen, falls Caller nichts setzt
+    payload['memory_consent'] ??= _memoryConsentDefault();
+
     _appendMemoryHints(payload);
     _appendContactTints(payload, locale: locale, tz: tz);
     _appendByteContext(payload);
@@ -2068,7 +2154,7 @@ class ApiService {
         if (session != null) 'session': _buildSessionMap(session),
       };
 
-  // ---------------- kleine Parser-Helfer ----------------
+   // ---------------- kleine Parser-Helfer ----------------
 
   static int? _asInt(dynamic v) {
     if (v is num) return v.toInt();
@@ -2093,6 +2179,7 @@ class ReflectionAIResult {
   final String depth; // light | medium | deep
   final String riskFlag; // none | support | crisis
   final List<String> tags;
+
   const ReflectionAIResult({
     required this.reflection,
     required this.depth,

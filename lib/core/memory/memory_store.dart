@@ -1,3 +1,4 @@
+//[BASELINE] lib/core/memory/memory_store.dart  (Stand: 28.10.)
 // lib/core/memory/memory_store.dart
 //
 // MemoryStore v2.3 — SharedPreferences-Persistenz für MemoryEntry.
