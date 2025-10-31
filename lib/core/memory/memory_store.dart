@@ -1,4 +1,4 @@
-// [BASELINE] lib/core/memory/memory_store.dart — v6.3.1 (Stand: 29.10.2025)
+// [BASELINE] lib/core/memory/memory_store.dart — v6.3.2 (Stand: 30.10.2025)
 // MemoryStore — SharedPreferences-Persistenz für MemoryEntry (lokal, Ghost-Mode)
 // -----------------------------------------------------------------------------
 // Eigenschaften:
@@ -15,6 +15,7 @@
 // Hinweise:
 // • isEnabled default = true (Ghost-/Therapist-Modus steuert MemoryService separat)
 // • facetHistogram berücksichtigt Facet.hits (0/fehlend → 1)
+// • Neu v6.3.2: forgetAllPII(), saveAck()-Alias, removeOpt(), getFlag()/setFlag() stabilisiert
 // -----------------------------------------------------------------------------
 
 import 'dart:convert';
@@ -27,10 +28,17 @@ class MemoryStore {
   MemoryStore._();
   static final MemoryStore instance = MemoryStore._();
 
+  // Flags/Keys
   static const String _kEnabled = 'memory.enabled';
   static const String _kShareEnabled = 'memory.share_enabled'; // optional
   static const String _kEntries = 'memory.entries.json'; // v1/v2 Kompat-Key
   static const int _kMax = 200;
+
+  // PII-Keys (von MemoryService genutzt)
+  static const String _kIdentityName = 'identity.name';
+  static const String _kIdentityGreetByName = 'identity.greet_by_name';
+  static const String _kProfileUserName = 'profile.user_name';
+  static const String _kProfileNicknames = 'profile.nicknames';
 
   SharedPreferences? _prefs;
 
@@ -120,21 +128,15 @@ class MemoryStore {
     await _prefs!.setBool(key, value);
   }
 
-  /// Generischer Getter: Liefert rohe gespeicherte Werte (wenn möglich).
   Future<Object?> getOpt(String key) async {
     await init();
     if (!_prefs!.containsKey(key)) return null;
-    // shared_prefs gibt typisiert zurück:
-    final obj = _prefs!.get(key);
-    if (obj == null) return null;
-    // Falls String JSON enthält, Original zurückgeben (MemoryService parst selbst bei Bedarf)
-    return obj;
+    return _prefs!.get(key);
   }
 
   Future<String?> getOptString(String key) async {
     await init();
-    final v = _prefs!.getString(key);
-    return v;
+    return _prefs!.getString(key);
   }
 
   Future<bool?> getOptBool(String key) async {
@@ -158,7 +160,16 @@ class MemoryStore {
   Future<void> clearAll() async {
     await init();
     await _prefs!.remove(_kEntries);
-    // Flags bewusst NICHT löschen (enabled/share_enabled)
+    // Flags bewusst NICHT löschen (enabled/share_enabled/PII bleiben)
+  }
+
+  /// Löscht die lokal gespeicherten PII-Felder (für Privacy-Screen).
+  Future<void> forgetAllPII() async {
+    await init();
+    await _prefs!.remove(_kIdentityName);
+    await _prefs!.setBool(_kIdentityGreetByName, false);
+    await _prefs!.remove(_kProfileUserName);
+    await _prefs!.remove(_kProfileNicknames);
   }
 
   Future<List<MemoryEntry>> all() async {
@@ -200,7 +211,6 @@ class MemoryStore {
   Future<List<MemoryEntry>> latest({int limit = 3}) async {
     final list = await all();
     final capped = _cap(limit, 0, _kMax);
-    // Iterable.take ist tolerant, falls capped > list.length
     return list.take(capped).toList(growable: false);
   }
 
@@ -241,25 +251,23 @@ class MemoryStore {
   /// Fügt eine generische „Zeile“ ein (role: 'user'|'panda'), meta optional.
   Future<void> appendLine(
       String role, String text, Map<String, dynamic>? meta) async {
-    // Map in MemoryEntry transformieren und speichern
     final m = <String, dynamic>{
       'kind': 'line',
       'role': role,
       'text': text,
       'meta': meta ?? const <String, dynamic>{},
-      // Session aus meta, sonst 'local'
       'session_id': (meta?['session_id'] as String?) ?? 'local',
       'created_at': DateTime.now().toUtc().toIso8601String(),
-      // optionale leere Felder für Kompatibilität
       'context_facets': const <dynamic>[],
     };
     await saveMap(m);
   }
 
-  Future<void> saveLine(
-      {required String role,
-      required String text,
-      Map<String, dynamic>? meta}) {
+  Future<void> saveLine({
+    required String role,
+    required String text,
+    Map<String, dynamic>? meta,
+  }) {
     return appendLine(role, text, meta);
   }
 
@@ -277,11 +285,13 @@ class MemoryStore {
     safe['kind'] = safe['kind'] ?? 'ack';
     safe['created_at'] = (safe['created_at'] as String?) ??
         DateTime.now().toUtc().toIso8601String();
-    safe['session_id'] = (safe['session_id'] as String?) ??
-        (safe['round_id'] as String?) ??
-        'local';
+    safe['session_id'] =
+        (safe['session_id'] as String?) ?? (safe['round_id'] as String?) ?? 'local';
     await saveMap(safe);
   }
+
+  /// Alias (für dyn.saveAck? in MemoryService).
+  Future<void> saveAck(Map<String, dynamic> ack) => recordAcknowledge(ack);
 
   /// Universeller Map-Save: wandelt Map→MemoryEntry und speichert.
   Future<void> saveMap(Map<String, dynamic> map) async {
@@ -291,7 +301,6 @@ class MemoryStore {
     } catch (_) {
       // Falls Map nicht direkt parsebar ist, versuche defensive Normalisierung
       try {
-        // Minimalfelder erzwingen
         final safe = <String, dynamic>{
           ...map,
           'created_at':
@@ -312,16 +321,13 @@ class MemoryStore {
       await save(value);
     } else if (value is Map) {
       await saveMap(Map<String, dynamic>.from(value));
-    } else {
-      // try JSON string?
-      if (value is String) {
-        try {
-          final decoded = jsonDecode(value);
-          if (decoded is Map) {
-            await saveMap(Map<String, dynamic>.from(decoded));
-          }
-        } catch (_) {/* ignore */}
-      }
+    } else if (value is String) {
+      try {
+        final decoded = jsonDecode(value);
+        if (decoded is Map) {
+          await saveMap(Map<String, dynamic>.from(decoded));
+        }
+      } catch (_) {/* ignore */}
     }
   }
 
@@ -358,7 +364,6 @@ class MemoryStore {
       ..sort((a, b) {
         final byCount = b.value.compareTo(a.value);
         if (byCount != 0) return byCount;
-        // Stabilisierung: alphabetisch bei Gleichstand
         return a.key.toLowerCase().compareTo(b.key.toLowerCase());
       });
     final capped = _cap(take, 0, sorted.length);

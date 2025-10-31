@@ -1,4 +1,4 @@
-// [BASELINE] lib/features/reflection/reflection_view.dart (Stand: 29.10.)
+// [BASELINE] lib/features/reflection/reflection_view.dart (Stand: 30.10.)
 // lib/features/reflection/reflection_view.dart
 //
 // ReflectionView — reine Layout-Schicht (Plan v6.2.2 + v6.3.x VM-Wiring)
@@ -9,6 +9,7 @@
 // • Verlauf (Thread), Answer-Chips (insert-only), Topic-Chips (optional)
 // • Abschluss-/Mood-CTA (allowClosure/moodPrompt), Risk/Hotline-Banner
 // • Composer (unten) + Footer-Disclaimer
+// • Optional: kleines Dev-Badge oben rechts → „Mem ON (n)“ / „Mem OFF“
 //
 // Rückwärtskompatibel: alle neuen Props sind optional.
 //
@@ -16,11 +17,8 @@
 import 'package:flutter/material.dart';
 
 // Zen-UI Widgets (wie im Projekt genutzt)
-// (zen_style.dart entfernt – war ungenutzt)
 import '../../shared/ui/zen_widgets.dart'
     show ZenBackdrop, ZenGlassCard, ZenChipGhost;
-// Risk/Hotline: Wir verwenden eine lokale, leichte Karte (_SafetyHotlineCard)
-// import '../../widgets/hotline_widget.dart';  // entfällt (API-Divergenz)
 
 class ReflectionViewProps {
   // Header / dekorativ
@@ -32,7 +30,7 @@ class ReflectionViewProps {
   final String? introText; // Pitch/Intro (oben, pinned-ähnlich)
   final String? bridgeText; // Bridge/Recall (optional, unter Intro)
 
-  // Leitfrage-Block (neu v6.3)
+  // Leitfrage-Block
   final String? question; // Leitfrage (mit Fragezeichen)
   final String? helperSuggestion; // 0–1 Satz unter der Frage
   final List<String> talkLines; // kleine Talk-Zeilen (≤2)
@@ -53,7 +51,7 @@ class ReflectionViewProps {
   final VoidCallback? onMicTap;
   final bool isRecording;
 
-  // Abschluss/Mood-CTA (neu v6.3)
+  // Abschluss/Mood-CTA
   final bool allowClosure;
   final bool moodPrompt;
   final VoidCallback? onClosureTap;
@@ -70,6 +68,11 @@ class ReflectionViewProps {
 
   // Optional: zusätzliche Abstände
   final double maxCardWidth;
+
+  // Optional: Dev-Badge (Mem ON/OFF)
+  final bool showDevMemBadge; // zeigt kleines Badge oben rechts
+  final bool memoryOn; // true → „Mem ON“
+  final int memoryCount; // n in „Mem ON (n)“
 
   const ReflectionViewProps({
     this.headerTitle = 'Ordne deine Gedanken',
@@ -99,6 +102,9 @@ class ReflectionViewProps {
     this.footerDisclaimer =
         'Dies ist keine Therapie, sondern eine mentale Begleitungs-App.',
     this.maxCardWidth = 680,
+    this.showDevMemBadge = false,
+    this.memoryOn = false,
+    this.memoryCount = 0,
   });
 }
 
@@ -127,7 +133,7 @@ class ReflectionView extends StatelessWidget {
       body: Stack(
         children: [
           // Sanfter Hintergrund
-          const Positioned-fill(
+          Positioned.fill(
             child: ZenBackdrop(
               asset: 'assets/flusspanda.png',
               alignment: Alignment.centerRight,
@@ -140,6 +146,17 @@ class ReflectionView extends StatelessWidget {
               milk: .10,
             ),
           ),
+
+          // Optionales Mini-Dev-Badge (oben rechts)
+          if (props.showDevMemBadge)
+            Positioned(
+              top: 8,
+              right: 8,
+              child: _DevMemBadge(
+                on: props.memoryOn,
+                count: props.memoryCount,
+              ),
+            ),
 
           SafeArea(
             child: Padding(
@@ -529,7 +546,6 @@ class _QuestionCard extends StatelessWidget {
         children: [
           Text(
             question,
-            // Entfernt: theme.textWidgetTheme?.style (existiert nicht in ThemeData)
             style: theme.textTheme.titleMedium?.copyWith(height: 1.28),
           ),
           if ((helperSuggestion ?? '').trim().isNotEmpty) ...[
@@ -767,6 +783,52 @@ class _SafetyHotlineCard extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// --------------------------- Dev Badge ---------------------------------------
+
+class _DevMemBadge extends StatelessWidget {
+  final bool on;
+  final int count;
+  const _DevMemBadge({required this.on, required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    final bg = on
+        ? const Color(0xFF2E7D32).withValues(alpha: .90) // grünlich
+        : Colors.black.withValues(alpha: .60);
+    final fg = Colors.white;
+    final label = on ? 'Mem ON (${count.clamp(0, 999)})' : 'Mem OFF';
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              on ? Icons.memory_rounded : Icons.block,
+              size: 16,
+              color: fg,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: const TextStyle(
+                fontSize: 12,
+                height: 1.1,
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -1,26 +1,24 @@
-// [BASELINE] lib/features/reflection/reflection_screen.dart (Stand: 29.10.)
+// [BASELINE] lib/features/reflection/reflection_screen.dart (Stand: 30.10.)
 // lib/features/reflection/reflection_screen.dart
 //
 // ReflectionScreen — Panda v3.24.3 (Oxford level; CH risk actions; no auto-nav)
 // -----------------------------------------------------------------------------
+// Handshake / Merge-Signal (Plan v6.4.4):
+// • Der Screen setzt KEINE eigenen Memories und KEIN meta.flags.client_memory.
+// • Die ApiService injiziert – bei aktivem Consent – automatisch context.memories
+//   und setzt meta.flags.client_memory:true selbst (Single Source of Truth).
+// -----------------------------------------------------------------------------
 // In diesem Build:
-// • Meta-Ebene: Alle Worker-Calls (start/next/closure) bekommen ein `meta`-Objekt
-//   mitgegeben (Memory-Bridge/Recall, UI/Session/Safety/Telemetry).
-// • **Memory-Integration (Phase 1):**
-//   – Vor jedem Call wird best-effort `MemoryStore.pickFor(userText)` (oder
-//     Fallback via MemoryService) aufgerufen und als `memories` + `memoryConsent`
-//     an den Worker durchgereicht (snake_case).
-//   – Nach dem Turn wird – **nur bei Themen-Overlap** und **nur bei Einsicht** –
-//     `recordAcknowledge()` (best-effort) getriggert, um kein Memory-Spam zu erzeugen.
-//   – Keine PII im Logging/Meta (nur anonyme Zähler / Flags).
+// • Meta-Ebene: Alle Worker-Calls (start/next/closure) bekommen ein `meta`-Objekt.
+// • Phase-9 Hooks (on-device, unsichtbar):
+//   – Vor Worker-Call:  unawaited(MemoryService.saveUserTurn(...))
+//   – Nach Worker-Turn: unawaited(MemoryService.savePandaTurn(...));
+//                        unawaited(MemoryService.saveFromWorker(turn))
 // • Mini-Einbau Name-Lernen (lokal, on-device):
 //   – Beim Start der Runde:     unawaited(MemoryService.instance.learnNameFromText(userText));
 //   – Beim Fortsetzen/Antwort:  unawaited(MemoryService.instance.learnNameFromText(userAnswer));
-// • Phase-9 Hooks (unsichtbar, on-device):
-//   – Vor Worker-Call:  unawaited(MemoryService.saveUserTurn(...))
-//   – Nach Worker-Turn: unawaited(MemoryService.savePandaTurn(...)); unawaited(MemoryService.saveFromWorker(turn))
-// • Fallbacks bleiben erhalten: Wenn die API keine `meta`/`memories`/`memoryConsent`
-//   kennt, wird automatisch auf die alte Signatur zurückgefallen (NoSuchMethodError).
+// • Fallbacks bleiben erhalten: Wenn die API keine `meta` kennt, wird automatisch
+//   auf die alte Signatur zurückgefallen (NoSuchMethodError).
 // • Fixes: DTO-Session verwenden, PandaMood-Score aus valence → 0..4,
 //   fehlende Methoden ergänzt: _maybeAskMood, _onPressSaveRound, _deleteRound.
 // -----------------------------------------------------------------------------
@@ -68,8 +66,6 @@ import '../../services/core/api_service.dart'; // Mood speichern
 
 // Memory-Layer
 import '../../core/memory/memory_service.dart';
-import '../../core/memory/memory_store.dart'
-    show MemoryStore; // pickFor()/enabled (dyn tolerant)
 
 // CH Hotlines (Call-Buttons) + Launcher-Utilities
 import '../../widgets/hotline_widget.dart'; // SwissHotlineCard / Section
@@ -103,20 +99,6 @@ typedef AddToGedankenbuch = void Function(
 
 // ---------------- Interner UI-State ------------------------------------------
 enum _ChipMode { starter, answer, none }
-
-// ---------------- Intern: Picked Memories ------------------------------------
-class _PickedMem {
-  final dynamic payload; // beliebig; wird 1:1 an Worker gegeben
-  final bool consent;
-  final List<String> keys; // extrahierte Facetten/Tags (lowercased) für Overlap
-  final Map<String, dynamic> metaSafe; // nur anonyme Zähler fürs Meta
-  const _PickedMem({
-    required this.payload,
-    required this.consent,
-    required this.keys,
-    required this.metaSafe,
-  });
-}
 
 // ---------------- Screen ------------------------------------------------------
 class ReflectionScreen extends StatefulWidget {
@@ -188,9 +170,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
   // ---------------- Memory Recall / Bridge (visuell unsichtbar) --------------
   String? _bridgeText; // (nicht angezeigt; nur für Worker-Kontext)
 
-  // Track: bereits acknowledged pro Runde → kein Doppel-Ack
-  final Set<String> _ackRounds = <String>{};
-
   Future<void> _prefetchRecall() async {
     // Best-effort: Recall laden, UI bleibt nie blockiert.
     try {
@@ -253,9 +232,11 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     String? mode,
     bool isStart = false,
     bool isClosure = false,
-    Map<String, dynamic>? memorySummary, // nur anonyme Zähler/Flags
   }) {
     return {
+      'flags': {
+        // absichtlich leer – Merge-Signal setzt NUR die ApiService
+      },
       'ui': {
         'screen': 'reflection',
         'version': '3.24.3',
@@ -277,13 +258,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       },
       'memory': {
         'bridge': _bridgeText,
-        if (memorySummary != null) ...{
-          'injected': {
-            'present': true,
-            ...memorySummary, // z. B. {facets_count, tags_count, consent}
-          }
-        } else
-          'injected': {'present': false},
+        'injected': {'present': false}, // Anzeigezweck, kein funktionaler Flag
       },
       'input': {
         if (userText != null) 'user_text': userText,
@@ -330,6 +305,13 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       ..value = 1.0;
 
     _attachSttEngine();
+
+    // NEW: Identity-Cache vorwärmen (best-effort), damit ApiService den Namen sofort mitsenden kann
+    unawaited(() async {
+      try {
+        await (MemoryService.instance as dynamic).loadIdentityName?.call();
+      } catch (_) {}
+    }());
 
     // Memory-Recall vorab laden (nur für Worker-Kontext; UI zeigt nichts an)
     unawaited(_prefetchRecall());
@@ -534,183 +516,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     );
   }
 
-  // --- Memory Picking ---------------------------------------------------------
-  Future<_PickedMem?> _pickMemoriesFor(String userText) async {
-    final input = (userText).trim();
-    if (input.isEmpty) return null;
-
-    // 1) Primär: MemoryStore.pickFor(userText) – dyn tolerant
-    try {
-      await MemoryStore.instance.init();
-      final bool consent = MemoryStore.instance.isEnabled;
-      final dyn = MemoryStore.instance as dynamic;
-      final dynamic res = await dyn.pickFor?.call(input);
-      if (res != null) {
-        final keys = _extractFacetKeys(res);
-        final metaSafe = {
-          'facets_count': keys.length,
-          'consent': consent,
-        };
-        return _PickedMem(
-            payload: res, consent: consent, keys: keys, metaSafe: metaSafe);
-      }
-    } catch (_) {
-      // ignore
-    }
-
-    // 2) Fallback: kompakter Kontext-Hint aus MemoryService
-    try {
-      final hint = MemoryService.instance.buildContextHint(
-        maxFacets: 3,
-        maxTags: 5,
-        maxAgeDays: 14,
-      );
-      if (hint != null) {
-        final payload = <String, dynamic>{
-          if ((hint.facets as List?)?.isNotEmpty ?? false)
-            'recent_facets': List<String>.from(
-                (hint.facets as List).map((e) => e.toString())),
-          if ((hint.tags as List?)?.isNotEmpty ?? false)
-            'recent_tags':
-                List<String>.from((hint.tags as List).map((e) => e.toString())),
-          if ((hint.topics as List?)?.isNotEmpty ?? false)
-            'last_themes': List<String>.from(
-                (hint.topics as List).map((e) => e.toString())),
-        };
-        final keys = _extractFacetKeys(payload);
-        return _PickedMem(
-          payload: payload,
-          consent: true,
-          keys: keys,
-          metaSafe: {'facets_count': keys.length, 'consent': true},
-        );
-      }
-    } catch (_) {
-      // ignore
-    }
-
-    return null;
-  }
-
-  List<String> _extractFacetKeys(dynamic src) {
-    final out = <String>{};
-
-    void addStr(String? s) {
-      final t = (s ?? '').trim();
-      if (t.isEmpty) return;
-      out.add(t.toLowerCase());
-    }
-
-    void addList(dynamic v) {
-      if (v is List) {
-        for (final e in v) {
-          if (e is Map) {
-            addStr((e['label'] ?? e['key'] ?? e['topic'] ?? e['tag'] ?? '')
-                .toString());
-          } else {
-            addStr(e?.toString());
-          }
-        }
-      }
-    }
-
-    if (src is Map) {
-      // v2 camelCase Objects
-      addList(src['contextFacets']); // [{label,...}]
-      addList(src['facets']); // [String]
-      // snake_case Context-Hint
-      addList(src['context_facets']); // [{label,...}] or [String]
-      addList(src['recent_facets']); // [String]
-      addList(src['recent_tags']); // [String]
-      addList(src['last_themes']); // [String]
-      addList(src['recent_topics']); // [String]
-    }
-
-    return out.toList(growable: false);
-  }
-
-  bool _hasTopicOverlap(_PickedMem pick, dynamic turn) {
-    if (pick.keys.isEmpty) return false;
-
-    final mem = pick.keys.toSet();
-
-    final tags = _safeStringList(turn, ['tags']).map((e) => e.toLowerCase());
-    final ctx = _safeStringList(turn, ['context']).map((e) => e.toLowerCase());
-    final facs = _safeStringList(turn, ['understanding', 'facets'])
-        .map((e) => e.toLowerCase()); // normalized UI-Facetten
-
-    final q = _coerceQuestion(turn).toLowerCase();
-    final qTokens =
-        q.split(RegExp(r'[^a-zäöüß0-9]+')).where((w) => w.length >= 3);
-
-    final set = {...tags, ...ctx, ...facs, ...qTokens};
-    return set.any(mem.contains);
-  }
-
-  bool _hasInsight(dynamic turn) {
-    // a) normalized: top-level insight_score
-    final double? sTop = _safeNum(turn, ['insight_score']);
-    if (sTop != null && sTop >= 0.5) return true;
-
-    // b) older/worker: flow.insight_score
-    final double? sFlow = _safeNum(turn, ['flow', 'insight_score']);
-    if (sFlow != null && sFlow >= 0.5) return true;
-
-    // c) typed DTO: TurnAnalysis.insightScore
-    try {
-      if (turn is ReflectionTurn) {
-        final v = turn.analysis?.insightScore;
-        if (v != null && v >= 0.5) return true;
-      }
-    } catch (_) {/* tolerant */}
-
-    // d) heuristischer Fallback
-    final hasMirror = _coerceMirror(turn).trim().isNotEmpty;
-    final hasQ = _coerceQuestion(turn).trim().isNotEmpty;
-    return hasMirror && hasQ;
-  }
-
-  Future<void> _acknowledgeIfInsight({
-    required ReflectionRound round,
-    required dynamic turn,
-    _PickedMem? picked,
-  }) async {
-    if (picked == null) return;
-    if (_ackRounds.contains(round.id)) return; // pro Runde nur ein Ack
-    if (!_hasInsight(turn)) return;
-    if (!_hasTopicOverlap(picked, turn)) return;
-
-    final double? score = _safeNum(turn, ['insight_score']) ??
-        _safeNum(turn, ['flow', 'insight_score']) ??
-        (() {
-          try {
-            if (turn is ReflectionTurn) return turn.analysis?.insightScore;
-          } catch (_) {}
-          return null;
-        }());
-
-    final ack = {
-      'round_id': round.id,
-      'session_id': _session?.threadId,
-      'insight_score': score,
-      'ts': DateTime.now().toUtc().toIso8601String(),
-      'facets_keys': picked.keys.take(6).toList(), // klein halten
-    };
-
-    try {
-      // bevorzugt Service (dyn tolerant)
-      final dyn = MemoryService.instance as dynamic;
-      await dyn.recordAcknowledge?.call(ack);
-    } catch (_) {
-      try {
-        final dynStore = MemoryStore.instance as dynamic;
-        await dynStore.recordAcknowledge?.call(ack);
-      } catch (_) {/* ignore */}
-    }
-
-    _ackRounds.add(round.id);
-  }
-
   // --- Start: neue Reflexion -------------------------------------------------
   Future<void> _startNewReflection({
     required String userText,
@@ -738,9 +543,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       } catch (_) {}
     }());
 
-    // NEU: Memories picken (best-effort)
-    final _PickedMem? picked = await _pickMemoriesFor(userText);
-
     try {
       final round = ReflectionRound(
         id: _makeId(),
@@ -761,31 +563,26 @@ class _ReflectionScreenState extends State<ReflectionScreen>
         userText: userText,
         mode: mode,
         isStart: true,
-        memorySummary: picked?.metaSafe,
       );
 
       try {
-        // 1) Neuer Endpunkt mit Meta + Memories (dyn tolerant)
+        // 1) Neuer Endpunkt mit Meta (ApiService injiziert memories & Merge-Signal)
         turn = await (GuidanceService.instance as dynamic)
             .startSessionFull(
               text: userText,
               locale: 'de',
               tz: 'Europe/Zurich',
               meta: meta,
-              memories: picked?.payload,
-              memoryConsent: picked?.consent ?? false,
             )
             .timeout(_netTimeout);
       } on NoSuchMethodError {
         try {
-          // 2) Alter Endpunkt ohne Meta, aber evtl. Memories
+          // 2) Alter Endpunkt ohne Meta
           turn = await (GuidanceService.instance as dynamic)
               .startSessionFull(
                 text: userText,
                 locale: 'de',
                 tz: 'Europe/Zurich',
-                memories: picked?.payload,
-                memoryConsent: picked?.consent ?? false,
               )
               .timeout(_netTimeout);
         } on NoSuchMethodError {
@@ -847,10 +644,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
         } catch (_) {}
       }());
 
-      // NEU: bei Einsicht + Overlap → Acknowledge
-      unawaited(
-          _acknowledgeIfInsight(round: round, turn: turn, picked: picked));
-
       _fadeSlideCtrl.forward(from: 0);
       _scrollToBottom();
       _focusInput();
@@ -871,7 +664,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     }
   }
 
-  // --- Continue: weitere Spiegelung/Frage per /reflect_full ------------------
+  // --- Continue: weitere Spiegelung/Frage per /reflect_full oder /next_turn_full
   Future<void> _continueReflectionFromWorker({
     required ReflectionRound round,
     required String userAnswer,
@@ -895,17 +688,13 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       } catch (_) {}
     }());
 
-    // NEU: Memories picken für die Antwort (aktualisierte Achse)
-    final _PickedMem? picked = await _pickMemoriesFor(userAnswer);
-
     dynamic turn;
-    final meta =
-        _buildMeta(userAnswer: userAnswer, memorySummary: picked?.metaSafe);
+    final meta = _buildMeta(userAnswer: userAnswer);
 
     try {
       if (_session != null) {
         try {
-          // 1) Neuer Endpunkt (nextTurnFull) mit Meta + Memories
+          // 1) Neuer Endpunkt (nextTurnFull) mit Meta (ApiService injiziert memories)
           turn = await (GuidanceService.instance as dynamic)
               .nextTurnFull(
                 session: _session!,
@@ -913,13 +702,11 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                 locale: 'de',
                 tz: 'Europe/Zurich',
                 meta: meta,
-                memories: picked?.payload,
-                memoryConsent: picked?.consent ?? false,
               )
               .timeout(_netTimeout);
         } on NoSuchMethodError {
           try {
-            // 2) Älterer Name (reflectFull) mit Meta + Memories (dyn)
+            // 2) Älterer Name (reflectFull) mit Meta (dyn)
             turn = await (GuidanceService.instance as dynamic)
                 .reflectFull(
                   session: _session!,
@@ -927,12 +714,10 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                   locale: 'de',
                   tz: 'Europe/Zurich',
                   meta: meta,
-                  memories: picked?.payload,
-                  memoryConsent: picked?.consent ?? false,
                 )
                 .timeout(_netTimeout);
           } on NoSuchMethodError {
-            // 3) Fallback ohne Meta/Memories
+            // 3) Fallback ohne Meta
             turn = await GuidanceService.instance
                 .startSessionFull(
                   text: userAnswer,
@@ -952,8 +737,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                 locale: 'de',
                 tz: 'Europe/Zurich',
                 meta: meta,
-                memories: picked?.payload,
-                memoryConsent: picked?.consent ?? false,
               )
               .timeout(_netTimeout);
         } on NoSuchMethodError {
@@ -1022,9 +805,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
         await dyn.saveFromWorker?.call(turn);
       } catch (_) {}
     }());
-
-    // NEU: bei Einsicht + Overlap → Acknowledge
-    unawaited(_acknowledgeIfInsight(round: round, turn: turn, picked: picked));
 
     _fadeSlideCtrl.forward(from: 0);
     _scrollToBottom();
@@ -1543,7 +1323,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(Icons.cloud_off_rounded,
-                  color: Colors.black.withValue(alpha: .65)),
+                  color: Colors.black.withValues(alpha: .65)),
               const SizedBox(height: 10),
               Text(
                 (msg.isNotEmpty ? msg : 'Verbindung gerade schwierig.'),
@@ -1929,7 +1709,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                                             ?.copyWith(
                                               height: 1.25,
                                               color: Colors.black
-                                                  .withValue(alpha: 0.72),
+                                                  .withValues(alpha: 0.72),
                                             ),
                                       ),
                                     ),
@@ -2291,14 +2071,14 @@ class _CalmGlassBanner extends StatelessWidget {
       margin: const EdgeInsets.symmetric(horizontal: 16),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.white.withValue(alpha: .20),
+        color: Colors.white.withValues(alpha: .20),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withValue(alpha: .22)),
+        border: Border.all(color: Colors.white.withValues(alpha: .22)),
         boxShadow: [
           BoxShadow(
             blurRadius: 20,
             offset: const Offset(0, 8),
-            color: Colors.black.withValue(alpha: .10),
+            color: Colors.black.withValues(alpha: .10),
           ),
         ],
       ),

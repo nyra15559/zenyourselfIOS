@@ -1,14 +1,11 @@
-// [BASELINE] lib/features/reflection/reflection_models.dart (Stand: 29.10., v3.25.2-hope)
+// [BASELINE] lib/features/reflection/reflection_models.dart (Stand: 30.10., v3.26.0-mergeflags)
 // Part: Modelle/Typen/Utils (library: reflection_screen)
 // -----------------------------------------------------------------------------
-// v3.25.2 — Worker v15.x Alignment (+Hope passthrough, Oxford style, fixes)
-// - NEU: _PandaStep.hope (optional) + robustes Parsing (hope | hope_text |
-//        flow.hope | ui.hope | speech_sequence[*].type=='hope')
-// - Risk-Fallback robust: _asBool(m['risk']) statt striktem == true
-// - Followups: Doppelpunkte am Ende entfernen (harmoniert mit UI-Chips)
-// - String→Liste: Trennzeichen „;“ auch ohne Leerraum splitten (\s*;\s*)
-// - Answer-Helper: weitere verschachtelte Aliase (flow/ui: chips/answers/options)
-// - Bestehende v3.25 Features bleiben unverändert (Fragen/Chips/HelperSuggestion)
+// v3.26.0 — Merge-Flags tolerant (meta.flags.*) + Hope passthrough (v3.25.2)
+// - NEU (optional): TurnProbe.coerceMeta(...) / coerceMetaFlags(...) / flag(...)
+//   *liest sicher meta.flags.client_memory & Co., ohne neue Pflichtfelder*
+// - Weiterhin: robuste Hope-Extraktion, risk-Fallbacks, helper-Normalisierung
+// - Ziel: Modelle bleiben schlank; Meta/Flags nur lesen, wenn vorhanden.
 // -----------------------------------------------------------------------------
 // Lints / Analyzer: Private Typen in öffentlicher API sind hier bewusst gewollt.
 // ignore_for_file: library_private_types_in_public_api
@@ -29,12 +26,12 @@ const int kMaxAnswersForMoodFallback = 3; // spätestens nach so vielen Antworte
 /// Ein semantischer „Schritt“ des Panda-Coaches:
 /// - [mirror]: kurze, beruhigende Spiegelung
 /// - [question]: optionale Leitfrage (0–1)
-//  - [followups]: Antwort-Chips als Satzstarter (keine Fragen, max. 3)
+/// - [followups]: Antwort-Chips als Satzstarter (keine Fragen, max. 3)
 /// - [talkLines]: optionale Zusatzzeilen (max. 2)
 /// - [risk]: Risiko-Hinweis (true = Safety-Hinweis/CH-Card anzeigen)
 /// - [helperSuggestion]: sanfter 0–1-Satz vom Worker (optional)
-/// - [hope]: kurzer, hoffnungsvoller Satz (optional; wird im UI unter der Frage gezeigt)
-/// - [answer]: Nutzerantwort auf die aktuelle Frage (optional)
+/// - [hope]: kurzer, hoffnungsvoller Satz (optional; UI-Hope-Slot)
+/// - [answer]: Nutzerantwort (optional)
 class _PandaStep {
   final String mirror;
   final String question;
@@ -720,10 +717,10 @@ String? _pickFirstNonEmptyString(List<dynamic> candidates) {
 }
 
 // =============================================================================
-// TurnProbe — Session/Flow Normalizer & Checks (ergänzend, ohne Brüche)
+// TurnProbe — Session/Flow/Meta Normalizer & Checks (ergänzend, ohne Brüche)
 // =============================================================================
 
-/// Hilfsklasse zur robusten Normalisierung von Session- und Flow-Feldern
+/// Hilfsklasse zur robusten Normalisierung von Session-, Flow- und Meta-Feldern
 /// über unterschiedliche Worker-Versionen hinweg.
 /// * Nicht invasiv: Nur Zusatz-Utilities. Bestehende Modelle bleiben unverändert.
 class TurnProbe {
@@ -832,6 +829,110 @@ class TurnProbe {
     final f = coerceFlow(turnOrFlow);
     return f.containsKey('mood_prompt') && f.containsKey('recommend_end');
   }
+
+  // ---------------- Meta / Flags (optional, non-invasive) --------------------
+
+  /// Liefert eine *tolerant normalisierte* Meta-Struktur:
+  /// { flags: { <key>: <bool|num|string> ... }, ... }
+  ///
+  /// Akzeptiert folgende Formen:
+  /// - turn{ meta:{ flags:{...} } }
+  /// - turn{ meta:{...} } (Flags ggf. direkt in meta)
+  /// - turn{ flags:{...} } (Top-Level Flags)
+  /// - turn{ client_memory:true } (einzelne Top-Level-Schalter)
+  static JsonMap coerceMeta(dynamic turnOrMeta) {
+    // 1) Meta-Objekt extrahieren (wenn vorhanden)
+    Map<String, dynamic> meta = const <String, dynamic>{};
+    final fromTurn =
+        (turnOrMeta is Map) ? Map<String, dynamic>.from(turnOrMeta) : null;
+
+    if (fromTurn != null) {
+      if (fromTurn['meta'] is Map) {
+        meta = Map<String, dynamic>.from(fromTurn['meta'] as Map);
+      } else {
+        // Keine separate meta-Struktur → leeres Meta
+        meta = <String, dynamic>{};
+      }
+    } else if (turnOrMeta is Map) {
+      meta = Map<String, dynamic>.from(turnOrMeta);
+    }
+
+    // 2) Flags-Quelle ermitteln (Prio: meta.flags → meta → top-level flags)
+    Map<String, dynamic> flags = const <String, dynamic>{};
+
+    if (meta['flags'] is Map) {
+      flags = Map<String, dynamic>.from(meta['flags'] as Map);
+    } else if (fromTurn != null && fromTurn['flags'] is Map) {
+      flags = Map<String, dynamic>.from(fromTurn['flags'] as Map);
+    } else {
+      // Einzelne Top-Level-Schalter in flags spiegeln (tolerant)
+      final candidates = <String>[
+        'client_memory',
+        'memory_consent',
+        'server_memory_merge',
+        'merge_client_memory',
+      ];
+      final f = <String, dynamic>{};
+      for (final k in candidates) {
+        final v = _extractNested(fromTurn, [k]);
+        if (v != null) f[k] = v;
+      }
+      flags = f;
+    }
+
+    return <String, dynamic>{
+      ...meta,
+      'flags': flags,
+    };
+  }
+
+  /// Extrahiert *nur die Flags* (bool-konvertiert, soweit möglich).
+  /// Beispiel: {'client_memory': true, 'memory_consent': false}
+  static JsonMap coerceMetaFlags(dynamic turnOrMeta) {
+    final meta = coerceMeta(turnOrMeta);
+    final raw = (meta['flags'] is Map)
+        ? Map<String, dynamic>.from(meta['flags'] as Map)
+        : const <String, dynamic>{};
+
+    bool? asBoolOrNull(dynamic v) {
+      if (v == null) return null;
+      if (v is bool) return v;
+      if (v is num) return v != 0;
+      if (v is String) {
+        final s = v.trim().toLowerCase();
+        if (s.isEmpty) return null;
+        if (s == 'true' || s == '1' || s == 'yes' || s == 'y' || s == 'on') {
+          return true;
+        }
+        if (s == 'false' || s == '0' || s == 'no' || s == 'n' || s == 'off') {
+          return false;
+        }
+      }
+      return null; // Unbekanntes Format → nicht erzwingen
+    }
+
+    final out = <String, dynamic>{};
+    raw.forEach((k, v) {
+      final b = asBoolOrNull(v);
+      out[k.toString()] = b ?? v; // Bool wenn ermittelbar, sonst Rohwert
+    });
+    return out;
+  }
+
+  /// Liest ein bestimmtes Flag *tolerant* aus turn/meta/flags.
+  /// [name] z. B. 'client_memory'. Fallback nur verwendet, wenn nirgends vorhanden.
+  static bool flag(dynamic turnOrMeta, String name, {bool fallback = false}) {
+    final flags = coerceMetaFlags(turnOrMeta);
+    if (flags.containsKey(name)) {
+      final v = flags[name];
+      return _asBool(v);
+    }
+    // Zusatzpfad: Manchmal liegt der Schalter *nicht* in flags (Top-Level/Meta)
+    final direct =
+        _extractNested(turnOrMeta, ['meta', name]) ?? _extractNested(turnOrMeta, [name]);
+    if (direct != null) return _asBool(direct);
+    return fallback;
+  }
 }
 
 // ---- interne Helfer für TurnProbe ------------------------------------------
@@ -865,7 +966,7 @@ bool _asBool(dynamic v) {
   if (v is num) return v != 0;
   if (v is String) {
     final s = v.trim().toLowerCase();
-    return s == 'true' || s == '1' || s == 'yes' || s == 'y';
+    return s == 'true' || s == '1' || s == 'yes' || s == 'y' || s == 'on';
   }
   return false;
 }

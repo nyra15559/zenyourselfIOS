@@ -1,7 +1,6 @@
-// lib/main.dart
-//
+// [BASELINE] lib/main.dart (Stand: 29.10.)
 // ZenYourself — App Bootstrap (Oxford-Zen, Pro-Level, Material 3)
-// v1.6 · 2025-10-23
+// v1.6.2 · 2025-10-29
 // -----------------------------------------------------------------------------
 // • EINZIGE MaterialApp im Projekt (verhindert Routing-Konflikte).
 // • Alle benannten Routen (/, /reflection, /journey, …) hier registriert.
@@ -10,7 +9,9 @@
 // • A11y, i18n, Themes (Material 3), sanftes Scroll-Verhalten.
 // • MemoryService.init() beim Start (Kontext-Gedächtnis).
 // • Community-Bootstrap (Stats + Signed POST) via --dart-define.
-// • NEU v1.6: Deutliche Debug-Logs + sichere CLI-Hinweise (maskierte Secrets)
+// • NEU v1.6.2: Dev-Opt-in für Memory → setzt shareEnabled + greetingConsent
+//   im DEBUG-Build, damit der Name sofort im selben Turn verfügbar ist
+//   (privacy-safe: Release bleibt Ghost-Mode).
 // -----------------------------------------------------------------------------
 
 import 'dart:async';
@@ -102,6 +103,30 @@ Future<void> main() async {
     try {
       await MemoryService.instance.init();
       debugPrint('✅ MemoryService initialized (context memory ready).');
+
+      // --- NEU: Dev-Opt-in (nur im Debug-Build) -----------------------------
+      if (kDebugMode) {
+        try {
+          final dyn = MemoryService.instance as dynamic;
+          // ignore: avoid_dynamic_calls
+          await (dyn.setShareEnabled?.call(true));
+          // ignore: avoid_dynamic_calls
+          await (dyn.setGreetingConsent?.call(true));
+
+          bool share = false, greet = false;
+          try {
+            // ignore: avoid_dynamic_calls
+            share = dyn.shareEnabled == true;
+            // ignore: avoid_dynamic_calls
+            greet = dyn.greetingConsent == true;
+          } catch (_) {}
+          debugPrint(
+              '✅ Memory (debug): consent share=$share, greet=$greet — Name direkt nutzbar.');
+        } catch (e, st) {
+          debugPrint('⚠️  Memory debug-consent setup failed: $e\n$st');
+        }
+      }
+      // ----------------------------------------------------------------------
     } catch (e, st) {
       debugPrint(
           '⚠️  MemoryService init failed (continuing without memory): $e\n$st');
@@ -143,7 +168,7 @@ void _setupZenApi() {
   final String url =
       definesUsed && _kApiUrl.isNotEmpty ? _kApiUrl : ZenEnv.apiUrl;
   final String token =
-      definesUsed && _kApiToken.isNotEmpty ? _kApiToken : ZenEnv.appToken;
+    definesUsed && _kApiToken.isNotEmpty ? _kApiToken : ZenEnv.appToken;
 
   if (enabled && url.isNotEmpty) {
     try {

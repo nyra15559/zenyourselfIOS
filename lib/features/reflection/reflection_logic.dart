@@ -1,6 +1,11 @@
-// [BASELINE] lib/features/reflection/reflection_logic.dart
+// [BASELINE] lib/features/reflection/reflection_logic.dart (Stand: 30.10.)
 // ZenYourself — ReflectionLogic (Controller & Handler)
-// v12.1.4-baseline · 2025-10-29 · Europe/Zurich
+// PANDA-REFLECT-12.7 → v6.4.4 (Merge-Signal)
+// -----------------------------------------------------------------------------
+// Merge-Signal / Handshake:
+// • Bei jedem Call wird `meta.flags.client_memory:true` übergeben.
+// • Bridge (Recall) wird als `meta.memory.bridge` mitgegeben.
+// • Memories/Consent werden 1:1 als context.memories + memory_consent (Guidance/API).
 // -----------------------------------------------------------------------------
 // Aufgaben (FilePlan 6.2.x + v6.3):
 // • Controller-Klasse (kein UI; ChangeNotifier)
@@ -154,6 +159,7 @@ class ReflectionController extends ChangeNotifier {
         tz: 'Europe/Zurich',
         memories: _memories,
         memoryConsent: _memoryConsent,
+        meta: _buildMeta(mode: fromVoice ? 'voice' : 'text'),
         clientContext: {
           'mode': fromVoice ? 'voice' : 'text',
           'source': 'reflection_screen',
@@ -211,6 +217,7 @@ class ReflectionController extends ChangeNotifier {
         tz: 'Europe/Zurich',
         memories: _memories, // v6.3.0: optionale aktualisierte Memories
         memoryConsent: _memoryConsent, // v6.3.0: Consent mitgeben (tolerant)
+        meta: _buildMeta(mode: 'text'),
         clientContext: const {'mode': 'text', 'source': 'reflection_screen'},
       ).timeout(_kNetTimeout);
 
@@ -242,11 +249,13 @@ class ReflectionController extends ChangeNotifier {
       try {
         // ignore: avoid_dynamic_calls
         final dyn = svc as dynamic;
+        // ignore: avoid_dynamic_calls
         final Future<ReflectionTurn>? fut = dyn.nextTurnAction?.call(
           session: _session!,
           action: action,
           locale: 'de',
           tz: 'Europe/Zurich',
+          meta: _buildMeta(mode: 'action'),
         );
         if (fut != null) {
           turn = await fut.timeout(_kNetTimeout);
@@ -259,6 +268,7 @@ class ReflectionController extends ChangeNotifier {
             tz: 'Europe/Zurich',
             memories: _memories,
             memoryConsent: _memoryConsent,
+            meta: _buildMeta(mode: 'action-fallback'),
             clientContext: const {
               'mode': 'text',
               'source': 'reflection_screen'
@@ -274,6 +284,7 @@ class ReflectionController extends ChangeNotifier {
           tz: 'Europe/Zurich',
           memories: _memories,
           memoryConsent: _memoryConsent,
+          meta: _buildMeta(mode: 'action-fallback'),
           clientContext: const {'mode': 'text', 'source': 'reflection_screen'},
         ).timeout(_kNetTimeout);
       }
@@ -309,8 +320,12 @@ class ReflectionController extends ChangeNotifier {
   ReflectionVM _buildVM(ReflectionTurn t) {
     final mirror = _cap((t.mirror ?? '').trim(), 640);
     final q = (t.primaryQuestion ?? '').trim();
-    final talk =
-        t.talk.take(2).map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+
+    final talk = t.talk
+        .take(2)
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
 
     // answerChips (aus Worker), sanft normalisieren + mind. 2 Chips sicherstellen
     final baseChips = t.answerHelpers
@@ -324,7 +339,12 @@ class ReflectionController extends ChangeNotifier {
         ? null
         : t.helperSuggestion!.trim();
 
-    final risk = t.risk; // abgeleitet aus riskFlag
+    // Robust aus riskFlag abgeleitet (falls kein .risk Getter existiert)
+    final String rf = (t.riskFlag ?? '').toLowerCase().trim();
+    final bool risk = (rf == 'crisis' || rf == 'support') ||
+        // ignore: avoid_dynamic_calls
+        ((t as dynamic).risk == true);
+
     final allowClosure =
         (t.flow?.recommendEnd == true) || (t.flow?.moodPrompt == true);
     final moodPrompt = (t.flow?.moodPrompt == true);
@@ -433,6 +453,28 @@ class ReflectionController extends ChangeNotifier {
     return '$base…';
   }
 
+  Map<String, dynamic> _buildMeta({String? mode}) {
+    return {
+      'ui': {
+        'controller': 'reflection_logic',
+        'version': 'v6.4.4',
+      },
+      'memory': {
+        'bridge': _bridgeText,
+      },
+      'flags': {
+        // *** Merge-Signal / Handshake ***
+        'client_memory': true,
+      },
+      'client': {
+        'source': 'reflection_logic',
+        if (mode != null) 'mode': mode,
+      },
+      'tz': 'Europe/Zurich',
+      'timestamp': DateTime.now().toUtc().toIso8601String(),
+    };
+  }
+
   String? _composeBridgeText(dynamic recall) {
     if (recall == null) return null;
     final tokens = <String>[];
@@ -513,7 +555,7 @@ class ReflectionController extends ChangeNotifier {
     // 3) analysis.hope (falls vorhanden) oder kurzer summary-Fallback
     try {
       final a = t.analysis;
-      // ignore: unnecessary_raw_strings
+      // ignore: avoid_dynamic_calls
       final hope = (a?.hope ?? '').toString().trim();
       if (hope.isNotEmpty) return hope;
       final sum = (a?.summary ?? '').toString().trim();

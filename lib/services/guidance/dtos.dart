@@ -1,4 +1,4 @@
-//[BASELINE] lib/services/guidance/dtos.dart (Stand: 29.10.)
+// [BASELINE] lib/services/guidance/dtos.dart (Stand: 30.10.)
 // lib/services/guidance/dtos.dart
 //
 // DTOs & Value-Types für Guidance-Service (standalone, ohne Api-Abhängigkeit)
@@ -22,6 +22,12 @@
 //   – understanding { topic_shift } (tolerant gelesen + in toJson geführt)
 //   – closure{ mood_intro.text, hope_reply, closure_prompt, mode?, reason?, tone? } DTO
 //   – insight_score weiterhin in TurnAnalysis (Top-Level passthrough möglich)
+// • v6.4.4: **Merge-Signal-Erweiterung**
+//   – meta.flags.client_memory (bool?) → ReflectionTurn.metaClientMemory
+//   – context.memories (beliebig) → ReflectionTurn.contextMemories (List<dynamic> tolerant)
+//   – memories_to_save bereits vorhanden (List<dynamic>)
+//   – flow.insight_score (double?) → ReflectionFlow.insightScore (für Guidance-Passthrough)
+//   – Parser bleibt tolerant; unbekannte Felder werden ignoriert, nicht verworfen.
 //
 // Mini-Checkliste (Pflichtenheft A/5):
 // [x] ReflectionTurn.answerHelpers vorhanden (Default [])
@@ -35,6 +41,9 @@
 // [x] memories_to_save[] vorhanden, tolerant
 // [x] understanding.topic_shift vorhanden, tolerant
 // [x] ClosureData DTO vorhanden
+// [x] meta.flags.client_memory vorhanden (tolerant)
+// [x] context.memories vorhanden (tolerant)
+// [x] flow.insight_score vorhanden (tolerant)
 
 /// ───────────────────────────────────────────────────────────────────────────
 /// AnalyzeResult (Legacy – optional genutzt)
@@ -314,6 +323,14 @@ class ReflectionTurn {
   /// NEU (Plan-Punkt 8): Hinweis des Workers auf Themenwechsel.
   final String? understandingTopicShift;
 
+  /// NEU (v6.4.4): Meta-Flag vom Client — Merge-Signal
+  /// meta.flags.client_memory (bool?), tolerant geparst
+  final bool? metaClientMemory;
+
+  /// NEU (v6.4.4): context.memories — beliebige Struktur, tolerant als Liste
+  /// (Map → [Map], String/Num → [v], List → unverändert)
+  final List<dynamic> contextMemories;
+
   const ReflectionTurn({
     required this.outputText,
     required this.mirror,
@@ -326,12 +343,14 @@ class ReflectionTurn {
     required this.tags,
     required this.riskFlag,
     this.questions = const [],
-    this.talk = const [],
+       this.talk = const [],
     this.speechSequence = const <dynamic>[],
     this.analysis,
     this.topicSuggestions = const <String>[],
     this.memoriesToSave = const <dynamic>[],
     this.understandingTopicShift,
+    this.metaClientMemory,
+    this.contextMemories = const <dynamic>[],
   });
 
   // Fallback-Fehlertext-Kopie, damit dtos.dart unabhängig bleibt
@@ -383,6 +402,8 @@ class ReflectionTurn {
       if (topicSuggestions.isNotEmpty) 'topic_suggestions': topicSuggestions,
       if (memoriesToSave.isNotEmpty)
         'memories_to_save': List<dynamic>.from(memoriesToSave),
+      if (contextMemories.isNotEmpty)
+        'context_memories': List<dynamic>.from(contextMemories),
     };
 
     // understanding.topic_shift nur senden, wenn vorhanden
@@ -427,8 +448,14 @@ class ReflectionTurn {
       flowMap?['questions'],
     ]);
 
-    // simple lists
+    // context (sowohl Liste als auch Map zulassen)
     final context = _strings([m['context']]);
+
+    // context.memories tolerant sammeln (List | Map | scalar)
+    final contextObj = asMap(m['context']);
+    final cmem = _ensureListDyn(contextObj?['memories']);
+
+    // simple lists
     final followups = _strings([m['followups']]);
     final talk = _strings([
       m['talk'],
@@ -540,6 +567,14 @@ class ReflectionTurn {
       return (s == null || s.isEmpty) ? null : s;
     }
 
+    // meta.flags.client_memory (v6.4.4)
+    bool? metaClientMemory() {
+      final meta = asMap(m['meta']);
+      final flags = asMap(meta?['flags']);
+      final raw = flags?['client_memory'] ?? flags?['clientMemory'];
+      return _parseBoolOrNull(raw);
+    }
+
     return ReflectionTurn(
       outputText: outputText.isEmpty ? kErrorHintFallback : outputText,
       mirror: (m['mirror']?.toString().trim().isNotEmpty ?? false)
@@ -564,6 +599,8 @@ class ReflectionTurn {
       topicSuggestions: tsDedup,
       memoriesToSave: memoriesToSave,
       understandingTopicShift: understandingTopicShift(),
+      metaClientMemory: metaClientMemory(),
+      contextMemories: cmem,
     );
   }
 }
@@ -583,6 +620,9 @@ class ReflectionFlow {
   /// abgefragt werden darf/soll (UI-Gate).
   final bool moodPrompt;
 
+  /// NEU (v6.4.4): optionaler Insight-Wert direkt im Flow (Passthrough)
+  final double? insightScore;
+
   const ReflectionFlow({
     required this.recommendEnd,
     required this.suggestBreak,
@@ -591,6 +631,7 @@ class ReflectionFlow {
     this.talkOnly = false,
     this.allowReflect = true,
     this.moodPrompt = false,
+    this.insightScore,
   });
 
   Map<String, dynamic> toJson() => {
@@ -601,6 +642,7 @@ class ReflectionFlow {
         if (talkOnly) 'talk_only': true,
         'allow_reflect': allowReflect,
         if (moodPrompt) 'mood_prompt': true,
+        if (insightScore != null) 'insight_score': insightScore,
       };
 
   /// Tolerante Factory, falls der Worker (oder ein Fallback) eine Flow-Map liefert.
@@ -627,6 +669,12 @@ class ReflectionFlow {
       return null;
     }
 
+    double? asDouble(dynamic x) {
+      if (x is num) return x.toDouble();
+      if (x is String) return double.tryParse(x.trim());
+      return null;
+    }
+
     return ReflectionFlow(
       recommendEnd: m['recommend_end'] == true || m['end'] == true,
       suggestBreak: m['suggest_break'] == true || m['break'] == true,
@@ -637,6 +685,7 @@ class ReflectionFlow {
       moodPrompt: m['mood_prompt'] == true ||
           m['moodPrompt'] == true ||
           moodPromptNested(),
+      insightScore: asDouble(m['insight_score'] ?? m['insightScore']),
     );
   }
 }
@@ -819,7 +868,7 @@ class StoryResult {
 
 /// ───────────────────────────────────────────────────────────────────────────
 /// Platzhalter-/Hilfstypen (Legacy)
-// ───────────────────────────────────────────────────────────────────────────
+/// ───────────────────────────────────────────────────────────────────────────
 class Analysis {
   final Object? sorc;
   final List<Object?> levers;
@@ -893,7 +942,7 @@ extension IfEmptyX on String {
 
 /// ───────────────────────────────────────────────────────────────────────────
 /// Interne, wiederverwendbare Parse-Helfer (keine Abhängigkeiten)
-// ───────────────────────────────────────────────────────────────────────────
+/// ───────────────────────────────────────────────────────────────────────────
 
 /// Führt mehrere dynamische Quellen zusammen und gibt eine getrimmte Liste
 /// nicht-leerer Strings zurück. Unterstützt:
@@ -964,4 +1013,25 @@ String? _pickString(Map<String, dynamic>? mm, List<String> keys) {
 List<dynamic> _listDyn(dynamic v) {
   if (v is List) return List<dynamic>.from(v);
   return const <dynamic>[];
+}
+
+/// Beliebigen Wert in eine (flache) Liste überführen:
+/// - List → Kopie
+/// - Map/String/Num/bool → [v]
+/// - null → []
+List<dynamic> _ensureListDyn(dynamic v) {
+  if (v == null) return const <dynamic>[];
+  if (v is List) return List<dynamic>.from(v);
+  return <dynamic>[v];
+}
+
+/// Bool tolerant parsen:
+/// true/false, "true"/"false", "1"/"0", "yes"/"no", "y"/"n"
+bool? _parseBoolOrNull(dynamic v) {
+  if (v == null) return null;
+  if (v is bool) return v;
+  final s = v.toString().trim().toLowerCase();
+  if (s == 'true' || s == '1' || s == 'yes' || s == 'y') return true;
+  if (s == 'false' || s == '0' || s == 'no' || s == 'n') return false;
+  return null;
 }

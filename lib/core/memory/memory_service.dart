@@ -1,4 +1,4 @@
-// [BASELINE] lib/core/memory/memory_service.dart — v6.3.3+hotfix1 (Stand: 29.10.2025)
+// [BASELINE] lib/core/memory/memory_service.dart — v6.3.8 (Stand: 30.10.2025)
 // ZenYourself — MemoryService (Lokales Kontext-Gedächtnis, Ghost-Mode by default)
 // -----------------------------------------------------------------------------
 // Leitprinzipien:
@@ -8,21 +8,16 @@
 // • Snake-Case für Payload-Brücken (context.memories{...}, memory_consent)
 // • Tolerant gegenüber Store-Implementierungen (reflektive Calls mit Fallbacks)
 //
-// In diesem Modul:
+// In diesem Modul (Bestätigung ohne Consent-Änderung):
 // • Flags: enabled (lokal), shareEnabled (Opt-in)
-// • Identity: saveIdentityName()/loadGreetingName()/forgetIdentityName()/learnNameFromText(...)
-// • Konversation: saveUserTurn()/savePandaTurn() (best-effort Append)
-// • Worker-Integration: saveFromWorker(workerResponse) + leichter Sync-Hint-Cache
-// • Read-APIs: latest(), topFacets(), latestTopics()/recentTopics(), recall()
-// • Hints/Memories: buildContextHint() (sync, klein, TTL), buildContextMemories(consent:)
-// • Byte-Kontext: tryGetByteContext()/exportByteContext()/byteContext()
-// • Warmup/Init: init()/warmup()/preload()
-// • Fehlerbehandlung: niemals Exceptions nach außen; still/ignore in catch-Blöcken
+// • buildContextHint(): kleine, synchrone Hints inkl. identity/profile (nur Cache)
+// • saveFromWorker(): robust, inkl. memories_to_save[] (Identity/Profile Upsert)
+// • buildContextMemories(consent: bool): sendet NUR bei consent==true (unverändert)
 //
 // Abhängigkeiten: insight_models.dart (Facet), MemoryEntry/Mapper/Store
 // -----------------------------------------------------------------------------
 
-import 'dart:convert' show jsonEncode, utf8;
+import 'dart:convert' show jsonEncode, jsonDecode, utf8;
 
 import '../models/insight_models.dart';
 import 'memory_entry.dart';
@@ -30,18 +25,43 @@ import 'memory_mapper.dart';
 import 'memory_store.dart';
 
 /// Leichte, synchrone Hint-Struktur für den Worker (keine PII).
-/// Wird von ApiService._appendMemoryHints() genutzt.
 /// Alle Felder optional; leere Felder werden nicht gesendet.
+/// **Hinweis**: identity/profile stammen nur aus Sync-Cache (keine awaits).
 class MemoryContextHint {
   final List<String>? facets; // stabile Facet-Keys
   final List<String>? tags; // optional
   final List<String>? topics; // human labels der Facetten
-  const MemoryContextHint({this.facets, this.tags, this.topics});
+
+  // Identity/Profile (rein lokal, sync, klein)
+  final String? identityName; // -> context.memories.identity.name
+  final String? profileUserName; // -> context.memories.profile.user_name
+  final List<String>? profileNicknames; // -> context.memories.profile.nicknames[]
+
+  const MemoryContextHint({
+    this.facets,
+    this.tags,
+    this.topics,
+    this.identityName,
+    this.profileUserName,
+    this.profileNicknames,
+  });
 
   Map<String, dynamic> toJson() => <String, dynamic>{
         if (facets != null && facets!.isNotEmpty) 'facets': facets,
         if (tags != null && tags!.isNotEmpty) 'tags': tags,
         if (topics != null && topics!.isNotEmpty) 'topics': topics,
+        if ((identityName ?? '').toString().trim().isNotEmpty)
+          'identity': {
+            'name': identityName!.trim(),
+          },
+        if ((profileUserName ?? '').toString().trim().isNotEmpty ||
+            (profileNicknames?.isNotEmpty ?? false))
+          'profile': <String, dynamic>{
+            if ((profileUserName ?? '').toString().trim().isNotEmpty)
+              'user_name': profileUserName!.trim(),
+            if (profileNicknames != null && profileNicknames!.isNotEmpty)
+              'nicknames': profileNicknames,
+          },
       };
 }
 
@@ -68,6 +88,30 @@ class MemoryService {
   List<Facet>? _topFacetsCache;
   DateTime? _topFacetsTs;
 
+  // Identity/Profile Sync-Caches
+  String? _identityNameCache;
+  String? get identityNameSync => _identityNameCache;
+
+  String? _profileUserNameCache;
+  List<String>? _profileNicknamesCache;
+
+  String? get profileUserNameSync => _profileUserNameCache;
+  List<String> get profileNicknamesSync =>
+      List.unmodifiable(_profileNicknamesCache ?? const <String>[]);
+
+  // Bequeme Alias-Getter
+  String? latestUserNameSync({bool preferIdentity = true}) {
+    final a = preferIdentity ? _identityNameCache : _profileUserNameCache;
+    return (a != null && a.trim().isNotEmpty)
+        ? a
+        : (preferIdentity ? _profileUserNameCache : _identityNameCache);
+  }
+
+  String? latestNicknameSync() =>
+      (_profileNicknamesCache != null && _profileNicknamesCache!.isNotEmpty)
+          ? _profileNicknamesCache!.first
+          : null;
+
   // TTLs
   static const _hintTtlDays = 14;
   static const _topicsTtlSec = 30;
@@ -78,6 +122,10 @@ class MemoryService {
   static const String _kIdentityGreetByName = 'identity.greet_by_name';
   static const String _kShareEnabled = 'share_enabled';
 
+  // Profile-Keys
+  static const String _kProfileUserName = 'profile.user_name';
+  static const String _kProfileNicknames = 'profile.nicknames'; // JSON-Array
+
   // ---------------- Lifecycle / Flags ----------------------------------------
 
   Future<void> init() async {
@@ -87,6 +135,30 @@ class MemoryService {
 
       final se = await _getOptBool(_kShareEnabled);
       _shareEnabled = se ?? _tryReadShareEnabledReflective() ?? false;
+
+      // Identity & Profile vorladen (für sync use)
+      try {
+        final n = await _getOptString(_kIdentityName);
+        _identityNameCache =
+            (n == null || n.trim().isEmpty) ? null : _cap(n.trim());
+      } catch (_) {/* ignore */}
+
+      try {
+        final p = await _getOptString(_kProfileUserName);
+        _profileUserNameCache =
+            (p == null || p.trim().isEmpty) ? null : _cap(p.trim());
+      } catch (_) {/* ignore */}
+
+      try {
+        final list = await _getOptStringList(_kProfileNicknames);
+        _profileNicknamesCache = (list == null || list.isEmpty)
+            ? null
+            : list
+                .map((e) => e.toString().trim())
+                .where((e) => e.isNotEmpty)
+                .map(_cap)
+                .toList(growable: false);
+      } catch (_) {/* ignore */}
     } catch (_) {
       // Defaults beibehalten
     }
@@ -122,15 +194,58 @@ class MemoryService {
     } catch (_) {/* ignore */}
   }
 
-  // ---------------- Identity (lokal, nur bei Opt-in nutzbar) -----------------
+  // ---------------- Identity/Profile (lokal) ---------------------------------
 
   /// Speichert Name lokal (PII). greetByName steuert, ob Panda den Namen
   /// verwenden darf. Kein Versand ohne Consent.
   Future<void> saveIdentityName(String name, {bool greetByName = true}) async {
     try {
-      final n = name.trim();
+      final n = _cap(name.trim());
       if (n.isEmpty) return;
+      _identityNameCache = n; // Sync-Cache
       await _setOptString(_kIdentityName, n);
+      await _setOptBool(_kIdentityGreetByName, greetByName);
+
+      // Falls kein profile.user_name gesetzt ist, freundlich spiegeln
+      if ((_profileUserNameCache == null ||
+              _profileUserNameCache!.trim().isEmpty) &&
+          greetByName == true) {
+        await saveProfileUserName(n);
+      }
+    } catch (_) {/* ignore */}
+  }
+
+  /// Separater Profilname (user_name), oft identisch zu Identity.
+  Future<void> saveProfileUserName(String name) async {
+    try {
+      final n = _cap(name.trim());
+      if (n.isEmpty) return;
+      _profileUserNameCache = n;
+      await _setOptString(_kProfileUserName, n);
+    } catch (_) {/* ignore */}
+  }
+
+  /// Einen Spitznamen hinzufügen (de-duped, capped).
+  Future<void> addNickname(String nickname) async {
+    try {
+      String n = _cap(nickname.trim());
+      if (n.isEmpty || n.length < 2) return;
+      final list = [...(_profileNicknamesCache ?? const <String>[])];
+      final key = n.toLowerCase();
+      if (!list.map((e) => e.toLowerCase()).contains(key)) {
+        list.insert(0, n);
+      }
+      while (list.length > 5) {
+        list.removeLast();
+      }
+      _profileNicknamesCache = list;
+      await _setOptStringList(_kProfileNicknames, list);
+    } catch (_) {/* ignore */}
+  }
+
+  /// Nur die Anrede-Erlaubnis setzen (Name bleibt erhalten/leer).
+  Future<void> setGreetingConsent(bool greetByName) async {
+    try {
       await _setOptBool(_kIdentityGreetByName, greetByName);
     } catch (_) {/* ignore */}
   }
@@ -138,6 +253,7 @@ class MemoryService {
   /// Löscht den lokal gespeicherten Namen (PII) und setzt greet_by_name=false.
   Future<void> forgetIdentityName() async {
     try {
+      _identityNameCache = null; // Sync-Cache löschen
       final dyn = _store as dynamic;
       try {
         final r = dyn.removeOpt?.call(_kIdentityName);
@@ -150,6 +266,24 @@ class MemoryService {
     } catch (_) {/* ignore */}
   }
 
+  /// Profilnamen & Nicknames vergessen (PII).
+  Future<void> forgetProfileNames() async {
+    try {
+      _profileUserNameCache = null;
+      _profileNicknamesCache = null;
+
+      final dyn = _store as dynamic;
+      try {
+        final r = dyn.removeOpt?.call(_kProfileUserName);
+        if (r is Future) await r;
+      } catch (_) {/* try next */}
+      try {
+        final r = dyn.removeOpt?.call(_kProfileNicknames);
+        if (r is Future) await r;
+      } catch (_) {/* ignore */}
+    } catch (_) {/* ignore */}
+  }
+
   /// Optionale Sammellöschung aller PII-Fakten (z. B. für Privacy-Screen).
   Future<void> forgetAllPII() async {
     try {
@@ -157,9 +291,13 @@ class MemoryService {
       try {
         final r = dyn.forgetAllPII?.call();
         if (r is Future) await r;
+        _identityNameCache = null;
+        _profileUserNameCache = null;
+        _profileNicknamesCache = null;
         return;
       } catch (_) {/* try next */}
       await forgetIdentityName();
+      await forgetProfileNames();
     } catch (_) {/* ignore */}
   }
 
@@ -168,17 +306,45 @@ class MemoryService {
     try {
       final name = await _getOptString(_kIdentityName);
       final greet = await _getOptBool(_kIdentityGreetByName) ?? false;
-      final trimmed = (name?.trim().isEmpty ?? true) ? null : name!.trim();
+      final trimmed = (name?.trim().isEmpty ?? true) ? null : _cap(name!.trim());
+      _identityNameCache = trimmed; // Cache aktualisieren
       return (name: trimmed, greetByName: greet);
     } catch (_) {
       return (name: null, greetByName: false);
     }
   }
 
-  /// Extrahiert aus natürlichem Text einen Vornamen und speichert ihn (Opt-in default true).
-  /// Beispiele:
-  ///  - „ich heiße matthias“, „mein name ist lea“, „nenn mich alex“,
-  ///  - „ich bin sara“, „mein vorname ist tom“, „man nennt mich lio“, „ja einfach matthias“
+  /// Nur den Identity-Namen laden und in den Sync-Cache legen (für ApiService).
+  Future<String?> loadIdentityName() async {
+    try {
+      final n = await _getOptString(_kIdentityName);
+      _identityNameCache =
+          (n == null || n.trim().isEmpty) ? null : _cap(n.trim());
+      return _identityNameCache;
+    } catch (_) {
+      return _identityNameCache;
+    }
+  }
+
+  /// Markiert „heute lieber anonym“/„ohne Name“ u. ä. → greet_by_name=false.
+  Future<void> maybeRespectAnonFromText(String text) async {
+    if (!_enabled) return;
+    try {
+      final t = text.toLowerCase();
+      final anonPhrases = <RegExp>[
+        RegExp(r'\bheute\s+lieber\s+anonym\b'),
+        RegExp(r'\bheute\s+ohne\s+name(n)?\b'),
+        RegExp(r'\bkein(en)?\s+namen\s+verwenden\b'),
+        RegExp(r'\bnicht\s+mit\s+namen\s+ansprechen\b'),
+      ];
+      final wantsAnon = anonPhrases.any((re) => re.hasMatch(t));
+      if (wantsAnon) {
+        await setGreetingConsent(false);
+      }
+    } catch (_) {/* ignore */}
+  }
+
+  /// Extrahiert aus natürlichem Text einen Vornamen und speichert ihn.
   Future<void> learnNameFromText(String text, {bool greetByName = true}) async {
     if (!_enabled) return;
     try {
@@ -189,9 +355,8 @@ class MemoryService {
 
       String? candidate;
 
-      // klassische & erweiterte Muster
       final patterns = <RegExp>[
-        RegExp(r"\bich\s+hei(?:ß|ss|s)e\s+([a-zäöüß\-\' ]+)",
+        RegExp(r"\bich\s+hei(?:ß|ss|s|se)\s+([a-zäöüß\-\' ]+)",
             caseSensitive: false),
         RegExp(r"\bmein\s+name\s+ist\s+([a-zäöüß\-\' ]+)",
             caseSensitive: false),
@@ -215,69 +380,71 @@ class MemoryService {
         }
       }
 
-      // fallback: Einzelwort nach "heiße/Name ist"
       candidate ??= () {
-        final m = RegExp(r"\b(hei(?:ß|ss|s)e|name\s+ist)\b\s+([a-zäöüß\-\' ]+)")
+        final m = RegExp(r"\b(hei(?:ß|ss|s|se)|name\s+ist)\b\s+([a-zäöüß\-\' ]+)")
             .firstMatch(lower);
         return (m != null && m.groupCount >= 2) ? m.group(2) : null;
       }();
 
       if (candidate == null) return;
 
-      // auf erstes Token reduzieren (z. B. "matthias k." → "matthias")
       final firstToken = candidate.split(RegExp(r"\s+")).first;
 
-      // säubern & in Title-Case (Apostroph bleibt erlaubt)
-      String clean = firstToken.replaceAll(RegExp(r"[^a-zA-ZäöüÄÖÜß\-' ]"), '');
+      String clean =
+          firstToken.replaceAll(RegExp(r"[^a-zA-ZäöüÄÖÜß\-' ]"), '');
       clean = clean.replaceAll(' ', '');
       if (clean.length < 2) return;
-      clean = clean[0].toUpperCase() + clean.substring(1);
+      clean = _cap(clean);
 
-      // Ausschlüsse
-      const banned = {'einfach', 'ja', 'okay', 'ok', 'nein'};
+      const banned = {'einfach', 'ja', 'okay', 'ok', 'nein', 'anonym'};
       if (banned.contains(clean.toLowerCase())) return;
 
       await saveIdentityName(clean, greetByName: greetByName);
+      await saveProfileUserName(clean);
     } catch (_) {/* ignore */}
   }
 
   // ---------------- Write: Konversation & Worker-Save ------------------------
 
   /// Speichert tolerant aus einer Worker-Response (no-op, wenn disabled).
-  /// [source] optional (Telemetrie).
+  /// Verarbeitet zusätzlich memories_to_save[] (Identity/Profile Upsert).
   Future<void> saveFromWorker(dynamic workerResponse, {String? source}) async {
     if (!_enabled) return;
     try {
       if (workerResponse is! Map) return;
       final map = Map<String, dynamic>.from(workerResponse);
 
+      // 1) Standard-Mapper → Conversation/Facets (leicht)
       final entry = MemoryMapper.fromWorker(map); // nullable
-      if (entry == null) return;
+      if (entry != null) {
+        await _store.save(entry);
+        // leichten Sync-Hint aktualisieren
+        if (entry.contextFacets.isNotEmpty) {
+          final sorted = [...entry.contextFacets]..sort((a, b) {
+              final byHits = (b.hits).compareTo(a.hits);
+              if (byHits != 0) return byHits;
+              return (a.label).toLowerCase().compareTo((b.label).toLowerCase());
+            });
 
-      await _store.save(entry);
+          final facetKeys =
+              sorted.map((f) => f.key).where((s) => s.trim().isNotEmpty).toList();
+          final facetLabels = sorted
+              .map((f) => f.label)
+              .where((s) => s.trim().isNotEmpty)
+              .toList();
 
-      // leichten Sync-Hint aktualisieren
-      if (entry.contextFacets.isNotEmpty) {
-        final sorted = [...entry.contextFacets]..sort((a, b) {
-            final byHits = (b.hits).compareTo(a.hits);
-            if (byHits != 0) return byHits;
-            return (a.label).toLowerCase().compareTo((b.label).toLowerCase());
-          });
-
-        final facetKeys =
-            sorted.map((f) => f.key).where((s) => s.trim().isNotEmpty).toList();
-        final facetLabels = sorted
-            .map((f) => f.label)
-            .where((s) => s.trim().isNotEmpty)
-            .toList();
-
-        _lastHint = MemoryContextHint(
-          facets: facetKeys.take(6).toList(growable: false),
-          tags: null,
-          topics: facetLabels.take(6).toList(growable: false),
-        );
-        _lastHintTs = DateTime.now();
+          _lastHint = MemoryContextHint(
+            facets: facetKeys.take(6).toList(growable: false),
+            tags: null,
+            topics: facetLabels.take(6).toList(growable: false),
+            // Names werden unten via memories_to_save ergänzt
+          );
+          _lastHintTs = DateTime.now();
+        }
       }
+
+      // 2) memories_to_save[] tolerant einlesen (Upsert)
+      await _ingestMemoriesToSave(map);
 
       _invalidateSoftCaches();
     } catch (_) {
@@ -296,7 +463,6 @@ class MemoryService {
   }
 
   /// Acknowledge-Ereignis bei Einsicht & Themen-Overlap registrieren (best-effort).
-  /// Erwartet z. B. {round_id, session_id, insight_score, ts, facet_keys:[]}
   Future<void> recordAcknowledge(Map<String, dynamic> ack) async {
     if (!_enabled) return;
     try {
@@ -393,6 +559,9 @@ class MemoryService {
     _latestTopicsTs = null;
     _topFacetsCache = null;
     _topFacetsTs = null;
+    _identityNameCache = null;
+    _profileUserNameCache = null;
+    _profileNicknamesCache = null;
     try {
       await _store.clearAll();
     } catch (_) {/* ignore */}
@@ -493,9 +662,7 @@ class MemoryService {
   Future<List<String>> recentTopics({int limit = 6}) =>
       latestTopics(limit: limit);
 
-  /// Liefert kompakte Recall-Liste (Labels) für UI-Brücken.
-  /// Hinweis: UI soll aktuell **keine** „Letzten Themen“-Chips anzeigen; diese API
-  /// dient nur internen Bridges/Experimenten.
+  /// Liefert kompakte Recall-Liste (Labels) für UI-Brücken (intern).
   Future<List<dynamic>> recall({int limit = 6, String? topicHint}) async {
     try {
       final int takeN = (limit * 2).clamp(6, 24).toInt();
@@ -546,6 +713,7 @@ class MemoryService {
   // ---------------- Sync-Hints & Memories für ApiService ---------------------
 
   /// **Synchroner** Hint für den Worker (klein, aus Cache).
+  /// Enthält zusätzlich identity/profile (Name + Nicknames) als reine Hints.
   MemoryContextHint? buildContextHint({
     int maxFacets = 3,
     int maxTags = 5,
@@ -553,37 +721,67 @@ class MemoryService {
   }) {
     try {
       if (!_enabled) return null;
-      final hint = _lastHint;
-      if (hint == null) return null;
 
-      if (_lastHintTs != null && maxAgeDays > 0) {
-        final ageDays = DateTime.now().difference(_lastHintTs!).inDays;
-        if (ageDays > maxAgeDays) return null;
+      final hint = _lastHint;
+      List<String>? facets;
+      List<String>? tags;
+      List<String>? topics;
+
+      if (hint != null) {
+        if (_lastHintTs != null && maxAgeDays > 0) {
+          final ageDays = DateTime.now().difference(_lastHintTs!).inDays;
+          if (ageDays <= maxAgeDays) {
+            facets = (hint.facets == null)
+                ? null
+                : hint.facets!.take(maxFacets).toList(growable: false);
+            tags = (hint.tags == null)
+                ? null
+                : hint.tags!.take(maxTags).toList(growable: false);
+            topics = (hint.topics == null)
+                ? null
+                : hint.topics!.take(5).toList(growable: false);
+          }
+        }
       }
 
-      final facets = (hint.facets == null)
-          ? null
-          : hint.facets!.take(maxFacets).toList(growable: false);
-      final tags = (hint.tags == null)
-          ? null
-          : hint.tags!.take(maxTags).toList(growable: false);
-      final topics = (hint.topics == null)
-          ? null
-          : hint.topics!.take(5).toList(growable: false);
+      // Namen rein aus Sync-Cache (niemals await!)
+      final idName = (_identityNameCache ?? '').trim();
+      final profName = (_profileUserNameCache ?? '').trim();
+      final nicks = (_profileNicknamesCache ?? const <String>[])
+          .where((e) => e.trim().isNotEmpty)
+          .map((e) => e.trim())
+          .take(5)
+          .toList(growable: false);
 
       if ((facets == null || facets.isEmpty) &&
           (tags == null || tags.isEmpty) &&
-          (topics == null || topics.isEmpty)) {
+          (topics == null || topics.isEmpty) &&
+          idName.isEmpty &&
+          profName.isEmpty &&
+          nicks.isEmpty) {
         return null;
       }
 
-      return MemoryContextHint(facets: facets, tags: tags, topics: topics);
+      return MemoryContextHint(
+        facets: facets,
+        tags: tags,
+        topics: topics,
+        identityName: idName.isEmpty ? null : idName,
+        profileUserName: profName.isEmpty ? null : profName,
+        profileNicknames: nicks.isEmpty ? null : nicks,
+      );
     } catch (_) {
       return null;
     }
   }
 
   /// **Memories-Block** für ApiService (nur bei Consent verwenden!).
+  /// Enthält:
+  ///  - identity{name} (nur wenn greet_by_name==true)
+  ///  - profile{user_name,nicknames?} (freundlicher Spiegel)
+  ///  - hint{facets,tags,topics} (klein, sync)
+  ///  - recent_topics [Labels] (max 8) — human-friendly
+  ///  - share:true (falls Therapist-Mode aktiv)
   Future<Map<String, dynamic>> buildContextMemories(
       {required bool consent}) async {
     try {
@@ -596,10 +794,29 @@ class MemoryService {
         out['identity'] = <String, dynamic>{'name': id.name};
       }
 
+      if ((_profileUserNameCache ?? '').toString().trim().isNotEmpty ||
+          (_profileNicknamesCache?.isNotEmpty ?? false)) {
+        out['profile'] = <String, dynamic>{
+          if ((_profileUserNameCache ?? '').toString().trim().isNotEmpty)
+            'user_name': _profileUserNameCache!.trim(),
+          if (_profileNicknamesCache != null && _profileNicknamesCache!.isNotEmpty)
+            'nicknames': _profileNicknamesCache,
+        };
+      }
+
       final hint = buildContextHint();
       if (hint != null) {
-        out['hint'] = hint.toJson();
+        out['hint'] = hint.toJson()
+          ..remove('identity')
+          ..remove('profile'); // identity/profile sind oben explizit gesetzt
       }
+
+      try {
+        final topics = await latestTopics(limit: 8);
+        if (topics.isNotEmpty) {
+          out['recent_topics'] = topics;
+        }
+      } catch (_) {/* ignore */}
 
       if (_shareEnabled) {
         out['share'] = true;
@@ -638,6 +855,103 @@ class MemoryService {
 
   // ---------------- interne Helfer ------------------------------------------
 
+  Future<void> _ingestMemoriesToSave(Map<String, dynamic> root) async {
+    try {
+      final list = (root['memories_to_save'] as List?) ??
+          (root['memoriesToSave'] as List?) ??
+          const [];
+      if (list.isEmpty) return;
+
+      for (final item in list) {
+        if (item == null) continue;
+        if (item is Map) {
+          final mem = Map<String, dynamic>.from(item);
+
+          // identity.name
+          final idMap = (mem['identity'] is Map)
+              ? Map<String, dynamic>.from(mem['identity'])
+              : null;
+          final idName =
+              (idMap?['name'] ?? mem['identity_name'] ?? mem['name'])
+                  ?.toString()
+                  .trim();
+          if ((idName ?? '').isNotEmpty) {
+            await saveIdentityName(idName!);
+          }
+
+          // profile.user_name & profile.nicknames[]
+          final profMap = (mem['profile'] is Map)
+              ? Map<String, dynamic>.from(mem['profile'])
+              : null;
+          final profName =
+              (profMap?['user_name'] ?? mem['profile_user_name'])
+                  ?.toString()
+                  .trim();
+          if ((profName ?? '').isNotEmpty) {
+            await saveProfileUserName(profName!);
+          }
+
+          final nicksDyn = (profMap?['nicknames'] ?? mem['nicknames']);
+          final nicks = _parseStringList(nicksDyn);
+          for (final nick in nicks) {
+            await addNickname(nick);
+          }
+
+          // best-effort generisch sichern (falls Store es unterstützt)
+          try {
+            final dyn = _store as dynamic;
+            final safe = <String, dynamic>{
+              ...mem,
+              'kind': mem['kind'] ?? 'memory',
+              'ts': DateTime.now().toUtc().toIso8601String()
+            };
+            try {
+              final r1 = dyn.saveMap?.call(safe);
+              if (r1 is Future) await r1;
+            } catch (_) {/* try next */}
+            try {
+              final r2 = dyn.save?.call(safe);
+              if (r2 is Future) await r2;
+            } catch (_) {/* ignore */}
+          } catch (_) {/* ignore */}
+        } else if (item is String) {
+          // simple string → ggf. als Nickname interpretieren (z. B. "Matze")
+          final s = item.trim();
+          // FIX: 'und' → '&&' (Dart)
+          if (s.split(' ').length == 1 && s.length >= 2 && s.length <= 24) {
+            await addNickname(s);
+          }
+        }
+      }
+
+      // Hint um Namen ergänzen (sync), ohne await
+      final idNameNow = (_identityNameCache ?? '').trim();
+      final profNameNow = (_profileUserNameCache ?? '').trim();
+      final nicksNow = (_profileNicknamesCache ?? const <String>[])
+          .where((e) => e.trim().isNotEmpty)
+          .map((e) => e.trim())
+          .toList(growable: false);
+
+      if (_lastHint != null ||
+          idNameNow.isNotEmpty ||
+          profNameNow.isNotEmpty ||
+          nicksNow.isNotEmpty) {
+        final base = _lastHint;
+        _lastHint = MemoryContextHint(
+          facets: base?.facets,
+          tags: base?.tags,
+          topics: base?.topics,
+          identityName: idNameNow.isEmpty ? base?.identityName : idNameNow,
+          profileUserName:
+              profNameNow.isEmpty ? base?.profileUserName : profNameNow,
+          profileNicknames:
+              (nicksNow.isEmpty ? base?.profileNicknames : nicksNow),
+        );
+        _lastHintTs ??= DateTime.now();
+      }
+    } catch (_) {/* ignore */}
+  }
+
   void _invalidateSoftCaches() {
     _latestTopicsCache = null;
     _latestTopicsTs = null;
@@ -658,6 +972,8 @@ class MemoryService {
     } catch (_) {/* ignore */}
     return null;
   }
+
+  String _cap(String s) => s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
 
   Future<void> _setOptString(String key, String value) async {
     try {
@@ -705,6 +1021,29 @@ class MemoryService {
       if (r is Future) {
         final v = await r;
         if (v is String) return v;
+      }
+    } catch (_) {/* ignore */}
+    return null;
+  }
+
+  Future<void> _setOptStringList(String key, List<String> values) async {
+    try {
+      final json = jsonEncode(values);
+      await _setOptString(key, json);
+    } catch (_) {/* ignore */}
+  }
+
+  Future<List<String>?> _getOptStringList(String key) async {
+    try {
+      final raw = await _getOptString(key);
+      if (raw == null || raw.trim().isEmpty) return null;
+      final v = jsonDecode(raw);
+      if (v is List) {
+        return v
+            .where((e) => e != null)
+            .map((e) => e.toString())
+            .where((e) => e.trim().isNotEmpty)
+            .toList(growable: false);
       }
     } catch (_) {/* ignore */}
     return null;
@@ -759,6 +1098,28 @@ class MemoryService {
       }
     } catch (_) {/* ignore */}
     return null;
+  }
+
+  // Kleine Utils
+  static List<String> _parseStringList(dynamic v) {
+    if (v == null) return const <String>[];
+    if (v is List) {
+      return v
+          .where((e) => e != null)
+          .map((e) => e.toString().trim())
+          .where((s) => s.isNotEmpty)
+          .toList(growable: false);
+    }
+    if (v is String) {
+      final s = v.trim();
+      if (s.isEmpty) return const <String>[];
+      return s
+          .split(RegExp(r'[,\n;]+'))
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toList(growable: false);
+    }
+    return const <String>[];
   }
 }
 

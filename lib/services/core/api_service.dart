@@ -1,4 +1,6 @@
-// [BASELINE] lib/services/core/api_service.dart  (Stand: 29.10.)
+// [BASELINE] lib/services/core/api_service.dart (Stand: 2025-10-30)
+// MERGE SIGNAL: meta.flags.client_memory — Merge-Signal-File 1.2 (Plan v6.4.4)
+//
 // lib/services/core/api_service.dart
 //
 // ZenYourself — Core ApiService (server+offline, Samfring optional)
@@ -8,14 +10,14 @@
 // - Memory-Hooks & Byte-Kontext (best-effort, ohne await)
 // - Light Contact-Tints (Header + Payload), Samfring=optional
 // - Out-Soft-Gate: kleiner Start-Blocker; blockiert NIE Offline-Flows
-// - v6.3.1:
-//     • reflectFull/nextTurnFull(..., memories, memoryConsent) → sendet
-//       context.memories{...} (snake_case) + memory_consent:true/false,
-//       tolerant gegen fehlende Memory-Typen (dynamic/toMap/toJson/Map)
-//     • Auto-Anreicherung von context.memories bei Consent im Worker-Invoker
-//       (falls Caller nichts gesetzt hat) – inkl. Legacy-Top-Level 'memories'
-//     • nextTurnAction(session, action, ...) → eigener Endpoint mit Fallback
-//     • Legacy-Fallback: insight_score aus Top-Level/flow → TurnAnalysis
+// - v6.4.5 (Merge-Signal Durchzug + compile fix):
+//     • Fix Map-Literal in configureForWorker headers (<String, String>{}).
+//     • meta.flags.client_memory wird gesetzt, wenn memory_consent==true.
+//     • Zusätzlich Legacy-Alias: client_memory_merge (rückwärtskompatibel).
+//     • context.memories werden nur bei Consent & vorhandenen Daten gesendet.
+// - v6.3.3+hotfix-name-inject (beibehalten):
+//     • Sofortige Namens-Injektion im *gleichen* Turn, wenn Nutzer „ich heiße …“
+//       schreibt (privacy-gated: nur bei memory_consent==true).
 //
 
 import 'dart:async';
@@ -158,6 +160,53 @@ class ApiService {
     } catch (_) {/* never block */}
   }
 
+  // *** NEU: schneller Name-Extractor für dieselbe Nachricht (Race vermeiden) ***
+  String? _extractNameFromTextQuick(String text) {
+    try {
+      final t = text.trim();
+      if (t.isEmpty) return null;
+      final lc = t.toLowerCase();
+      final rx = RegExp(
+        r"\b(ich heiße|ich heisse|mein name ist|ich bin|nenn mich|man nennt mich)\s+([a-zäöüß\-' ]+)",
+        caseSensitive: false,
+      );
+      final m = rx.firstMatch(lc);
+      if (m == null) return null;
+
+      var seg = (m.group(2) ?? '').trim();
+      seg = seg.split(RegExp(r'[.,;:!?]')).first.trim();
+      if (seg.isEmpty) return null;
+
+      var first = seg.split(RegExp(r'\s+')).first;
+      first = first.replaceAll(RegExp(r"[^a-zA-ZäöüÄÖÜß\-']"), '');
+      if (first.length < 2 || first.length > 28) return null;
+
+      const banned = {'einfach', 'ja', 'okay', 'ok', 'nein'};
+      if (banned.contains(first.toLowerCase())) return null;
+
+      return first[0].toUpperCase() + first.substring(1);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // Sorgt dafür, dass bei aktivem Consent das Merge-Signal-Flag gesetzt wird.
+  Map<String, dynamic> _ensureClientMemoryMergeFlag(
+    Map<String, dynamic> body, {
+    required bool consent,
+  }) {
+    if (!consent) return body; // nur mit Opt-in
+    final meta = Map<String, dynamic>.from((body['meta'] as Map?) ?? const {});
+    final flags = Map<String, dynamic>.from((meta['flags'] as Map?) ?? const {});
+    // v6.4.4: offizieller Schlüssel
+    flags['client_memory'] = true;
+    // Legacy-Alias (für ältere Tools/Skripte wie deine Case-B Payloads)
+    flags['client_memory_merge'] ??= true;
+    meta['flags'] = flags;
+    body['meta'] = meta;
+    return body;
+  }
+
   // ---------------- Config ----------------
 
   void configureHttp(
@@ -217,8 +266,9 @@ class ApiService {
 
       // v6.3.1: **On-Device Memories automatisch anreichern**, falls Consent==true
       // und Caller noch KEINE context.memories gesetzt hat.
+      bool consent = false;
       try {
-        final bool consent = (enriched['memory_consent'] == true) ||
+        consent = (enriched['memory_consent'] == true) ||
             (((enriched['context'] as Map?)?['memory_consent']) == true);
         final hasCtx = (enriched['context'] is Map);
         final Map<String, dynamic> ctx = hasCtx
@@ -257,6 +307,9 @@ class ApiService {
       } catch (_) {
         // still – niemals blockieren
       }
+
+      // **NEU**: Merge-Signal sicherstellen (auch wenn Payload nicht via _basePayload entstand)
+      _ensureClientMemoryMergeFlag(enriched, consent: consent);
 
       // kleiner Start-Blocker, aber NUR für Outbound
       if (!_outGateOpen && !_isHealthPath(path)) {
@@ -609,9 +662,13 @@ class ApiService {
       if (clientContext != null && clientContext.isNotEmpty)
         'client_context': _sanitizeClientContext(clientContext),
     };
+    payload['memory_consent'] ??= _memoryConsentDefault();
+
     _appendMemoryHints(payload);
     _appendContactTints(payload, locale: locale, tz: tz);
     _appendByteContext(payload);
+    _ensureClientMemoryMergeFlag(
+        payload, consent: payload['memory_consent'] == true);
 
     final json =
         await _postMaybe('/closure_full', payload, saveSource: 'closure_full');
@@ -722,7 +779,7 @@ class ApiService {
     );
 
     try {
-      final json = await _postMaybe('/reflect', payload, saveSource: 'reflect');
+      final json = await _postMaybe('/reflect_full', payload, saveSource: 'reflect');
       if (json == null) throw Exception('no json');
       return _turnFromReflectJson(json, session);
     } catch (_) {
@@ -1400,6 +1457,14 @@ class ApiService {
     // --- DTO-Basis (liefert u. a. analysis/topic_suggestions/risk/talk/helpers) ---
     final dtoBase = ReflectionTurn.fromMaybe(json);
 
+    // ---- Save-Hook für Memories vom Worker (tolerant) -----------------------
+    try {
+      final memToSave = (json['memories_to_save'] as List?) ?? const [];
+      if (memToSave.isNotEmpty) {
+        _memorySave({'memories_to_save': memToSave}, 'reflect_full');
+      }
+    } catch (_) {/* still */}
+
     // Alt-Parser: Fragen & Primary ableiten (Kompatibilität behalten)
     final questionsList = _parseStringList(
         json['questions'] ?? json['multi_questions'] ?? json['qs']);
@@ -1677,9 +1742,9 @@ class ApiService {
       if (json['lead'] != null) json['lead'].toString(),
       if (json['lead_question'] != null) json['lead_question'].toString(),
       if (json['output_text'] != null) json['output_text'].toString(),
-      if (json['question'] != null) json['question'].toString(),
       if (fromChoices != null && fromChoices.trim().isNotEmpty)
         fromChoices.trim(),
+      if (json['question'] != null) json['question'].toString(),
       if (json['content'] != null) json['content'].toString(),
       if (json['raw'] != null) json['raw'].toString(),
     ].map((s) => s.trim()).where((s) => s.isNotEmpty).toList(growable: false);
@@ -1937,9 +2002,12 @@ class ApiService {
 
   void _attachMemories(Map<String, dynamic> payload,
       {dynamic memories, bool? memoryConsent}) {
-    if (memoryConsent != null) {
-      payload['memory_consent'] = memoryConsent == true;
-    }
+    // v6.4.4: Memories nur anhängen, wenn Consent wirklich true ist
+    final bool consentEffective = memoryConsent ??
+        (payload['memory_consent'] == true) ||
+        (((payload['context'] as Map?)?['memory_consent']) == true);
+    if (!consentEffective) return;
+
     final mem = _normalizeMemories(memories);
     if (mem == null || mem.isEmpty) return;
 
@@ -2118,6 +2186,34 @@ class ApiService {
 
     // Consent automatisch aus MemoryService übernehmen, falls Caller nichts setzt
     payload['memory_consent'] ??= _memoryConsentDefault();
+    _ensureClientMemoryMergeFlag(
+        payload, consent: payload['memory_consent'] == true);
+
+    // *** NEU: Sofortige Identity-Injektion im selben Call (privacy-gated) ***
+    // Wenn der Nutzer in *dieser* Nachricht seinen Namen nennt, hängen wir
+    // (bei memory_consent==true) direkt context.memories.identity.name an.
+    try {
+      final bool consentNow = payload['memory_consent'] == true;
+      if (consentNow) {
+        final quickName = _extractNameFromTextQuick(text);
+        if (quickName != null && quickName.isNotEmpty) {
+          final ctx = Map<String, dynamic>.from(
+              (payload['context'] as Map?) ?? const {});
+          final mem = Map<String, dynamic>.from(
+              (ctx['memories'] as Map?) ?? const {});
+          final id = Map<String, dynamic>.from(
+              (mem['identity'] as Map?) ?? const {});
+          id['name'] = quickName; // sofort verfügbar für diesen Turn
+          mem['identity'] = id;
+          ctx['memories'] = mem;
+          payload['context'] = ctx;
+          // Legacy-Spiegel (einige ältere Worker lesen top-level)
+          payload['memories'] ??= mem;
+        }
+      }
+    } catch (_) {
+      // still: niemals blockieren
+    }
 
     _appendMemoryHints(payload);
     _appendContactTints(payload, locale: locale, tz: tz);

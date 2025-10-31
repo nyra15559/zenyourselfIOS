@@ -1,4 +1,4 @@
-// [BASELINE] lib/core/memory/memory_mapper.dart — v6.3.1 (Stand: 29.10.2025)
+// [BASELINE] lib/core/memory/memory_mapper.dart — v6.3.2 (Stand: 30.10.2025)
 //
 // MemoryMapper — toleranter Worker→MemoryEntry-Merger
 // ----------------------------------------------------
@@ -7,29 +7,31 @@
 // • Deduplizierte Facets (case-insensitive by key) — Hits werden zusammengeführt
 // • Liefert null, wenn *kein* relevantes Signal vorhanden ist
 //
-// Erfasste Signalquellen (inkl. neuer Hint-Pfade):
+// Erfasste Signalquellen (inkl. neuer Hint-/Fallback-Pfade):
 //   facets:
 //     • facets | context_facets
 //     • understanding.facets | analysis.context_facets | analysis.facets
 //     • context.memories.facets | context.memories.context_facets
 //     • context.memories.hint.facets | context.memories.hint.recent_facets
+//     • context.hint.facets | context.hint.recent_facets
+//     • context_hint.facets | context_hint.hint.facets
+//     • ui.facets
 //   topics → Facet-Fallback:
-//     • topics | topic_suggestions | analysis.topic_suggestions
-//     • understanding.topics
-//     • context.memories.recent_topics | context_hint.last_themes
-//     • context_hint.recent_facets (als Keys; Label = Key)
-//     • context.memories.hint.topics
+//     • topics | topic_suggestions | analysis.topic_suggestions | analysis.recent_topics
+//     • understanding.topics | flow.topics | ui.topics
+//     • context.memories.recent_topics | context.memories.hint.topics | context.memories.hint.recent_topics
+//     • context.hint.topics | context_hint.topics | context_hint.last_themes | context_hint.recent_facets (als Keys; Label = Key)
 //   insight_score:
 //     • insight_score | understanding.insight_score | analysis.insight_score | flow.insight_score
 //     • insight.score  (camel/legacy)
 //     • insight_baseline | insight.baseline (optional)
 //   mood:
-//     • mood | closure.mood | context.mood
-//   summary:
+//     • mood | closure.mood | context.mood | flow.mood
+//   summary (sanfter Text, z. B. Hoffnung/Schluss):
 //     • summary | understanding.summary | analysis.summary
-//     • closure.hope_reply | closure.text
-//   next_hint:
-//     • next_hint | flow.next_hint | closure.closure_prompt | context.next_hint
+//     • closure.hope_reply | closure.text | flow.hope | hope | ui.hope
+//   next_hint (sanfter Ausblick/Frage für nächsten Turn):
+//     • next_hint | flow.next_hint | closure.closure_prompt | context.next_hint | analysis.next_hint | ui.next_hint
 //
 // Hinweise
 // • Wir tolerieren Map-, DTO- und JSON-String-Eingaben.
@@ -145,7 +147,7 @@ class MemoryMapper {
         final s = v.trim();
         if (s.isEmpty) continue;
         final parts = s
-            .split(RegExp(r'\r?\n+|[•\-–—]\s+|;\s+|,\s+'))
+            .split(RegExp(r'\r?\n+|[•\-–—]\s+|\s*;\s*|\s*,\s+'))
             .map((e) => e.trim())
             .where((e) => e.isNotEmpty)
             .toList();
@@ -202,9 +204,8 @@ class MemoryMapper {
       } else {
         final sumHits =
             (prev.hits <= 0 ? 1 : prev.hits) + (f.hits <= 0 ? 1 : f.hits);
-        final betterLabel = (f.label.trim().length > prev.label.trim().length)
-            ? f.label
-            : prev.label;
+        final betterLabel =
+            (f.label.trim().length > prev.label.trim().length) ? f.label : prev.label;
         byKey[k] = Facet(key: k, label: betterLabel, hits: sumHits);
       }
     }
@@ -229,6 +230,11 @@ class MemoryMapper {
       ['threadId'],
       ['round', 'id'],
       ['roundId'],
+      ['turn', 'session', 'id'],
+      ['data', 'session', 'id'],
+      ['response', 'session', 'id'],
+      ['meta', 'session_id'],
+      ['meta', 'thread_id'],
       ['sessionId'],
       ['id'],
     ]);
@@ -245,6 +251,11 @@ class MemoryMapper {
       ['context', 'memories', 'context_facets'],
       ['context', 'memories', 'hint', 'facets'],
       ['context', 'memories', 'hint', 'recent_facets'],
+      ['context', 'hint', 'facets'],
+      ['context', 'hint', 'recent_facets'],
+      ['context_hint', 'facets'],
+      ['context_hint', 'hint', 'facets'],
+      ['ui', 'facets'],
     ]);
 
     // Optionaler Fallback: Themenlisten (Labels) in Facets konvertieren
@@ -254,10 +265,16 @@ class MemoryMapper {
         ['topic_suggestions'],
         ['topicSuggestions'],
         ['analysis', 'topic_suggestions'],
+        ['analysis', 'recent_topics'],
         ['understanding', 'topics'],
+        ['flow', 'topics'],
+        ['ui', 'topics'],
         ['context', 'memories', 'recent_topics'],
-        ['context_hint', 'last_themes'],
         ['context', 'memories', 'hint', 'topics'],
+        ['context', 'memories', 'hint', 'recent_topics'],
+        ['context', 'hint', 'topics'],
+        ['context_hint', 'topics'],
+        ['context_hint', 'last_themes'],
       ]);
 
       // Falls nur „recent_facets“ (Keys) vorhanden sind, als Labels/Keys übernehmen
@@ -294,16 +311,20 @@ class MemoryMapper {
       ['mood'],
       ['closure', 'mood'],
       ['context', 'mood'],
+      ['flow', 'mood'],
     ]);
     final mood = (moodMap != null) ? MoodPair.fromWorker(moodMap) : null;
 
-    // Summary
+    // Summary (inkl. Hope-Fallbacks)
     final summary = _stringAt(raw, const [
       ['summary'],
       ['understanding', 'summary'],
       ['analysis', 'summary'],
       ['closure', 'hope_reply'],
       ['closure', 'text'],
+      ['flow', 'hope'],
+      ['hope'],
+      ['ui', 'hope'],
     ]);
 
     // Next hint
@@ -312,6 +333,8 @@ class MemoryMapper {
       ['flow', 'next_hint'],
       ['closure', 'closure_prompt'],
       ['context', 'next_hint'],
+      ['analysis', 'next_hint'],
+      ['ui', 'next_hint'],
     ]);
 
     final hasSignal = facets.isNotEmpty ||
