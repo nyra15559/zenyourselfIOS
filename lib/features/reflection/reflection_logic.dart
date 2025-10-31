@@ -1,19 +1,22 @@
-// [BASELINE] lib/features/reflection/reflection_logic.dart (Stand: 30.10.)
+// [BASELINE] lib/features/reflection/reflection_logic.dart (Stand: 31.10.)
 // ZenYourself — ReflectionLogic (Controller & Handler)
-// PANDA-REFLECT-12.7 → v6.4.4 (Merge-Signal)
+// PANDA-REFLECT-12.7 → v6.6.0 (Facet-State + Voice-Router + Recovery)
 // -----------------------------------------------------------------------------
 // Merge-Signal / Handshake:
 // • Bei jedem Call wird `meta.flags.client_memory:true` übergeben.
 // • Bridge (Recall) wird als `meta.memory.bridge` mitgegeben.
 // • Memories/Consent werden 1:1 als context.memories + memory_consent (Guidance/API).
 // -----------------------------------------------------------------------------
-// Aufgaben (FilePlan 6.2.x + v6.3):
+// Aufgaben (FilePlan 6.2.x + v6.3 + v6.6):
 // • Controller-Klasse (kein UI; ChangeNotifier)
 // • Start/Senden-Flow (Full-Endpunkte; Memories/Consent durchreichen)
 // • Action-Flow (Rate-Limit 1×/Session; Fallback tolerant)
 // • Hybrid-Note (typed + transcript, defensiv, gekappt)
 // • Debounce/Rate-Limit (min Gap zwischen Sends; sanft, ohne Exceptions)
 // • VM-Bau: answer_helpers-only, mind. 2 Chips, Talk≤2, Risk/Flow-Flags, Hope
+// • NEU: Facet-Router & SkillFlow (Essenz/Beispiel) vs. Standard
+// • NEU: Voice-Trigger → identische Aktionen wie Buttons (availableActions)
+// • NEU: Edgecases (Themenwechsel während aktiver Facet, Abbruch, Closure-Recovery)
 // -----------------------------------------------------------------------------
 // Leitlinien:
 // • Keine UI-Logik; reine Orchestrierung + State. View rendert nur 'vm'.
@@ -22,6 +25,7 @@
 // -----------------------------------------------------------------------------
 
 import 'dart:async';
+import 'dart:collection';
 import 'package:flutter/foundation.dart';
 
 import '../../services/guidance/dtos.dart'
@@ -30,6 +34,8 @@ import '../../services/guidance_service.dart';
 import '../../core/memory/memory_service.dart';
 
 const Duration _kNetTimeout = Duration(seconds: 18);
+
+// --------------------------- Public VM ---------------------------------------
 
 /// Öffentliche, render-fertige Sicht auf den aktuellen Turn.
 /// (Die View greift *nur* auf diese Felder zu – keine DTO-Abhängigkeit nötig.)
@@ -61,8 +67,21 @@ class ReflectionVM {
   bool get hasQuestion => question.trim().isNotEmpty;
 }
 
-/// Controller & Orchestrator (kein UI).
-/// Verantwortlich für: Start/Weiter-Flow, Action-Flow, Debounce/Rate-Limit.
+// --------------------------- Actions (public model) --------------------------
+
+/// Minimaler Aktions-Descriptor (UI kann daraus Buttons bauen).
+class AvailableAction {
+  final String id; // z.B. 'topic_switch', 'essence', 'example', 'abort'
+  final String label; // z.B. 'Thema wechseln'
+  final String? note; // optionale Zusatzinfo (z.B. Ziel-Facet)
+  const AvailableAction({required this.id, required this.label, this.note});
+
+  AvailableAction copyWith({String? label, String? note}) =>
+      AvailableAction(id: id, label: label ?? this.label, note: note ?? this.note);
+}
+
+// --------------------------- Controller --------------------------------------
+
 class ReflectionController extends ChangeNotifier {
   ReflectionController({
     Duration sendMinGap = const Duration(milliseconds: 420),
@@ -79,12 +98,25 @@ class ReflectionController extends ChangeNotifier {
   ReflectionVM? get vm => _vm;
   ReflectionSession? get session => _session;
   String? get bridgeText => _bridgeText; // für Bridge-Bubble (optional)
-
-  /// Optional: vom UI gesetzte Memories (werden an Full-Endpunkte durchgereicht).
-  dynamic get memories => _memories;
-
-  /// Optional: Einwilligung, Memories an den Worker zu senden (Default: aus MemoryService).
+  dynamic get memories => _memories; // optional: UI liefert Memories
   bool get memoryConsent => _memoryConsent;
+
+  /// Facetten-Queue (Themen-Unteraspekte, die Panda vorschlägt).
+  UnmodifiableListView<String> get facetQueue =>
+      UnmodifiableListView(_facetQueue);
+
+  /// Aktive Facette (falls Panda gerade in einem Unteraspekt arbeitet).
+  String? get activeFacet => _activeFacet;
+
+  /// Topic-Pin (visueller „Kontext-Pin“; z. B. Hauptthema).
+  String? get topicPin => _topicPin;
+
+  /// Für Footer/Voice nutzbare Aktionen (max. 3–4, ohne UI-Icons).
+  UnmodifiableListView<AvailableAction> get availableActions =>
+      UnmodifiableListView(_availableActions);
+
+  /// True, falls wir gerade in einem „SkillFlow“ (Essenz/Beispiel) sind.
+  bool get inSkillFlow => _inSkillFlow;
 
   // ---------------- Private state --------------------------------------------
 
@@ -100,9 +132,16 @@ class ReflectionController extends ChangeNotifier {
   Timer? _pendingSend;
   bool _actionUsedInThisSession = false;
 
-  // v6.3.0: optionale Memory-Weitergabe
+  // Memory
   dynamic _memories;
   bool _memoryConsent = false;
+
+  // Facets / Topics / Actions
+  final List<String> _facetQueue = <String>[];
+  String? _activeFacet;
+  String? _topicPin;
+  final List<AvailableAction> _availableActions = <AvailableAction>[];
+  bool _inSkillFlow = false; // Router: SkillFlow (Essenz/Beispiel) vs Standard
 
   // ---------------- Init / Bridge --------------------------------------------
 
@@ -110,7 +149,7 @@ class ReflectionController extends ChangeNotifier {
   Future<void> prefetchBridge() async {
     try {
       final recall = await MemoryService.instance.recall(limit: 6);
-      // Consent still-update (falls sich der Nutzer zwischenzeitlich umentschied)
+      // Consent still-update
       try {
         _memoryConsent = MemoryService.instance.shareEnabled;
       } catch (_) {/* ignore */}
@@ -119,18 +158,15 @@ class ReflectionController extends ChangeNotifier {
     } catch (_) {/* never throw */}
   }
 
-  /// Setzt die Einwilligung zur Memory-Weitergabe (persistiert NICHT).
   void setMemoryConsent(bool consent) {
     _memoryConsent = consent;
-    // kein notify nötig; wirkt bei nächstem Send
   }
 
-  /// Übergibt (oder löscht via `null`) optionale Memories für den nächsten Turn/Start.
   void setMemories(dynamic memories) {
     _memories = memories;
   }
 
-  /// Setzt den Controller hart zurück (z. B. beim Screen-Wechsel).
+  /// Hartes Zurücksetzen (z. B. beim Screen-Wechsel).
   void reset() {
     _debounceCancel();
     _loading = false;
@@ -138,6 +174,13 @@ class ReflectionController extends ChangeNotifier {
     _vm = null;
     _bridgeText = null;
     _actionUsedInThisSession = false;
+
+    _facetQueue.clear();
+    _activeFacet = null;
+    _topicPin = null;
+    _availableActions.clear();
+    _inSkillFlow = false;
+
     notifyListeners();
   }
 
@@ -153,23 +196,26 @@ class ReflectionController extends ChangeNotifier {
 
     _setLoading(true);
     try {
-      final turn = await GuidanceService.instance.startSessionFull(
-        text: text,
-        locale: 'de',
-        tz: 'Europe/Zurich',
-        memories: _memories,
-        memoryConsent: _memoryConsent,
-        meta: _buildMeta(mode: fromVoice ? 'voice' : 'text'),
-        clientContext: {
-          'mode': fromVoice ? 'voice' : 'text',
-          'source': 'reflection_screen',
-        },
-      ).timeout(_kNetTimeout);
+      final turn = await GuidanceService.instance
+          .startSessionFull(
+            text: text,
+            locale: 'de',
+            tz: 'Europe/Zurich',
+            memories: _memories,
+            memoryConsent: _memoryConsent,
+            meta: _buildMeta(mode: fromVoice ? 'voice' : 'text'),
+            clientContext: {
+              'mode': fromVoice ? 'voice' : 'text',
+              'source': 'reflection_screen',
+            },
+          )
+          .timeout(_kNetTimeout);
 
       _session = _coerceSession(turn);
       _vm = _buildVM(turn);
-      _actionUsedInThisSession =
-          false; // neue Session ⇒ Action-Rate-Limit reset
+      _actionUsedInThisSession = false; // Reset Rate-Limit
+      _updateFacetsFromTurn(turn);
+      _recomputeAvailableActions();
     } catch (_) {
       // sanfter Fallback-VM
       _vm = const ReflectionVM(
@@ -184,6 +230,7 @@ class ReflectionController extends ChangeNotifier {
         hopeText: null,
         topicChips: <String>[],
       );
+      _recomputeAvailableActions();
     } finally {
       _setLoading(false);
     }
@@ -191,7 +238,6 @@ class ReflectionController extends ChangeNotifier {
 
   /// Setzt Session fort mit [text]. Falls keine Session existiert → start().
   Future<void> send(String text) async {
-    // Debounce: sammelt schnelle Mehrfach-Events ein und sendet *einmal*.
     _pendingSend?.cancel();
     _pendingSend = Timer(const Duration(milliseconds: 220), () async {
       await _sendNow(text);
@@ -210,19 +256,25 @@ class ReflectionController extends ChangeNotifier {
         return;
       }
 
-      final turn = await GuidanceService.instance.nextTurnFull(
-        session: _session!,
-        text: text,
-        locale: 'de',
-        tz: 'Europe/Zurich',
-        memories: _memories, // v6.3.0: optionale aktualisierte Memories
-        memoryConsent: _memoryConsent, // v6.3.0: Consent mitgeben (tolerant)
-        meta: _buildMeta(mode: 'text'),
-        clientContext: const {'mode': 'text', 'source': 'reflection_screen'},
-      ).timeout(_kNetTimeout);
+      final turn = await GuidanceService.instance
+          .nextTurnFull(
+            session: _session!,
+            text: text,
+            locale: 'de',
+            tz: 'Europe/Zurich',
+            memories: _memories,
+            memoryConsent: _memoryConsent,
+            meta: _buildMeta(mode: 'text'),
+            clientContext: const {'mode': 'text', 'source': 'reflection_screen'},
+          )
+          .timeout(_kNetTimeout);
 
       _session = _coerceSession(turn);
       _vm = _buildVM(turn);
+      // Standard-Textinput ⇒ SkillFlow verlassen
+      _inSkillFlow = false;
+      _updateFacetsFromTurn(turn);
+      _recomputeAvailableActions();
     } catch (_) {/* ignore, keep old vm */} finally {
       _setLoading(false);
     }
@@ -230,22 +282,20 @@ class ReflectionController extends ChangeNotifier {
 
   // ---------------- Actions ---------------------------------------------------
 
-  /// Führt eine User-Action aus (z. B. "journal_link", "story_link", "save"...).
+  /// Führt eine User-Action aus (z. B. 'topic_switch', 'essence', 'example', 'abort').
   /// Rate-Limit: max 1 Action pro Session (laut Plan).
   Future<void> handleAction(UserAction action) async {
     if (_session == null) return;
-    if (_actionUsedInThisSession) return; // Rate-Limit (1×/Session)
+    if (_actionUsedInThisSession) return; // 1×/Session
 
-    // Debounce: verhindere Double-Taps.
-    if (!_gateSendNow()) return;
+    if (!_gateSendNow()) return; // sanftes Double-Tap Gate
 
     _setLoading(true);
     try {
       final svc = GuidanceService.instance;
-
-      // Tolerant: Falls GuidanceService bereits eine Action-Methode hat, nutze sie.
-      // Sonst fallback auf normalen nextTurnFull (Server darf Action aus "messages" / context lesen).
       ReflectionTurn turn;
+
+      // Falls Guidance dedicated Action-Endpunkt bietet:
       try {
         // ignore: avoid_dynamic_calls
         final dyn = svc as dynamic;
@@ -260,41 +310,131 @@ class ReflectionController extends ChangeNotifier {
         if (fut != null) {
           turn = await fut.timeout(_kNetTimeout);
         } else {
-          // Fallback: minimaler "Action-Stich" via nextTurnFull ohne Text.
-          turn = await svc.nextTurnFull(
-            session: _session!,
-            text: '',
-            locale: 'de',
-            tz: 'Europe/Zurich',
-            memories: _memories,
-            memoryConsent: _memoryConsent,
-            meta: _buildMeta(mode: 'action-fallback'),
-            clientContext: const {
-              'mode': 'text',
-              'source': 'reflection_screen'
-            },
-          ).timeout(_kNetTimeout);
+          // Fallback: normaler nextTurnFull (ohne Text) – Server liest Action kontextuell
+          turn = await svc
+              .nextTurnFull(
+                session: _session!,
+                text: '',
+                locale: 'de',
+                tz: 'Europe/Zurich',
+                memories: _memories,
+                memoryConsent: _memoryConsent,
+                meta: _buildMeta(mode: 'action-fallback'),
+                clientContext: const {
+                  'mode': 'text',
+                  'source': 'reflection_screen'
+                },
+              )
+              .timeout(_kNetTimeout);
         }
       } catch (_) {
-        // Fallback: minimaler "Action-Stich" via nextTurnFull ohne Text.
-        turn = await svc.nextTurnFull(
-          session: _session!,
-          text: '',
-          locale: 'de',
-          tz: 'Europe/Zurich',
-          memories: _memories,
-          memoryConsent: _memoryConsent,
-          meta: _buildMeta(mode: 'action-fallback'),
-          clientContext: const {'mode': 'text', 'source': 'reflection_screen'},
-        ).timeout(_kNetTimeout);
+        turn = await svc
+            .nextTurnFull(
+              session: _session!,
+              text: '',
+              locale: 'de',
+              tz: 'Europe/Zurich',
+              memories: _memories,
+              memoryConsent: _memoryConsent,
+              meta: _buildMeta(mode: 'action-fallback'),
+              clientContext: const {'mode': 'text', 'source': 'reflection_screen'},
+            )
+            .timeout(_kNetTimeout);
       }
 
       _session = _coerceSession(turn);
       _vm = _buildVM(turn);
       _actionUsedInThisSession = true;
+
+      // Nach jeder Action: Facets/Router/Aktionsliste updaten.
+      _updateFacetsFromTurn(turn);
+      _recomputeAvailableActions();
     } catch (_) {/* ignore */} finally {
       _setLoading(false);
     }
+  }
+
+  // ---------- High-level Router: mappt IDs → UserAction + State-Handling ------
+
+  static const String _ACT_TOPIC_SWITCH = 'topic_switch';
+  static const String _ACT_ESSENCE = 'essence';
+  static const String _ACT_EXAMPLE = 'example';
+  static const String _ACT_ABORT = 'abort';
+
+  /// Router: Führt eine Aktion per ID aus und aktualisiert internen State.
+  Future<void> runAction(String id, {String? note}) async {
+    // Edge: Themenwechsel bei aktiver Facet → aktives Facet hinten anstellen
+    if (id == _ACT_TOPIC_SWITCH) {
+      if (_activeFacet != null) {
+        _facetQueue.add(_activeFacet!); // offenes Facet parken
+      }
+      // Nächstes Facet ziehen (falls vorhanden)
+      String? nextFacet;
+      if (_facetQueue.isNotEmpty) {
+        nextFacet = _facetQueue.removeAt(0);
+      }
+      _activeFacet = nextFacet; // kann null sein
+      if ((_activeFacet ?? '').trim().isNotEmpty) {
+        _topicPin = _activeFacet; // optischer Pin folgt dem neuen Facet
+        note = (_activeFacet ?? '').trim();
+      }
+      _inSkillFlow = false; // Themenwechsel beendet SkillFlow
+    } else if (id == _ACT_ESSENCE || id == _ACT_EXAMPLE) {
+      // SkillFlow einschalten; falls kein TopicPin → best-effort ableiten
+      _inSkillFlow = true;
+      if ((note ?? '').trim().isEmpty) {
+        note = _topicPin ?? _activeFacet ?? (vm?.topicChips.isNotEmpty == true ? vm!.topicChips.first : null);
+      }
+    } else if (id == _ACT_ABORT) {
+      // Abbruch: SkillFlow verlassen, aktive Facet räumen (nicht droppen)
+      _inSkillFlow = false;
+      _activeFacet = null;
+      // Kein Facetverlust: bereits geparkte Queue bleibt erhalten
+    }
+
+    final ua = _toUserAction(id, note: note);
+    await handleAction(ua);
+  }
+
+  /// Voice → Action Mapping (de / tolerant). Gibt true zurück, wenn gehandhabt.
+  Future<bool> tryVoiceTrigger(String utterance) async {
+    final u = _sanitizeInput(utterance).toLowerCase();
+
+    bool hasAny(String s) => u.contains(s);
+
+    // Reihenfolge: harter Abbruch → Switch → Essenz → Beispiel
+    if (hasAny('abbrechen') || hasAny('stop') || hasAny('stopp') || hasAny('halt') || hasAny('zurück')) {
+      await runAction(_ACT_ABORT);
+      return true;
+    }
+
+    if (hasAny('thema wechseln') ||
+        (hasAny('wechsel') && hasAny('thema')) ||
+        hasAny('anderes thema') ||
+        hasAny('topic wechseln')) {
+      await runAction(_ACT_TOPIC_SWITCH);
+      return true;
+    }
+
+    if (hasAny('essenz') ||
+        hasAny('kernaussage') ||
+        hasAny('kern') ||
+        hasAny('zusammenfassung') ||
+        hasAny('essence')) {
+      await runAction(_ACT_ESSENCE);
+      return true;
+    }
+
+    if (hasAny('beispiel') ||
+        hasAny('sample') ||
+        hasAny('zeige ein beispiel') ||
+        hasAny('gib mir ein beispiel')) {
+      await runAction(_ACT_EXAMPLE);
+      return true;
+    }
+
+    // Kein Trigger erkannt
+    return false;
   }
 
   // ---------------- Hybrid Note ----------------------------------------------
@@ -378,14 +518,11 @@ class ReflectionController extends ChangeNotifier {
   String _sanitizeInput(String s) {
     var x = (s).trim();
     if (x.isEmpty) return '';
-    // Hartes Limit spiegelt UI – defensiv hier nochmal:
     x = _cap(x, 800);
-    // Kompakte Whitespaces
     x = x.replaceAll(RegExp(r'\s+'), ' ').trim();
     return x;
   }
 
-  // Min-Gap Gate (Rate-Limit für Sends/Actions)
   bool _gateSendNow() {
     final now = DateTime.now();
     if (_lastSendAt == null) {
@@ -398,7 +535,6 @@ class ReflectionController extends ChangeNotifier {
       return true;
     }
     return false;
-    // (Silent drop – View darf gerne eine sanfte Haptik/Toast übernehmen)
   }
 
   void _debounceCancel() {
@@ -412,16 +548,11 @@ class ReflectionController extends ChangeNotifier {
   }
 
   String _sanitizeHelper(String raw) {
-    // 1) Trim
     var s = raw.trim();
     if (s.isEmpty) return '';
-    // 2) Keine Fragen als Chips
     s = s.replaceAll(RegExp(r'[?？]+$'), '');
-    // 3) Endzeichen (Doppelpunkt, Punkt, Ellipsis, Spaces) entfernen
     s = s.replaceAll(RegExp(r'\s*[:：.。…]+\s*$'), '').trim();
-    // 4) Max-Länge
     if (s.length > 72) s = '${s.substring(0, 72).trimRight()}…';
-    // 5) Exakt ein Ellipsis + Space als Satzstarter-Feeling
     s = '$s… ';
     return s;
   }
@@ -429,10 +560,8 @@ class ReflectionController extends ChangeNotifier {
   List<String> _ensureMinTwoChips(List<String> chips, {required String q}) {
     if (chips.length >= 2) return chips.take(3).toList();
     final List<String> out = List<String>.from(chips);
-    // Neutraler, universeller Zusatz-Starter basierend auf der Leitfrage
-    final fallback = (q.trim().isNotEmpty)
-        ? 'Wichtig ist mir außerdem … '
-        : 'Noch etwas dazu … ';
+    final fallback =
+        (q.trim().isNotEmpty) ? 'Wichtig ist mir außerdem … ' : 'Noch etwas dazu … ';
     out.add(fallback);
     return out.take(3).toList();
   }
@@ -448,27 +577,31 @@ class ReflectionController extends ChangeNotifier {
     if (s.length <= maxChars) return s;
     final cut = s.substring(0, maxChars);
     final lastSpace = cut.lastIndexOf(' ');
-    final base =
-        (lastSpace >= 40 ? cut.substring(0, lastSpace) : cut).trimRight();
+    final base = (lastSpace >= 40 ? cut.substring(0, lastSpace) : cut).trimRight();
     return '$base…';
   }
 
   Map<String, dynamic> _buildMeta({String? mode}) {
+    // Closure-Recovery: Wenn der Worker Abschluss signalisiert hatte, aber
+    // der Nutzer nun schreibt/handelt, öffnen wir bewusst wieder.
+    final bool reopen = (_vm?.allowClosure == true);
+
     return {
       'ui': {
         'controller': 'reflection_logic',
-        'version': 'v6.4.4',
+        'version': 'v6.6.0',
       },
       'memory': {
         'bridge': _bridgeText,
       },
       'flags': {
-        // *** Merge-Signal / Handshake ***
-        'client_memory': true,
+        'client_memory': true, // *** Merge-Signal / Handshake ***
+        'reopen': reopen,      // *** Closure-Recovery ***
       },
       'client': {
         'source': 'reflection_logic',
         if (mode != null) 'mode': mode,
+        if (_inSkillFlow) 'skill': 'on',
       },
       'tz': 'Europe/Zurich',
       'timestamp': DateTime.now().toUtc().toIso8601String(),
@@ -492,10 +625,9 @@ class ReflectionController extends ChangeNotifier {
           addToken(it);
         } else if (it is Map) {
           addToken((it['topic'] ?? it['tag'] ?? '').toString());
-          final facets = (it['facets'] as List?)
-                  ?.map((e) => e?.toString() ?? '')
-                  .toList() ??
-              const [];
+          final facets =
+              (it['facets'] as List?)?.map((e) => e?.toString() ?? '').toList() ??
+                  const [];
           if (facets.isNotEmpty) addToken(facets.first);
           final line = (it['line'] ?? it['hint'] ?? '').toString();
           if (line.isNotEmpty && tokens.length < 2) addToken(line);
@@ -507,21 +639,18 @@ class ReflectionController extends ChangeNotifier {
     final t1 = tokens[0];
     final t2 = tokens.length >= 2 ? tokens[1] : null;
 
-    final body = t2 == null
-        ? 'Ich erinnere mich an **$t1**.'
-        : 'Ich erinnere mich an **$t1** und **$t2**.';
+    final body =
+        t2 == null ? 'Ich erinnere mich an **$t1**.' : 'Ich erinnere mich an **$t1** und **$t2**.';
     return '$body Falls das heute noch mitschwingt – magst du dort anknüpfen?';
   }
 
   /// Robust: extrahiert einen kurzen "Hope"-Text aus verschiedenen Feldern.
   String? _extractHopeText(ReflectionTurn t) {
-    // 1) Direkt bekannte Felder
     try {
       final d = (t.hopeText ?? '').trim();
       if (d.isNotEmpty) return d;
     } catch (_) {/* ignore */}
     try {
-      // Einige Worker-Versionen nutzen 'hope'
       // ignore: avoid_dynamic_calls
       final dyn = t as dynamic;
       // ignore: avoid_dynamic_calls
@@ -529,7 +658,6 @@ class ReflectionController extends ChangeNotifier {
       if ((cand ?? '').isNotEmpty) return cand;
     } catch (_) {/* ignore */}
 
-    // 2) speech_sequence[{type:'hope', text:'...'}]
     try {
       // ignore: avoid_dynamic_calls
       final seq = (t as dynamic).speechSequence as List?;
@@ -552,7 +680,6 @@ class ReflectionController extends ChangeNotifier {
       }
     } catch (_) {/* ignore */}
 
-    // 3) analysis.hope (falls vorhanden) oder kurzer summary-Fallback
     try {
       final a = t.analysis;
       // ignore: avoid_dynamic_calls
@@ -563,6 +690,137 @@ class ReflectionController extends ChangeNotifier {
     } catch (_) {/* ignore */}
 
     return null;
+  }
+
+  // ---------------- Facets / Topics / Actions --------------------------------
+
+  /// Liest Facetten & Topic-Pin robust aus dem Turn und aktualisiert State.
+  void _updateFacetsFromTurn(ReflectionTurn t) {
+    // Facets: aus analysis.facets[] oder understanding.facets[] (tolerant)
+    final nextFacets = <String>[];
+
+    try {
+      final a = t.analysis;
+      final lf = (a?.facets ?? const <String>[]) as List?;
+      if (lf != null) {
+        for (final e in lf) {
+          final s = (e ?? '').toString().trim();
+          if (s.isNotEmpty) nextFacets.add(s);
+        }
+      }
+    } catch (_) {/* ignore */}
+
+    try {
+      // ignore: avoid_dynamic_calls
+      final dyn = t as dynamic;
+      // ignore: avoid_dynamic_calls
+      final u = dyn.understanding;
+      final lf = (u?.facets as List?) ?? const <dynamic>[];
+      for (final e in lf) {
+        final s = (e ?? '').toString().trim();
+        if (s.isNotEmpty) nextFacets.add(s);
+      }
+    } catch (_) {/* ignore */}
+
+    // De-dup & Queue aktualisieren (stabil)
+    final seen = <String>{};
+    final unique = <String>[];
+    for (final f in nextFacets) {
+      final k = f.toLowerCase();
+      if (seen.add(k)) unique.add(f);
+    }
+
+    _facetQueue
+      ..clear()
+      ..addAll(unique);
+
+    // Active Facet: wenn Panda keine Frage stellt (Closure) nicht überschreiben
+    if (_vm?.allowClosure != true) {
+      // Bevorzugt aktiv bleibt, wenn sie noch in neuer Liste vorhanden ist
+      if (_activeFacet != null &&
+          unique.any((e) => e.toLowerCase() == _activeFacet!.toLowerCase())) {
+        // nichts ändern
+      } else {
+        _activeFacet = unique.isNotEmpty ? unique.first : null;
+        if (_activeFacet != null && _facetQueue.isNotEmpty) {
+          // activeFacet darf nicht doppelt in Queue sein
+          if (_facetQueue.isNotEmpty &&
+              _facetQueue.first.toLowerCase() == _activeFacet!.toLowerCase()) {
+            _facetQueue.removeAt(0);
+          }
+        }
+      }
+    }
+
+    // Topic Pin: aus analysis.topic / topics[0] / understanding.topic / vm.topicChips.first
+    String? pin;
+    try {
+      final a = t.analysis;
+      final topic = (a?.topic ?? '').toString().trim();
+      if (topic.isNotEmpty) pin = topic;
+      if (pin == null && (a?.topics is List) && (a!.topics!.isNotEmpty)) {
+        final s = (a.topics!.first ?? '').toString().trim();
+        if (s.isNotEmpty) pin = s;
+      }
+    } catch (_) {/* ignore */}
+
+    if (pin == null) {
+      try {
+        // ignore: avoid_dynamic_calls
+        final dyn = t as dynamic;
+        final utopic = (dyn.understanding?.topic ?? '').toString().trim();
+        if (utopic.isNotEmpty) pin = utopic;
+      } catch (_) {/* ignore */}
+    }
+
+    if (pin == null && (vm?.topicChips.isNotEmpty ?? false)) {
+      pin = vm!.topicChips.first;
+    }
+
+    if ((pin ?? '').trim().isNotEmpty) {
+      _topicPin = pin!.trim();
+    }
+  }
+
+  /// Berechnet die anzeigbaren Aktionen (Buttons/Voice) abhängig vom Zustand.
+  void _recomputeAvailableActions() {
+    _availableActions.clear();
+
+    // „Thema wechseln“ ist (wenn sinnvoll) immer präsent
+    _availableActions.add(const AvailableAction(
+      id: _ACT_TOPIC_SWITCH,
+      label: 'Thema wechseln',
+    ));
+
+    // SkillFlow-Aktionen nur, wenn wir *nicht* ohnehin schon im SkillFlow sind
+    if (!_inSkillFlow) {
+      _availableActions.add(const AvailableAction(
+        id: _ACT_ESSENCE,
+        label: 'Essenz',
+      ));
+      _availableActions.add(const AvailableAction(
+        id: _ACT_EXAMPLE,
+        label: 'Beispiel',
+      ));
+    } else {
+      // Im SkillFlow bieten wir „Abbrechen“ an
+      _availableActions.add(const AvailableAction(
+        id: _ACT_ABORT,
+        label: 'Abbrechen',
+      ));
+    }
+
+    // Wenn keine Facetten vorhanden und kein TopicPin, „Thema wechseln“ eher passiv,
+    // aber wir lassen die Aktion (Worker kann trotzdem redirecten).
+
+    notifyListeners();
+  }
+
+  // ---------------- Wire helpers ---------------------------------------------
+
+  UserAction _toUserAction(String type, {String? note}) {
+    // UserAction{type, note} – tolerant gegen Enum/Wire
+    return UserAction(type: type, note: (note ?? '').trim().isEmpty ? null : note!.trim());
   }
 
   @override

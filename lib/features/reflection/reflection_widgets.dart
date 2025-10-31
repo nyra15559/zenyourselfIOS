@@ -12,6 +12,14 @@
 // - v6.11: Kleiner Dev-Indikator (nur Debug) – dezenter Punkt mit Tooltip
 // - v6.3.2 (29.10.): A11y/Copy-Tooltips verlässlich, leichte Const/Spacing-Polish
 // -----------------------------------------------------------------------------
+//
+// + v6.12 (neu):
+//   • PandaBubbleFooter(actions): Footer-Aktionen (max. 2 + Overflow „Mehr“)
+//   • SkillCardList(cards): horizontale Skill-/Info-Karten (Glas), mit Demo-Fallback
+//   • ContextPinBar(...): „sticky“ nutzbar (durch Parent), Outline-Pills mit klarer
+//     Abgrenzung zu Antwort-Chips; A11y-Labels, Fokus-Reihenfolge & Ellipsis.
+//
+// -----------------------------------------------------------------------------
 
 part of 'reflection_screen.dart';
 
@@ -1549,5 +1557,529 @@ extension _PandaStepCompatExt on _PandaStep {
     } catch (_) {}
 
     return null;
+  }
+}
+
+// ============================================================================
+// v6.12 — NEU: Footer-Aktionen (max. 2 + Overflow), SkillCardList, ContextPinBar
+// ============================================================================
+
+/// Datenobjekt für Footer-Aktionen (klar getrennt von Antwort-Chips).
+class PandaFooterAction {
+  final String label;
+  final IconData icon;
+  final VoidCallback onPressed;
+  final String? tooltip;
+  final String? semanticsLabel;
+
+  const PandaFooterAction({
+    required this.label,
+    required this.icon,
+    required this.onPressed,
+    this.tooltip,
+    this.semanticsLabel,
+  });
+}
+
+/// Outline-Pill (klarer Outline-Look; unterscheidet sich bewusst von Ghost-Chips).
+class _OutlinePillButton extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final VoidCallback? onPressed;
+  final String? semanticsLabel;
+
+  const _OutlinePillButton({
+    required this.label,
+    required this.icon,
+    this.onPressed,
+    this.semanticsLabel,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+
+    return Semantics(
+      button: true,
+      label: semanticsLabel ?? label,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minWidth: 118, minHeight: 40),
+        child: OutlinedButton.icon(
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            shape:
+                const StadiumBorder(side: BorderSide(color: ZenColors.outline)),
+            side: const BorderSide(color: ZenColors.outline, width: 1.0),
+            foregroundColor: _kInkStrong,
+            textStyle: tt.labelLarge?.copyWith(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+            ),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+          onPressed: onPressed,
+          icon: Icon(icon, size: 18),
+          label: Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Footer unter einer Panda-Karte. Zeigt max. 2 Primär-Aktionen; Rest im Overflow.
+class PandaBubbleFooter extends StatelessWidget {
+  final List<PandaFooterAction> actions;
+  final double maxWidth;
+  final String overflowLabel;
+  final IconData overflowIcon;
+
+  const PandaBubbleFooter({
+    super.key,
+    required this.actions,
+    this.maxWidth = 680,
+    this.overflowLabel = 'Mehr',
+    this.overflowIcon = Icons.more_horiz_rounded,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final visible = actions.take(2).toList(growable: false);
+    final overflow = actions.length > 2 ? actions.sublist(2) : const <PandaFooterAction>[];
+
+    return Center(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: maxWidth),
+        child: _ZenAppear(
+          delay: const Duration(milliseconds: 80),
+          child: RepaintBoundary(
+            child: ZenGlassCard(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+              topOpacity: _kGlassTop,
+              bottomOpacity: _kGlassBottom,
+              borderOpacity: _kGlassBorder,
+              borderRadius: _kRadius16,
+              child: FocusTraversalGroup(
+                policy: OrderedTraversalPolicy(),
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  alignment: WrapAlignment.center,
+                  children: [
+                    for (int i = 0; i < visible.length; i++)
+                      FocusTraversalOrder(
+                        order: NumericFocusOrder(i.toDouble()),
+                        child: _OutlinePillButton(
+                          label: visible[i].label,
+                          icon: visible[i].icon,
+                          onPressed: visible[i].onPressed,
+                          semanticsLabel:
+                              visible[i].semanticsLabel ?? visible[i].label,
+                        ),
+                      ),
+                    if (overflow.isNotEmpty)
+                      FocusTraversalOrder(
+                        order: NumericFocusOrder(visible.length.toDouble()),
+                        child: _OverflowPillMenu(
+                          label: overflowLabel,
+                          icon: overflowIcon,
+                          items: overflow,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _OverflowPillMenu extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final List<PandaFooterAction> items;
+
+  const _OverflowPillMenu({
+    required this.label,
+    required this.icon,
+    required this.items,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+
+    return Semantics(
+      button: true,
+      label: '$label – weitere Aktionen',
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minWidth: 118, minHeight: 40),
+        child: PopupMenuButton<int>(
+          tooltip: label,
+          position: PopupMenuPosition.under,
+          itemBuilder: (ctx) => [
+            for (int i = 0; i < items.length; i++)
+              PopupMenuItem<int>(
+                value: i,
+                child: Row(
+                  children: [
+                    Icon(items[i].icon, size: 18, color: _kInkStrong),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        items[i].label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: tt.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: _kInkStrong,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+          onSelected: (i) {
+            if (i >= 0 && i < items.length) items[i].onPressed();
+          },
+          // Wichtig: Kein "deaktivierter" Button als Child, damit es visuell nicht disabled wirkt.
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: ShapeDecoration(
+              shape: StadiumBorder(
+                side: BorderSide(color: ZenColors.outline),
+                ),
+              color: Colors.transparent,
+              shadows: const [],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 18, color: _kInkStrong),
+                const SizedBox(width: 8),
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: tt.labelLarge?.copyWith(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: _kInkStrong,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Datenmodell für eine Skill-/Info-Karte.
+class SkillCardData {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback? onTap;
+  final String? semanticsLabel;
+
+  const SkillCardData({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    this.onTap,
+    this.semanticsLabel,
+  });
+}
+
+/// Horizontale Liste kleiner Glas-Karten (klar getrennt von Antwort-Chips).
+class SkillCardList extends StatelessWidget {
+  final List<SkillCardData> cards;
+  final double maxWidth;
+  final EdgeInsetsGeometry padding;
+  final bool dense;
+
+  const SkillCardList({
+    super.key,
+    required this.cards,
+    this.maxWidth = 680,
+    this.padding = const EdgeInsets.symmetric(vertical: 4),
+    this.dense = true,
+  });
+
+  /// Bequemer Demo-Ctor mit Platzhalterdaten.
+  factory SkillCardList.demo({double maxWidth = 680}) {
+    return SkillCardList(
+      maxWidth: maxWidth,
+      cards: const [
+        SkillCardData(
+          icon: Icons.tips_and_updates_rounded,
+          title: 'Kleiner Tipp',
+          subtitle: 'Atme einmal ruhig aus, bevor du antwortest.',
+        ),
+        SkillCardData(
+          icon: Icons.bookmark_border_rounded,
+          title: 'Gedankenbuch',
+          subtitle: 'Du entscheidest, was gespeichert wird.',
+        ),
+        SkillCardData(
+          icon: Icons.lock_rounded,
+          title: 'Datenschutz',
+          subtitle: 'Ghost-Mode lässt alles lokal.',
+        ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final itemW = dense ? 220.0 : 260.0;
+    final itemH = dense ? 84.0 : 100.0;
+
+    if (cards.isEmpty) return const SizedBox.shrink();
+
+    return Center(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: maxWidth),
+        child: _ZenAppear(
+          delay: const Duration(milliseconds: 60),
+          child: SizedBox(
+            height: itemH,
+            child: ListView.separated(
+              padding: padding,
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              itemCount: cards.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 10),
+              itemBuilder: (context, i) {
+                final c = cards[i];
+                return _SkillCard(
+                  data: c,
+                  width: itemW,
+                  height: itemH,
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SkillCard extends StatelessWidget {
+  final SkillCardData data;
+  final double width;
+  final double height;
+
+  const _SkillCard({
+    required this.data,
+    required this.width,
+    required this.height,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+
+    final card = SizedBox(
+      width: width,
+      height: height,
+      child: ZenGlassCard(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        topOpacity: _kGlassTop,
+        bottomOpacity: _kGlassBottom,
+        borderOpacity: _kGlassBorder,
+        borderRadius: _kRadius14,
+        child: Row(
+          children: [
+            ExcludeSemantics(
+              child: Icon(data.icon, size: 20, color: _kInkStrong),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    data.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: tt.labelLarge?.copyWith(
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w800,
+                      color: _kInkStrong,
+                      height: 1.18,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    data.subtitle,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: tt.bodySmall?.copyWith(
+                      fontWeight: FontWeight.w500,
+                      color: _kInk.withValue(alpha: .85),
+                      height: 1.22,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (data.onTap == null) {
+      return card;
+    }
+
+    return Semantics(
+      button: true,
+      label: data.semanticsLabel ?? data.title,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: _kRadius14,
+          onTap: data.onTap,
+          child: card,
+        ),
+      ),
+    );
+  }
+}
+
+/// Kontext-Leiste mit Outline-Pills (z. B. Name/Consent/Modus). „Sticky“ über
+/// Parent (z. B. SliverPersistentHeader) nutzbar; hier nur der visuelle Block.
+class ContextPinBar extends StatelessWidget {
+  final List<Widget> pills;
+  final double maxWidth;
+  final bool elevated;
+  final EdgeInsetsGeometry padding;
+  final String? semanticsLabel;
+
+  const ContextPinBar({
+    super.key,
+    required this.pills,
+    this.maxWidth = 680,
+    this.elevated = true,
+    this.padding = const EdgeInsets.fromLTRB(10, 8, 10, 8),
+    this.semanticsLabel,
+  });
+
+  /// Bequeme Fabrik mit einfachen Text-Pills (Outline-Stil).
+  factory ContextPinBar.simple({
+    required List<String> labels,
+    double maxWidth = 680,
+    bool elevated = true,
+  }) {
+    return ContextPinBar(
+      maxWidth: maxWidth,
+      elevated: elevated,
+      pills: labels
+          .map((t) => _OutlineTextPill(label: t))
+          .toList(growable: false),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final shadow = elevated
+        ? const [
+            BoxShadow(
+              color: Color(0x14000000),
+              blurRadius: 18,
+              offset: Offset(0, 6),
+            )
+          ]
+        : const <BoxShadow>[];
+
+    return Center(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: maxWidth),
+        child: _ZenAppear(
+          delay: const Duration(milliseconds: 60),
+          child: Semantics(
+            container: true,
+            header: true,
+            label: semanticsLabel ?? 'Kontextleiste',
+            child: RepaintBoundary(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: ZenColors.surface.withValue(alpha: .88),
+                  borderRadius: _kRadius16,
+                  border: Border.all(color: ZenColors.outline),
+                  boxShadow: shadow,
+                ),
+                padding: padding,
+                child: FocusTraversalGroup(
+                  policy: OrderedTraversalPolicy(),
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    physics: const BouncingScrollPhysics(),
+                    child: Row(
+                      children: [
+                        for (int i = 0; i < pills.length; i++) ...[
+                          FocusTraversalOrder(
+                            order: NumericFocusOrder(i.toDouble()),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 4),
+                              child: pills[i],
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _OutlineTextPill extends StatelessWidget {
+  final String label;
+  const _OutlineTextPill({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: 32),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: ZenColors.surfaceAlt.withValue(alpha: .66),
+          border: Border.all(color: ZenColors.outline),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: tt.bodySmall?.copyWith(
+            fontWeight: FontWeight.w700,
+            color: _kInkStrong,
+            height: 1.10,
+          ),
+        ),
+      ),
+    );
   }
 }

@@ -1,21 +1,13 @@
-// [BASELINE] lib/core/memory/memory_service.dart — v6.3.8 (Stand: 30.10.2025)
+// [BASELINE] lib/core/memory/memory_service.dart — v6.4.2 (31.10.2025)
 // ZenYourself — MemoryService (Lokales Kontext-Gedächtnis, Ghost-Mode by default)
 // -----------------------------------------------------------------------------
-// Leitprinzipien:
-// • Passives Gedächtnis (Regel 46): keine proaktive Aufzählung, nur kontextual nutzen
-// • Ghost-Mode: keine PII ohne explizites Opt-in (Therapist-Mode = shareEnabled)
-// • UI darf nie blockieren: schwere Pfade async/best-effort, sync nur Tiny-Hints/Bytes
-// • Snake-Case für Payload-Brücken (context.memories{...}, memory_consent)
-// • Tolerant gegenüber Store-Implementierungen (reflektive Calls mit Fallbacks)
+// D1: FactType.insight + Serialisierung (MemoryFact) integriert.
+//     buildContextHint(..., activeFacet, topicPin) erweitert.
+//     Public-API: saveInsightFact(...).
+// E1: saveFromWorker(...) upsertet zusätzlich memories_to_save[*] als Facts.
 //
-// In diesem Modul (Bestätigung ohne Consent-Änderung):
-// • Flags: enabled (lokal), shareEnabled (Opt-in)
-// • buildContextHint(): kleine, synchrone Hints inkl. identity/profile (nur Cache)
-// • saveFromWorker(): robust, inkl. memories_to_save[] (Identity/Profile Upsert)
-// • buildContextMemories(consent: bool): sendet NUR bei consent==true (unverändert)
-//
-// Abhängigkeiten: insight_models.dart (Facet), MemoryEntry/Mapper/Store
-// -----------------------------------------------------------------------------
+// Rückwärtskompatibel zu v6.3.8. Bestehende Signaturen bleiben erhalten;
+// neue optionale Named-Parameter sind additive Erweiterungen.
 
 import 'dart:convert' show jsonEncode, jsonDecode, utf8;
 
@@ -25,8 +17,7 @@ import 'memory_mapper.dart';
 import 'memory_store.dart';
 
 /// Leichte, synchrone Hint-Struktur für den Worker (keine PII).
-/// Alle Felder optional; leere Felder werden nicht gesendet.
-/// **Hinweis**: identity/profile stammen nur aus Sync-Cache (keine awaits).
+/// **Neu**: activeFacet/topicPin (optional).
 class MemoryContextHint {
   final List<String>? facets; // stabile Facet-Keys
   final List<String>? tags; // optional
@@ -37,6 +28,10 @@ class MemoryContextHint {
   final String? profileUserName; // -> context.memories.profile.user_name
   final List<String>? profileNicknames; // -> context.memories.profile.nicknames[]
 
+  // Kontext-Pins (neu)
+  final String? activeFacet; // bevorzugte aktive Facette
+  final String? topicPin; // kurzer Themen-Pin/Schlüsselwort
+
   const MemoryContextHint({
     this.facets,
     this.tags,
@@ -44,6 +39,8 @@ class MemoryContextHint {
     this.identityName,
     this.profileUserName,
     this.profileNicknames,
+    this.activeFacet,
+    this.topicPin,
   });
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -62,6 +59,10 @@ class MemoryContextHint {
             if (profileNicknames != null && profileNicknames!.isNotEmpty)
               'nicknames': profileNicknames,
           },
+        if ((activeFacet ?? '').toString().trim().isNotEmpty)
+          'active_facet': activeFacet!.trim(),
+        if ((topicPin ?? '').toString().trim().isNotEmpty)
+          'topic_pin': topicPin!.trim(),
       };
 }
 
@@ -196,8 +197,6 @@ class MemoryService {
 
   // ---------------- Identity/Profile (lokal) ---------------------------------
 
-  /// Speichert Name lokal (PII). greetByName steuert, ob Panda den Namen
-  /// verwenden darf. Kein Versand ohne Consent.
   Future<void> saveIdentityName(String name, {bool greetByName = true}) async {
     try {
       final n = _cap(name.trim());
@@ -206,7 +205,6 @@ class MemoryService {
       await _setOptString(_kIdentityName, n);
       await _setOptBool(_kIdentityGreetByName, greetByName);
 
-      // Falls kein profile.user_name gesetzt ist, freundlich spiegeln
       if ((_profileUserNameCache == null ||
               _profileUserNameCache!.trim().isEmpty) &&
           greetByName == true) {
@@ -215,7 +213,6 @@ class MemoryService {
     } catch (_) {/* ignore */}
   }
 
-  /// Separater Profilname (user_name), oft identisch zu Identity.
   Future<void> saveProfileUserName(String name) async {
     try {
       final n = _cap(name.trim());
@@ -225,7 +222,6 @@ class MemoryService {
     } catch (_) {/* ignore */}
   }
 
-  /// Einen Spitznamen hinzufügen (de-duped, capped).
   Future<void> addNickname(String nickname) async {
     try {
       String n = _cap(nickname.trim());
@@ -243,14 +239,12 @@ class MemoryService {
     } catch (_) {/* ignore */}
   }
 
-  /// Nur die Anrede-Erlaubnis setzen (Name bleibt erhalten/leer).
   Future<void> setGreetingConsent(bool greetByName) async {
     try {
       await _setOptBool(_kIdentityGreetByName, greetByName);
     } catch (_) {/* ignore */}
   }
 
-  /// Löscht den lokal gespeicherten Namen (PII) und setzt greet_by_name=false.
   Future<void> forgetIdentityName() async {
     try {
       _identityNameCache = null; // Sync-Cache löschen
@@ -266,7 +260,6 @@ class MemoryService {
     } catch (_) {/* ignore */}
   }
 
-  /// Profilnamen & Nicknames vergessen (PII).
   Future<void> forgetProfileNames() async {
     try {
       _profileUserNameCache = null;
@@ -284,7 +277,6 @@ class MemoryService {
     } catch (_) {/* ignore */}
   }
 
-  /// Optionale Sammellöschung aller PII-Fakten (z. B. für Privacy-Screen).
   Future<void> forgetAllPII() async {
     try {
       final dyn = _store as dynamic;
@@ -301,7 +293,6 @@ class MemoryService {
     } catch (_) {/* ignore */}
   }
 
-  /// Liefert (Name, greetByName). Ist greetByName != true → Name NICHT verwenden.
   Future<({String? name, bool greetByName})> loadGreetingName() async {
     try {
       final name = await _getOptString(_kIdentityName);
@@ -314,7 +305,6 @@ class MemoryService {
     }
   }
 
-  /// Nur den Identity-Namen laden und in den Sync-Cache legen (für ApiService).
   Future<String?> loadIdentityName() async {
     try {
       final n = await _getOptString(_kIdentityName);
@@ -326,7 +316,6 @@ class MemoryService {
     }
   }
 
-  /// Markiert „heute lieber anonym“/„ohne Name“ u. ä. → greet_by_name=false.
   Future<void> maybeRespectAnonFromText(String text) async {
     if (!_enabled) return;
     try {
@@ -344,7 +333,6 @@ class MemoryService {
     } catch (_) {/* ignore */}
   }
 
-  /// Extrahiert aus natürlichem Text einen Vornamen und speichert ihn.
   Future<void> learnNameFromText(String text, {bool greetByName = true}) async {
     if (!_enabled) return;
     try {
@@ -406,8 +394,52 @@ class MemoryService {
 
   // ---------------- Write: Konversation & Worker-Save ------------------------
 
+  /// Public-API (D1): Einzelnen Insight-Fakt upserten (für Acknowledge-Layer/Badge).
+  Future<void> saveInsightFact({
+    String? sessionId,
+    String? topic,
+    required String line,
+    double? score,
+    String? activeFacet,
+    String? topicPin,
+    DateTime? createdAt,
+  }) async {
+    if (!_enabled) return;
+    try {
+      final ts = (createdAt ?? DateTime.now().toUtc());
+      final fact = MemoryFact(
+        id: 'f_${ts.millisecondsSinceEpoch}',
+        type: FactType.insight,
+        sessionId: (sessionId ?? '').trim().isEmpty ? null : sessionId!.trim(),
+        topic: (topic ?? '').trim().isEmpty ? null : topic!.trim(),
+        line: line.trim(),
+        score: score,
+        activeFacet:
+            (activeFacet ?? '').trim().isEmpty ? null : activeFacet!.trim(),
+        topicPin: (topicPin ?? '').trim().isEmpty ? null : topicPin!.trim(),
+        createdAt: ts,
+      );
+
+      final s = _store as dynamic;
+      try {
+        final r = s.upsertFacts?.call([fact.toMap()]);
+        if (r is Future) await r;
+        return;
+      } catch (_) {/* try next */}
+      try {
+        final r = s.upsertFact?.call(fact.toMap());
+        if (r is Future) await r;
+        return;
+      } catch (_) {/* try next */}
+      try {
+        final r = s.saveFact?.call(fact.toMap());
+        if (r is Future) await r;
+      } catch (_) {/* ignore */}
+    } catch (_) {/* ignore */}
+  }
+
   /// Speichert tolerant aus einer Worker-Response (no-op, wenn disabled).
-  /// Verarbeitet zusätzlich memories_to_save[] (Identity/Profile Upsert).
+  /// Verarbeitet zusätzlich memories_to_save[] (Identity/Profile + Insights).
   Future<void> saveFromWorker(dynamic workerResponse, {String? source}) async {
     if (!_enabled) return;
     try {
@@ -437,13 +469,66 @@ class MemoryService {
             facets: facetKeys.take(6).toList(growable: false),
             tags: null,
             topics: facetLabels.take(6).toList(growable: false),
-            // Names werden unten via memories_to_save ergänzt
+            // Name/activeFacet/topicPin werden unten ggf. ergänzt
           );
           _lastHintTs = DateTime.now();
         }
       }
 
-      // 2) memories_to_save[] tolerant einlesen (Upsert)
+      // 2) D1/E1 — Facts aus memories_to_save extrahieren und upserten
+      final facts = MemoryMapper.factsFromWorker(map);
+      if (facts.isNotEmpty) {
+        final maps = facts.map((f) => f.toMap()).toList(growable: false);
+        final s = _store as dynamic;
+
+        bool savedBatch = false;
+        try {
+          final r = s.upsertFacts?.call(maps);
+          if (r is Future) await r;
+          savedBatch = true;
+        } catch (_) {/* try next */}
+        if (!savedBatch) {
+          try {
+            final r = s.saveFacts?.call(maps);
+            if (r is Future) await r;
+            savedBatch = true;
+          } catch (_) {/* try next */}
+        }
+        if (!savedBatch) {
+          for (final m in maps) {
+            try {
+              final r = s.upsertFact?.call(m);
+              if (r is Future) await r;
+            } catch (_) {
+              try {
+                final r2 = s.saveFact?.call(m);
+                if (r2 is Future) await r2;
+              } catch (_) {/* swallow */}
+            }
+          }
+        }
+
+        // Hint um activeFacet/topicPin aus dem ersten Fact ergänzen (sync)
+        final first = facts.first;
+        final af = (first.activeFacet ?? '').trim();
+        final pin = (first.topicPin ?? '').trim();
+        if (af.isNotEmpty || pin.isNotEmpty) {
+          final base = _lastHint;
+          _lastHint = MemoryContextHint(
+            facets: base?.facets,
+            tags: base?.tags,
+            topics: base?.topics,
+            identityName: base?.identityName,
+            profileUserName: base?.profileUserName,
+            profileNicknames: base?.profileNicknames,
+            activeFacet: af.isNotEmpty ? af : base?.activeFacet,
+            topicPin: pin.isNotEmpty ? pin : base?.topicPin,
+          );
+          _lastHintTs ??= DateTime.now();
+        }
+      }
+
+      // 3) Bestehende Identity/Profile-Upserts aus memories_to_save (PII)
       await _ingestMemoriesToSave(map);
 
       _invalidateSoftCaches();
@@ -462,28 +547,24 @@ class MemoryService {
     await _saveLine('panda', text, meta: meta);
   }
 
-  /// Acknowledge-Ereignis bei Einsicht & Themen-Overlap registrieren (best-effort).
   Future<void> recordAcknowledge(Map<String, dynamic> ack) async {
     if (!_enabled) return;
     try {
       final safeAck = Map<String, dynamic>.from(ack);
       final dyn = _store as dynamic;
 
-      // 1) Spezifische Store-Methode
       try {
         final r = dyn.recordAcknowledge(safeAck);
         if (r is Future) await r;
         return;
       } catch (_) {/* try next */}
 
-      // 2) Alternative Namensvarianten
       try {
         final r = dyn.saveAck?.call(safeAck);
         if (r is Future) await r;
         return;
       } catch (_) {/* try next */}
 
-      // 3) Fallback: generische Map-Speicherung mit kind:'ack'
       safeAck.putIfAbsent('kind', () => 'ack');
       safeAck.putIfAbsent('ts', () => DateTime.now().toUtc().toIso8601String());
       try {
@@ -498,7 +579,6 @@ class MemoryService {
     } catch (_) {/* ignore */}
   }
 
-  /// Zentrale, compile-sichere Line-Save-Kaskade ohne statische MemoryEntry-Factories.
   Future<void> _saveLine(String role, String text,
       {Map<String, dynamic>? meta}) async {
     if (!_enabled) return;
@@ -506,7 +586,6 @@ class MemoryService {
       final m = meta ?? const <String, dynamic>{};
       final dyn = _store as dynamic;
 
-      // 1) Spezifische Methoden (falls vorhanden)
       try {
         if (role == 'user') {
           final r = dyn.saveUserLine(text, m);
@@ -519,7 +598,6 @@ class MemoryService {
         }
       } catch (_) {/* try next */}
 
-      // 2) Generische Append/SaveLine-Varianten
       try {
         final r = dyn.appendLine(role, text, m);
         if (r is Future) await r;
@@ -531,7 +609,6 @@ class MemoryService {
         return;
       } catch (_) {/* try next */}
 
-      // 3) Map-Fallback (einige Stores akzeptieren Map-Objekte)
       final map = {
         'kind': 'line',
         'role': role,
@@ -577,7 +654,6 @@ class MemoryService {
     }
   }
 
-  /// Aggregiert Top-Facetten (als Facet-Objekte mit 'hits').
   Future<List<Facet>> topFacets({int limit = 8}) async {
     try {
       if (_topFacetsCache != null &&
@@ -624,7 +700,6 @@ class MemoryService {
     }
   }
 
-  /// Human-friendly „Letzte Themen“ (nur Labels, deduped, neueste zuerst).
   Future<List<String>> latestTopics({int limit = 6}) async {
     try {
       if (_latestTopicsCache != null &&
@@ -658,7 +733,6 @@ class MemoryService {
     }
   }
 
-  /// Alias (für ApiService.recentTopics)
   Future<List<String>> recentTopics({int limit = 6}) =>
       latestTopics(limit: limit);
 
@@ -713,11 +787,13 @@ class MemoryService {
   // ---------------- Sync-Hints & Memories für ApiService ---------------------
 
   /// **Synchroner** Hint für den Worker (klein, aus Cache).
-  /// Enthält zusätzlich identity/profile (Name + Nicknames) als reine Hints.
+  /// **Neu**: optionale Pins `activeFacet` / `topicPin`.
   MemoryContextHint? buildContextHint({
     int maxFacets = 3,
     int maxTags = 5,
     int maxAgeDays = _hintTtlDays,
+    String? activeFacet,
+    String? topicPin,
   }) {
     try {
       if (!_enabled) return null;
@@ -740,6 +816,9 @@ class MemoryService {
             topics = (hint.topics == null)
                 ? null
                 : hint.topics!.take(5).toList(growable: false);
+            // Vorhandene Pins aus letztem Hint übernehmen, falls keine neuen kommen
+            activeFacet ??= hint.activeFacet;
+            topicPin ??= hint.topicPin;
           }
         }
       }
@@ -758,7 +837,9 @@ class MemoryService {
           (topics == null || topics.isEmpty) &&
           idName.isEmpty &&
           profName.isEmpty &&
-          nicks.isEmpty) {
+          nicks.isEmpty &&
+          (activeFacet == null || activeFacet.trim().isEmpty) &&
+          (topicPin == null || topicPin.trim().isEmpty)) {
         return null;
       }
 
@@ -769,19 +850,14 @@ class MemoryService {
         identityName: idName.isEmpty ? null : idName,
         profileUserName: profName.isEmpty ? null : profName,
         profileNicknames: nicks.isEmpty ? null : nicks,
+        activeFacet: (activeFacet ?? '').trim().isEmpty ? null : activeFacet!.trim(),
+        topicPin: (topicPin ?? '').trim().isEmpty ? null : topicPin!.trim(),
       );
     } catch (_) {
       return null;
     }
   }
 
-  /// **Memories-Block** für ApiService (nur bei Consent verwenden!).
-  /// Enthält:
-  ///  - identity{name} (nur wenn greet_by_name==true)
-  ///  - profile{user_name,nicknames?} (freundlicher Spiegel)
-  ///  - hint{facets,tags,topics} (klein, sync)
-  ///  - recent_topics [Labels] (max 8) — human-friendly
-  ///  - share:true (falls Therapist-Mode aktiv)
   Future<Map<String, dynamic>> buildContextMemories(
       {required bool consent}) async {
     try {
@@ -838,6 +914,10 @@ class MemoryService {
           'facets': _lastHint!.facets!.take(6).toList(),
         if (_lastHint!.topics != null && _lastHint!.topics!.isNotEmpty)
           'topics': _lastHint!.topics!.take(6).toList(),
+        if ((_lastHint!.activeFacet ?? '').trim().isNotEmpty)
+          'active_facet': _lastHint!.activeFacet!.trim(),
+        if ((_lastHint!.topicPin ?? '').trim().isNotEmpty)
+          'topic_pin': _lastHint!.topicPin!.trim(),
         if (_shareEnabled) 'share': true,
       };
       if (map.isEmpty) return null;
@@ -862,12 +942,15 @@ class MemoryService {
           const [];
       if (list.isEmpty) return;
 
+      // 1) Identity/Profile + 2) generische Saves + 3) Insight-Facts
+      final factMaps = <Map<String, dynamic>>[];
+
       for (final item in list) {
         if (item == null) continue;
         if (item is Map) {
           final mem = Map<String, dynamic>.from(item);
 
-          // identity.name
+          // (1) identity.name
           final idMap = (mem['identity'] is Map)
               ? Map<String, dynamic>.from(mem['identity'])
               : null;
@@ -879,7 +962,7 @@ class MemoryService {
             await saveIdentityName(idName!);
           }
 
-          // profile.user_name & profile.nicknames[]
+          // (1) profile.user_name & profile.nicknames[]
           final profMap = (mem['profile'] is Map)
               ? Map<String, dynamic>.from(mem['profile'])
               : null;
@@ -897,7 +980,7 @@ class MemoryService {
             await addNickname(nick);
           }
 
-          // best-effort generisch sichern (falls Store es unterstützt)
+          // (2) best-effort generisch sichern (falls Store es unterstützt)
           try {
             final dyn = _store as dynamic;
             final safe = <String, dynamic>{
@@ -914,17 +997,64 @@ class MemoryService {
               if (r2 is Future) await r2;
             } catch (_) {/* ignore */}
           } catch (_) {/* ignore */}
+
+          // (3) Insight-Fact herausziehen (falls vorhanden)
+          final m = {
+            ...mem,
+            'type': mem['type'] ?? 'insight',
+          };
+          try {
+            final fact = MemoryFact.fromMap(m);
+            factMaps.add(fact.toMap());
+          } catch (_) {/* ignore */}
         } else if (item is String) {
-          // simple string → ggf. als Nickname interpretieren (z. B. "Matze")
+          // einfacher String → kann ein Insight-Satz sein ODER Nickname
           final s = item.trim();
-          // FIX: 'und' → '&&' (Dart)
           if (s.split(' ').length == 1 && s.length >= 2 && s.length <= 24) {
-            await addNickname(s);
+            await addNickname(s); // kurzer Alias
+          } else if (s.isNotEmpty) {
+            try {
+              final fact = MemoryFact.fromMap({
+                'type': 'insight',
+                'line': s,
+              });
+              factMaps.add(fact.toMap());
+            } catch (_) {/* ignore */}
           }
         }
       }
 
-      // Hint um Namen ergänzen (sync), ohne await
+      if (factMaps.isNotEmpty) {
+        final s = _store as dynamic;
+        bool ok = false;
+        try {
+          final r = s.upsertFacts?.call(factMaps);
+          if (r is Future) await r;
+          ok = true;
+        } catch (_) {/* try next */}
+        if (!ok) {
+          try {
+            final r = s.saveFacts?.call(factMaps);
+            if (r is Future) await r;
+            ok = true;
+          } catch (_) {/* try next */}
+        }
+        if (!ok) {
+          for (final m in factMaps) {
+            try {
+              final r = s.upsertFact?.call(m);
+              if (r is Future) await r;
+            } catch (_) {
+              try {
+                final r2 = s.saveFact?.call(m);
+                if (r2 is Future) await r2;
+              } catch (_) {/* swallow */}
+            }
+          }
+        }
+      }
+
+      // Hint um Namen/Pins ergänzen (sync), ohne await
       final idNameNow = (_identityNameCache ?? '').trim();
       final profNameNow = (_profileUserNameCache ?? '').trim();
       final nicksNow = (_profileNicknamesCache ?? const <String>[])
@@ -932,23 +1062,19 @@ class MemoryService {
           .map((e) => e.trim())
           .toList(growable: false);
 
-      if (_lastHint != null ||
-          idNameNow.isNotEmpty ||
-          profNameNow.isNotEmpty ||
-          nicksNow.isNotEmpty) {
-        final base = _lastHint;
-        _lastHint = MemoryContextHint(
-          facets: base?.facets,
-          tags: base?.tags,
-          topics: base?.topics,
-          identityName: idNameNow.isEmpty ? base?.identityName : idNameNow,
-          profileUserName:
-              profNameNow.isEmpty ? base?.profileUserName : profNameNow,
-          profileNicknames:
-              (nicksNow.isEmpty ? base?.profileNicknames : nicksNow),
-        );
-        _lastHintTs ??= DateTime.now();
-      }
+      _lastHint = MemoryContextHint(
+        facets: _lastHint?.facets,
+        tags: _lastHint?.tags,
+        topics: _lastHint?.topics,
+        identityName: idNameNow.isEmpty ? _lastHint?.identityName : idNameNow,
+        profileUserName:
+            profNameNow.isEmpty ? _lastHint?.profileUserName : profNameNow,
+        profileNicknames:
+            (nicksNow.isEmpty ? _lastHint?.profileNicknames : nicksNow),
+        activeFacet: _lastHint?.activeFacet,
+        topicPin: _lastHint?.topicPin,
+      );
+      _lastHintTs ??= DateTime.now();
     } catch (_) {/* ignore */}
   }
 
@@ -1100,7 +1226,6 @@ class MemoryService {
     return null;
   }
 
-  // Kleine Utils
   static List<String> _parseStringList(dynamic v) {
     if (v == null) return const <String>[];
     if (v is List) {

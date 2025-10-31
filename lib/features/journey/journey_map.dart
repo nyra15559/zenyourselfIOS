@@ -1,6 +1,6 @@
 // lib/features/journey/journey_map.dart
 //
-// JourneyMapScreen — v9.0 Oxford (responsive grid, overflow-safe)
+// JourneyMapScreen — v9.1 Oxford (responsive grid, overflow-safe, WIP-Sheets)
 // -----------------------------------------------------------------------------
 // • Volle Responsivität (xs/sm: 1 Spalte; md+: 2 Spalten)
 // • Grid via Slivers; Footer als eigener Sliver (kein Overlay)
@@ -9,10 +9,12 @@
 // • TextScaler lokal geklemmt
 // • FIX: Zurück-Button liegt jetzt in einer SliverAppBar (nimmt Platz ein),
 //   ragt somit nicht mehr in den Content hinein und bleibt zuverlässig klickbar.
+// • NEU: Freundliche WIP-Sheets für „Impuls“ & „Therapeuten-Modus“ im Journey-Screen
 // -----------------------------------------------------------------------------
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:provider/provider.dart';
 
 import '../../shared/zen_style.dart' as zs hide ZenBackdrop, ZenGlassCard;
@@ -91,7 +93,8 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
   Future<void> _openReflection() async {
     HapticFeedback.selectionClick();
     await _pushLocked(
-        MaterialPageRoute(builder: (_) => const ReflectionScreen()));
+      MaterialPageRoute(builder: (_) => const ReflectionScreen()),
+    );
   }
 
   void _showLockedSnack(int remaining) {
@@ -103,6 +106,87 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
       duration: const Duration(seconds: 2),
     );
     ScaffoldMessenger.maybeOf(context)?.showSnackBar(snack);
+  }
+
+  /// Freundliches WIP-Sheet (Oxford-Zen) für noch nicht fertige Bereiche.
+  Future<void> _showWipSheet({
+    required IconData icon,
+    required String title,
+    required String body,
+    VoidCallback? onDevOpen, // optional: „Trotzdem öffnen (Dev)“
+  }) async {
+    HapticFeedback.selectionClick();
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: false,
+      useSafeArea: true,
+      showDragHandle: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        final tt = Theme.of(ctx).textTheme;
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+          child: ZenGlassCard(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+            topOpacity: .20,
+            bottomOpacity: .20,
+            borderOpacity: .22,
+            borderRadius: const BorderRadius.all(Radius.circular(18)),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(icon, color: zs.ZenColors.jade),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: tt.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(body, style: tt.bodyMedium),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    TextButton.icon(
+                      onPressed: () => Navigator.of(ctx).pop(),
+                      icon: const Icon(Icons.check_rounded),
+                      label: const Text('Verstanden'),
+                    ),
+                    const Spacer(),
+                    // Sinngemäße Abkürzung: Direkt zur Reflexion
+                    TextButton(
+                      onPressed: () {
+                        Navigator.of(ctx).pop();
+                        _openReflection();
+                      },
+                      child: const Text('Jetzt reflektieren'),
+                    ),
+                    if (kDebugMode && onDevOpen != null) ...[
+                      const SizedBox(width: 6),
+                      TextButton(
+                        onPressed: () {
+                          Navigator.of(ctx).pop();
+                          onDevOpen();
+                        },
+                        child: const Text('Trotzdem öffnen (Dev)'),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   @override
@@ -147,7 +231,8 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
         subtitleXs: 'Gedanken loslassen',
         subtitleMd: 'Lass deine Gedanken los',
         onTap: () => _pushLocked(
-            MaterialPageRoute(builder: (_) => const JournalScreen())),
+          MaterialPageRoute(builder: (_) => const JournalScreen()),
+        ),
       ),
       _OptionData(
         icon: Icons.psychology_alt_rounded,
@@ -175,13 +260,22 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
           _pushLocked(MaterialPageRoute(builder: (_) => const StoryScreen()));
         },
       ),
+      // --- Impuls: WIP-Sheet statt direkt öffnen ---
       _OptionData(
         icon: Icons.bubble_chart_rounded,
         label: 'Impuls',
         subtitleXs: 'Atem & Reset',
         subtitleMd: 'Atem & Mini-Reset',
-        onTap: () => _pushLocked(
-            MaterialPageRoute(builder: (_) => const ImpulseScreen())),
+        onTap: () => _showWipSheet(
+          icon: Icons.local_florist_rounded,
+          title: 'An diesem Garten wird noch gebaut',
+          body:
+              'Der Panda hat die Blümchen hier noch nicht gefunden. Wir bauen diesen Bereich gerade – '
+              'bald findest du hier kleine Impulse für einen freundlichen Reset.',
+          onDevOpen: () => _pushLocked(
+            MaterialPageRoute(builder: (_) => const ImpulseScreen()),
+          ),
+        ),
       ),
       _OptionData(
         icon: Icons.insights_rounded,
@@ -197,16 +291,25 @@ class _JourneyMapScreenState extends State<JourneyMapScreen>
           ),
         ),
       ),
+      // --- Therapeuten-Modus: WIP-Sheet mit Ausblick ---
       _OptionData(
         icon: Icons.verified_user_rounded,
         label: 'Therapeuten-Modus',
         subtitleXs: 'Code eingeben & teilen',
         subtitleMd: 'Code eingeben & teilen',
-        onTap: () => _pushLocked(
-          MaterialPageRoute(
-            builder: (_) => ProScreen(
-              moodEntries: widget.moodEntries,
-              reflectionEntries: widget.reflections,
+        onTap: () => _showWipSheet(
+          icon: Icons.verified_user_rounded,
+          title: 'Therapeuten-Modus (bald)',
+          body:
+              'Wir finalisieren die sichere, gezielte Freigabe: Mit Code, klarer Kontrolle und anonymisierbaren Reports. '
+              'Schon bald kannst du ausgewählte Einträge teilen – nur wenn du willst.',
+          // Dev-Pfad: ProScreen als temporärer Platzhalter
+          onDevOpen: () => _pushLocked(
+            MaterialPageRoute(
+              builder: (_) => ProScreen(
+                moodEntries: widget.moodEntries,
+                reflectionEntries: widget.reflections,
+              ),
             ),
           ),
         ),

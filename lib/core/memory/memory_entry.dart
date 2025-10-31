@@ -1,19 +1,16 @@
-// [BASELINE] lib/core/memory/memory_entry.dart — v6.3.1 (Stand: 29.10.2025)
+// [BASELINE] lib/core/memory/memory_entry.dart — v6.4.2 (31.10.2025)
 //
-// MemoryEntry — DTO für lokales Kontext-Gedächtnis (snake_case-Maps, defensiv)
-// -----------------------------------------------------------------------------
-// Kompatibilität (v1 → v2):
+// MemoryEntry & MemoryFact — DTOs fürs lokale Kontext-Gedächtnis (snake_case, defensiv)
+// -------------------------------------------------------------------------------------
+// Rückwärtskompatibel zu v6.3.x (Entry); neu: MemoryFact/FactType mit type=insight.
+//
+// Entry Kompatibilität (v1 → v2):
 // • sessionId                ⇆  id / session_id
 // • createdAt (ISO-UTC)      ⇆  created_at / ts
 // • contextFacets[List<Facet>] ⇆  context_facets / facets[List<String>]
 // • insightScore[Map|num]    ⇆  insight_score
 // • mood{mental,physical}    ⇆  Strings/Nums; Aliasse: icon/body/somatic
 // • summary / nextHint       ⇆  summary / next_hint
-//
-// Hinweise:
-// • toMap() gibt NUR snake_case-Schlüssel zurück (v2 Standard).
-// • fromMap() akzeptiert v1/v2/“schmale” Maps (line/ack) und normalisiert defensiv.
-// • toJson()/fromJson() sind Convenience-Wrapper für (De-)Serialisierung.
 
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
@@ -39,8 +36,6 @@ class MemoryEntry {
     this.summary,
     this.nextHint,
   });
-
-  // ---------- Copy ------------------------------------------------------------
 
   MemoryEntry copyWith({
     String? sessionId,
@@ -76,24 +71,20 @@ class MemoryEntry {
   }
 
   static DateTime _asDateTimeUtc(dynamic x) {
-    // Unterstützt ISO-Strings und Fallback auf now()
     final s = _asString(x).trim();
     final dt = DateTime.tryParse(s);
     return (dt ?? DateTime.now()).toUtc();
   }
 
-  // ---------- (De-)Serialisierung --------------------------------------------
+  // ---------- (De-)Serialisierung (Entry) ------------------------------------
 
   factory MemoryEntry.fromMap(Map<String, dynamic> m) {
-    // sessionId (Aliases)
     final sidRaw = m['sessionId'] ?? m['session_id'] ?? m['id'];
     final sid = _asString(sidRaw).trim();
 
-    // createdAt (Aliases: created_at / ts)
     final createdRaw = m['createdAt'] ?? m['created_at'] ?? m['ts'];
     final createdAt = _asDateTimeUtc(createdRaw);
 
-    // contextFacets: bevorzugt List<Map>, Fallback List<String>
     final facets = <Facet>[];
     final cfRaw = m['contextFacets'] ?? m['context_facets'] ?? m['facets'];
     if (cfRaw is List) {
@@ -101,19 +92,14 @@ class MemoryEntry {
         if (e is Map) {
           try {
             facets.add(Facet.fromMap(Map<String, dynamic>.from(e)));
-          } catch (_) {
-            // defektes Einzelelement ignorieren
-          }
+          } catch (_) {/* ignore */}
         } else {
           final s = _asString(e).trim();
-          if (s.isNotEmpty) {
-            facets.add(Facet(key: s, label: s));
-          }
+          if (s.isNotEmpty) facets.add(Facet(key: s, label: s));
         }
       }
     }
 
-    // insightScore: Map (v2) oder num/String (v1)
     InsightScore? insightScore;
     final rawInsight = m['insightScore'] ?? m['insight_score'];
     if (rawInsight is Map) {
@@ -128,7 +114,6 @@ class MemoryEntry {
       if (n != null) insightScore = InsightScore(n);
     }
 
-    // mood: akzeptiere Map mit int/num/String und Aliasse
     MoodPair? mood;
     final rawMood = m['mood'];
     if (rawMood is Map) {
@@ -139,14 +124,11 @@ class MemoryEntry {
       );
     }
 
-    // summary / nextHint (Aliasse)
     final summaryRaw = m['summary'];
     final nextHintRaw = m['nextHint'] ?? m['next_hint'];
-
     final summary = _asString(summaryRaw).trim();
     final nextHint = _asString(nextHintRaw).trim();
 
-    // Session-Fallback
     final sessionId =
         sid.isNotEmpty ? sid : 'local_${DateTime.now().millisecondsSinceEpoch}';
 
@@ -162,7 +144,6 @@ class MemoryEntry {
   }
 
   Map<String, dynamic> toMap() => <String, dynamic>{
-        // v2: ausschließlich snake_case Keys zurückgeben
         'session_id': sessionId,
         'created_at': createdAt.toUtc().toIso8601String(),
         'context_facets': contextFacets.map((f) => f.toMap()).toList(),
@@ -172,12 +153,9 @@ class MemoryEntry {
         'next_hint': nextHint,
       };
 
-  /// JSON-Convenience
   String toJson() => jsonEncode(toMap());
   factory MemoryEntry.fromJson(String json) =>
       MemoryEntry.fromMap(jsonDecode(json) as Map<String, dynamic>);
-
-  // ---------- Equality / Hash / Debug ----------------------------------------
 
   @override
   bool operator ==(Object other) {
@@ -206,4 +184,197 @@ class MemoryEntry {
   @override
   String toString() =>
       'MemoryEntry(sessionId:$sessionId, createdAt:$createdAt, facets:${contextFacets.length})';
+}
+
+// ============================================================================
+// MemoryFact / FactType — u. a. für „insight“-Fakten (Worker → memories_to_save)
+// ============================================================================
+
+enum FactType { identity, topic, facet, insight, name, mood, custom }
+
+FactType _parseFactType(dynamic x, {FactType fallback = FactType.custom}) {
+  final s = (x ?? '').toString().trim().toLowerCase();
+  switch (s) {
+    case 'identity':
+      return FactType.identity;
+    case 'topic':
+      return FactType.topic;
+    case 'facet':
+      return FactType.facet;
+    case 'insight':
+      return FactType.insight;
+    case 'name':
+      return FactType.name;
+    case 'mood':
+      return FactType.mood;
+    case 'custom':
+      return FactType.custom;
+    default:
+      return fallback;
+  }
+}
+
+String _factTypeToWire(FactType t) {
+  switch (t) {
+    case FactType.identity:
+      return 'identity';
+    case FactType.topic:
+      return 'topic';
+    case FactType.facet:
+      return 'facet';
+    case FactType.insight:
+      return 'insight';
+    case FactType.name:
+      return 'name';
+    case FactType.mood:
+      return 'mood';
+    case FactType.custom:
+      return 'custom';
+  }
+}
+
+@immutable
+class MemoryFact {
+  final String id;
+  final FactType type;
+  final String? sessionId;
+  final String? topic;       // Thema/Kategorie
+  final String? line;        // Kurzsatz/Hinweis (Badge/Hint)
+  final double? score;       // Stärke/Confidence/Insight 0..1
+  final String? activeFacet; // aktives Facettenlabel (Bridge/Pin)
+  final String? topicPin;    // Topic-Pin/Schlüsselwort
+  final DateTime createdAt;
+
+  const MemoryFact({
+    required this.id,
+    required this.type,
+    required this.createdAt,
+    this.sessionId,
+    this.topic,
+    this.line,
+    this.score,
+    this.activeFacet,
+    this.topicPin,
+  });
+
+  MemoryFact copyWith({
+    String? id,
+    FactType? type,
+    String? sessionId,
+    String? topic,
+    String? line,
+    double? score,
+    String? activeFacet,
+    String? topicPin,
+    DateTime? createdAt,
+  }) {
+    return MemoryFact(
+      id: id ?? this.id,
+      type: type ?? this.type,
+      sessionId: sessionId ?? this.sessionId,
+      topic: topic ?? this.topic,
+      line: line ?? this.line,
+      score: score ?? this.score,
+      activeFacet: activeFacet ?? this.activeFacet,
+      topicPin: topicPin ?? this.topicPin,
+      createdAt: createdAt ?? this.createdAt,
+    );
+  }
+
+  static DateTime _dt(dynamic x) {
+    final s = (x ?? '').toString();
+    final dt = DateTime.tryParse(s);
+    return (dt ?? DateTime.now()).toUtc();
+  }
+
+  static double? _asDouble(dynamic x) {
+    if (x == null) return null;
+    if (x is num) return x.toDouble();
+    final d = double.tryParse(x.toString().replaceAll(',', '.'));
+    return d;
+  }
+
+  factory MemoryFact.fromMap(Map<String, dynamic> m) {
+    final type = _parseFactType(m['type']);
+    final id = (m['id'] ?? m['key'] ?? '').toString().trim();
+    final sid = (m['session_id'] ?? m['sessionId'] ?? '').toString().trim();
+
+    final topic =
+        (m['topic'] ?? m['label'] ?? m['category'] ?? '').toString().trim();
+    final line = (m['line'] ??
+            m['text'] ??
+            m['hint'] ??
+            m['summary'] ??
+            m['title'] ??
+            '')
+        .toString()
+        .trim();
+
+    final score =
+        _asDouble(m['score'] ?? m['insight_score'] ?? m['confidence']);
+    final af = (m['active_facet'] ?? m['facet'] ?? '').toString().trim();
+    final pin = (m['topic_pin'] ?? m['pin'] ?? '').toString().trim();
+    final ts = _dt(m['created_at'] ?? m['ts']);
+
+    return MemoryFact(
+      id: id.isEmpty ? 'f_${ts.millisecondsSinceEpoch}' : id,
+      type: type,
+      sessionId: sid.isEmpty ? null : sid,
+      topic: topic.isEmpty ? null : topic,
+      line: line.isEmpty ? null : line,
+      score: score,
+      activeFacet: af.isEmpty ? null : af,
+      topicPin: pin.isEmpty ? null : pin,
+      createdAt: ts,
+    );
+  }
+
+  Map<String, dynamic> toMap() => <String, dynamic>{
+        'id': id,
+        'type': _factTypeToWire(type),
+        if (sessionId != null && sessionId!.isNotEmpty) 'session_id': sessionId,
+        if (topic != null && topic!.isNotEmpty) 'topic': topic,
+        if (line != null && line!.isNotEmpty) 'line': line,
+        if (score != null) 'score': score,
+        if (activeFacet != null && activeFacet!.isNotEmpty)
+          'active_facet': activeFacet,
+        if (topicPin != null && topicPin!.isNotEmpty) 'topic_pin': topicPin,
+        'created_at': createdAt.toUtc().toIso8601String(),
+      };
+
+  String toJson() => jsonEncode(toMap());
+  factory MemoryFact.fromJson(String json) =>
+      MemoryFact.fromMap(jsonDecode(json) as Map<String, dynamic>);
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is MemoryFact &&
+        other.id == id &&
+        other.type == type &&
+        other.sessionId == sessionId &&
+        other.topic == topic &&
+        other.line == line &&
+        other.score == score &&
+        other.activeFacet == activeFacet &&
+        other.topicPin == topicPin &&
+        other.createdAt == createdAt;
+  }
+
+  @override
+  int get hashCode => Object.hash(
+        id,
+        type,
+        sessionId,
+        topic,
+        line,
+        score,
+        activeFacet,
+        topicPin,
+        createdAt,
+      );
+
+  @override
+  String toString() =>
+      'MemoryFact(${_factTypeToWire(type)} id:$id topic:$topic facet:$activeFacet pin:$topicPin)';
 }

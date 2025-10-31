@@ -1,7 +1,7 @@
-//[BASELINE] lib/shared/ui/zen_widgets.dart (Stand: 29.10.)
+// [BASELINE] lib/shared/ui/zen_widgets.dart (Stand: 31.10.)
 // lib/shared/ui/zen_widgets.dart
 //
-// Oxford–Zen UI Widgets (v6.95 · 2025-10-23)
+// Oxford–Zen UI Widgets (v6.96 · 2025-10-31)
 // ---------------------------------------------------------------------------
 // WICHTIG – Vereinheitlichung v6.1 (ohne neue Dateien):
 // • Glas: Blur σ=18, bg White @0.20, border White @0.22, Shadow (0,8,20,0.10), Radius 20
@@ -15,6 +15,11 @@
 // • Effektives Body-Padding berücksichtigt Tastatur-Insets > SafeArea.
 // • Buttons: einheitlicher Icon–Label Abstand (10 px), optionale Semantics (TalkBack).
 // • ZenMetricTile hinzugefügt (A11y-freundlicher Metric-Tile).
+//
+// v6.96 – Änderungen (Task 9):
+// • F1: Wiederverwendbare Bausteine für PinBar/Footer ergänzt:
+//   – ZenOutlineButton: optionaler Tooltip-Parameter (rückwärtskompatibel).
+//   – NEU: ZenIconChip (Icon + optionales Label), kompakt & tonal/outlinefähig.
 //
 // Abhängigkeiten (pubspec):
 //   lottie: ^3.3.1
@@ -637,8 +642,6 @@ class ZenBackdrop extends StatelessWidget {
                   ),
                 ).copyWith(
                     // Alpha gemäß Parameter steuern
-                    // (Workaround: RadialGradient kann nicht direkt „alpha“ haben;
-                    // daher hier Layering vereinfachen – in der Praxis reicht dies)
                     ),
               ),
             ),
@@ -768,8 +771,7 @@ class ZenPandaSpeechBubble extends StatelessWidget {
     return AnimatedContainer(
       duration: _animMed,
       curve: Curves.easeOutCubic,
-      margin: const EdgeInsets.only(
-          bottom: 16), // fix: EdgeInsets statt EdgeBoxConstraints
+      margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
         color: bg,
         borderRadius: const BorderRadius.all(ZenRadii.l),
@@ -952,6 +954,9 @@ class ZenOutlineButton extends StatelessWidget {
   final String? semanticsLabel;
   final String? semanticsHint;
 
+  /// Optional: Tooltip (für PinBar/Footer praktisch)
+  final String? tooltip;
+
   const ZenOutlineButton({
     super.key,
     required this.label,
@@ -962,6 +967,7 @@ class ZenOutlineButton extends StatelessWidget {
     this.color,
     this.semanticsLabel,
     this.semanticsHint,
+    this.tooltip,
   });
 
   @override
@@ -1002,6 +1008,10 @@ class ZenOutlineButton extends StatelessWidget {
         hint: semanticsHint,
         child: btn,
       );
+    }
+
+    if (tooltip != null && tooltip!.trim().isNotEmpty) {
+      btn = Tooltip(message: tooltip!, child: btn);
     }
 
     return btn;
@@ -1204,6 +1214,106 @@ class ZenChipOutline extends StatelessWidget {
       ),
       visualDensity: VisualDensity.compact,
     );
+  }
+}
+
+/// ======================================================================
+/// ICON CHIP — kompakter Icon-Chip (PinBar/Footer)
+/// ======================================================================
+class ZenIconChip extends StatelessWidget {
+  /// Haupticon (z. B. push_pin, bookmark, mic, send, more_horiz)
+  final IconData icon;
+
+  /// Optionales Label (rechts vom Icon). Wenn null → reiner Icon-Chip.
+  final String? label;
+
+  /// Tap-Callback
+  final VoidCallback onPressed;
+
+  /// Primärfarbe des Chips (Umriss/Text/Icon). Default: ZenColors.jade
+  final Color? color;
+
+  /// Visuelle Auswahl (tonaler Fill + stärkere Outline)
+  final bool selected;
+
+  /// Dichter Modus (geringere Höhe/Padding; gut für Toolbars)
+  final bool dense;
+
+  /// Optionaler Tooltip (für reine Icon-Chips empfohlen)
+  final String? tooltip;
+
+  /// A11y (optional)
+  final String? semanticsLabel;
+  final String? semanticsHint;
+
+  const ZenIconChip({
+    super.key,
+    required this.icon,
+    this.label,
+    required this.onPressed,
+    this.color,
+    this.selected = false,
+    this.dense = true,
+    this.tooltip,
+    this.semanticsLabel,
+    this.semanticsHint,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final base = color ?? ZenColors.jade;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    final bg = selected
+        ? base.withValue(alpha: isDark ? .20 : .12)
+        : (isDark ? Colors.white.withValue(alpha: .06) : Colors.transparent);
+
+    final border = selected
+        ? base.withValue(alpha: .70)
+        : ZenColors.outline.withValue(alpha: .90);
+
+    final labelStyle = Theme.of(context)
+        .textTheme
+        .bodyMedium!
+        .copyWith(color: base, fontWeight: FontWeight.w700);
+
+    final padH = dense ? 10.0 : ZenSpacing.chipPadH.toDouble();
+    final padV = dense ? 6.0 : ZenSpacing.chipPadV.toDouble();
+
+    Widget chip = ActionChip(
+      onPressed: onPressed,
+      backgroundColor: bg,
+      elevation: 0,
+      visualDensity: dense ? VisualDensity.compact : VisualDensity.standard,
+      padding: EdgeInsets.symmetric(horizontal: padH, vertical: padV),
+      shape: StadiumBorder(side: BorderSide(color: border, width: 1.1)),
+      label: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: dense ? 18 : 19, color: base),
+          if (label != null && label!.trim().isNotEmpty) ...[
+            const SizedBox(width: 8),
+            Text(label!, overflow: TextOverflow.ellipsis, style: labelStyle),
+          ],
+        ],
+      ),
+    );
+
+    if ((semanticsLabel != null && semanticsLabel!.isNotEmpty) ||
+        (semanticsHint != null && semanticsHint!.isNotEmpty)) {
+      chip = Semantics(
+        button: true,
+        label: semanticsLabel,
+        hint: semanticsHint,
+        child: chip,
+      );
+    }
+
+    if (tooltip != null && tooltip!.trim().isNotEmpty) {
+      chip = Tooltip(message: tooltip!, child: chip);
+    }
+
+    return chip;
   }
 }
 

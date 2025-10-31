@@ -1,4 +1,4 @@
-// [BASELINE] lib/services/guidance_service.dart (Stand: 30.10.)
+// [BASELINE] lib/services/guidance_service.dart (Stand: 31.10.)
 // ZenYourself — Guidance / Coaching Service (PANDA-REFLECT-12.7 → v6.4.8)
 // -----------------------------------------------------------------------------
 // Änderungen v6.4.8:

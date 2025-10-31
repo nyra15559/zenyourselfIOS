@@ -1,159 +1,284 @@
-// [BASELINE] lib/services/guidance/dtos.dart (Stand: 30.10.)
-// lib/services/guidance/dtos.dart
-//
+// [V7] lib/services/guidance/dtos.dart (Stand: 31.10.)
 // DTOs & Value-Types für Guidance-Service (standalone, ohne Api-Abhängigkeit)
 // ────────────────────────────────────────────────────────────────────────────
 // • Keine externen Abhängigkeiten
 // • Defensive Defaults (tolerante fromMaybe-Factories)
 // • Snake_case-Shims für UI-/API-Kompatibilität
-// • v12.5-Alignment: bevorzugte Felder für answer_helpers, talk[],
-//   flow.mood_prompt; optional helper_suggestion (tolerant gelesen & serialisiert)
-// • v6.2.1: UserAction {type, note}, topic_suggestions (Top-Level),
-//   analysis (TurnAnalysis: summary/topic/insight_score/topic_suggestions)
-// • v6.2.2: Enums für Actions (ActionType) + Wire-Feld 'action_type' (optional),
-//   volle Abwärtskompatibilität via 'type' (String) beibehalten.
-// • v6.3.1: Kleinere Robustheits-Updates, Session-Snake-Case-Shims in toJson
-// • v6.3.2: Mehr Toleranz beim Einlesen (ui/flow.helper_suggestion, smalltalk_reply,
-//           Session-Int aus String; Flow: mood { prompt: true }; risk: 'level')
-// • v6.3.3: String→Liste-Split verbessert („;“ auch ohne Leerraum), optional
-//           speech_sequence (für Hope-Kompat) tolerant mitgeführt
-// • v6.4.1: **Neue Felder** für Plan-Punkt 8
-//   – memories_to_save[] (tolerant als List<dynamic>)
-//   – understanding { topic_shift } (tolerant gelesen + in toJson geführt)
-//   – closure{ mood_intro.text, hope_reply, closure_prompt, mode?, reason?, tone? } DTO
-//   – insight_score weiterhin in TurnAnalysis (Top-Level passthrough möglich)
-// • v6.4.4: **Merge-Signal-Erweiterung**
-//   – meta.flags.client_memory (bool?) → ReflectionTurn.metaClientMemory
-//   – context.memories (beliebig) → ReflectionTurn.contextMemories (List<dynamic> tolerant)
-//   – memories_to_save bereits vorhanden (List<dynamic>)
-//   – flow.insight_score (double?) → ReflectionFlow.insightScore (für Guidance-Passthrough)
-//   – Parser bleibt tolerant; unbekannte Felder werden ignoriert, nicht verworfen.
-//
-// Mini-Checkliste (Pflichtenheft A/5):
-// [x] ReflectionTurn.answerHelpers vorhanden (Default [])
-// [x] ReflectionFlow.moodPrompt / recommendEnd enthalten
-// [x] Tolerantes snake_case/legacy-Parsing (inkl. Aliasse & verschachtelte Felder)
-// [x] Helpers: geordnete Deduplizierung, max 3, keine Fragen („?“)
-// [x] Session passthrough robust (id/turn/max_turns Aliasse)
-// [x] helper_suggestion als optionales Feld vorhanden (DTO ↔ JSON)
-// [x] UserAction DTO vorhanden (String+Enum, rückwärtskompatibel)
-// [x] topic_suggestions + analysis vorhanden, tolerant gelesen
-// [x] memories_to_save[] vorhanden, tolerant
-// [x] understanding.topic_shift vorhanden, tolerant
-// [x] ClosureData DTO vorhanden
-// [x] meta.flags.client_memory vorhanden (tolerant)
-// [x] context.memories vorhanden (tolerant)
-// [x] flow.insight_score vorhanden (tolerant)
+// • V7 A1/E1/E2: Neue Typen (SpeechMeta, SkillCard, SkillBlock, Facets),
+//   Enums (ToneType, Stage), Aliasse & Aufräumen
+// • Rückwärtskompatibel zu v6.x: vorhandene Felder bleiben les-/serialisierbar
 
-/// ───────────────────────────────────────────────────────────────────────────
-/// AnalyzeResult (Legacy – optional genutzt)
-/// ───────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
+// Enums – Tone & Stage
+// ────────────────────────────────────────────────────────────────────────────
+enum ToneType { neutral, calm, hope, gentle, insight, ritual, light, crisis, unknown }
+extension ToneTypeWire on ToneType {
+  String get wire {
+    switch (this) {
+      case ToneType.neutral: return 'neutral';
+      case ToneType.calm:    return 'calm';
+      case ToneType.hope:    return 'hope';
+      case ToneType.gentle:  return 'gentle';
+      case ToneType.insight: return 'insight';
+      case ToneType.ritual:  return 'ritual';
+      case ToneType.light:   return 'light';
+      case ToneType.crisis:  return 'crisis';
+      case ToneType.unknown: return 'unknown';
+    }
+  }
+  static ToneType parse(dynamic v) {
+    final s = v?.toString().toLowerCase().trim() ?? '';
+    switch (s) {
+      case 'neutral': return ToneType.neutral;
+      case 'calm': return ToneType.calm;
+      case 'hope': return ToneType.hope;
+      case 'gentle': return ToneType.gentle;
+      case 'insight': return ToneType.insight;
+      case 'ritual': return ToneType.ritual;
+      case 'light': return ToneType.light;
+      case 'crisis': return ToneType.crisis;
+      default: return ToneType.unknown;
+    }
+  }
+}
+
+enum Stage { intro, clarify, hypothesize, deepen, bridge, closure, redirect, unknown }
+extension StageWire on Stage {
+  String get wire {
+    switch (this) {
+      case Stage.intro:       return 'intro';
+      case Stage.clarify:     return 'clarify';
+      case Stage.hypothesize: return 'hypothesize';
+      case Stage.deepen:      return 'deepen';
+      case Stage.bridge:      return 'bridge';
+      case Stage.closure:     return 'closure';
+      case Stage.redirect:    return 'redirect';
+      case Stage.unknown:     return 'unknown';
+    }
+  }
+  static Stage parse(dynamic v) {
+    final s = v?.toString().toLowerCase().trim() ?? '';
+    switch (s) {
+      case 'intro': return Stage.intro;
+      case 'clarify': return Stage.clarify;
+      case 'hypothesize':
+      case 'hypothesis': return Stage.hypothesize;
+      case 'deepen': return Stage.deepen;
+      case 'bridge': return Stage.bridge;
+      case 'closure':
+      case 'close': return Stage.closure;
+      case 'redirect':
+      case 'topic_shift': return Stage.redirect;
+      default: return Stage.unknown;
+    }
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// V7 A1: SpeechMeta – Meta-Infos über Tonalität, Thema, Safety, Vertrauen
+// ────────────────────────────────────────────────────────────────────────────
+class SpeechMeta {
+  final ToneType tone;
+  final String? topic;
+  final String? safety;      // z. B. 'none' | 'mild' | 'high'
+  final double? confidence;  // 0..1
+
+  const SpeechMeta({
+    this.tone = ToneType.unknown,
+    this.topic,
+    this.safety,
+    this.confidence,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'tone': tone.wire,
+        if ((topic ?? '').trim().isNotEmpty) 'topic': topic!.trim(),
+        if ((safety ?? '').trim().isNotEmpty) 'safety': safety!.trim(),
+        if (confidence != null) 'confidence': confidence,
+      };
+
+  static SpeechMeta? fromMaybe(dynamic v) {
+    if (v is! Map) return null;
+    final m = Map<String, dynamic>.from(v);
+    double? asDouble(dynamic x) {
+      if (x is num) return x.toDouble();
+      if (x is String) return double.tryParse(x.trim());
+      return null;
+    }
+    return SpeechMeta(
+      tone: ToneTypeWire.parse(m['tone']),
+      topic: m['topic']?.toString().trim().ifEmpty(() => ''),
+      safety: m['safety']?.toString().trim().ifEmpty(() => ''),
+      confidence: asDouble(m['confidence']),
+    );
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// V7 A1: Facets – Facet-Queue & aktives Facet
+// ────────────────────────────────────────────────────────────────────────────
+class Facets {
+  final String? active;         // aktuelles Facet (z. B. "Essenz", "Beispiel")
+  final List<String> queue;     // weitere geplante Facets (FIFO)
+
+  const Facets({this.active, this.queue = const <String>[]});
+
+  Map<String, dynamic> toJson() => {
+        if ((active ?? '').trim().isNotEmpty) 'active': active!.trim(),
+        if (queue.isNotEmpty) 'queue': queue,
+      };
+
+  static Facets? fromMaybe(dynamic v) {
+    if (v == null) return null;
+    if (v is List) {
+      final q = _strings(v);
+      return Facets(active: q.isEmpty ? null : q.first, queue: q.skip(1).toList());
+    }
+    if (v is Map) {
+      final m = Map<String, dynamic>.from(v);
+      final a = (m['active'] ?? m['current'])?.toString();
+      final q = _strings([m['queue'], m['list']]);
+      if ((a == null || a.trim().isEmpty) && q.isEmpty) return null;
+      return Facets(active: (a?.trim().isEmpty ?? true) ? null : a!.trim(), queue: q);
+    }
+    return null;
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// V7 A1: SkillCard & SkillBlock – Kartenbasierte Skills mit Stage
+// ────────────────────────────────────────────────────────────────────────────
+class SkillCard {
+  final String id;           // stabile ID (kann hashing-basiert sein)
+  final String title;        // Überschrift der Karte
+  final String body;         // kurzer Text / Anleitung
+  final Stage stage;         // Phase (clarify/bridge/closure ...)
+  final List<String> helpers; // Satzstarter / Chips (max 3 empfohlen)
+
+  const SkillCard({
+    required this.id,
+    required this.title,
+    required this.body,
+    required this.stage,
+    this.helpers = const <String>[],
+  });
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'body': body,
+        'stage': stage.wire,
+        if (helpers.isNotEmpty) 'helpers': helpers,
+      };
+
+  static SkillCard? fromMaybe(dynamic v) {
+    if (v is! Map) return null;
+    final m = Map<String, dynamic>.from(v);
+    final id = (m['id'] ?? m['key'] ?? '').toString().trim();
+    final title = (m['title'] ?? m['headline'] ?? '').toString().trim();
+    final body = (m['body'] ?? m['text'] ?? '').toString().trim();
+    final stage = StageWire.parse(m['stage']);
+    final helpers = _orderedDedup(_strings([m['helpers'], m['chips'], m['answers']])).take(3).toList();
+    if (id.isEmpty && title.isEmpty && body.isEmpty) return null;
+    return SkillCard(id: id.ifEmpty(() => 'card_${title.hashCode}_${body.hashCode}'),
+        title: title.ifEmpty(() => '—'),
+        body: body.ifEmpty(() => ''),
+        stage: stage,
+        helpers: helpers);
+  }
+}
+
+class SkillBlock {
+  final String kind;           // z. B. 'dream_reflection' | 'decision_support'
+  final Stage stage;
+  final List<SkillCard> cards;
+
+  const SkillBlock({required this.kind, required this.stage, this.cards = const <SkillCard>[]});
+
+  Map<String, dynamic> toJson() => {
+        'kind': kind,
+        'stage': stage.wire,
+        if (cards.isNotEmpty) 'cards': cards.map((c) => c.toJson()).toList(),
+      };
+
+  static SkillBlock? fromMaybe(dynamic v) {
+    if (v is! Map) return null;
+    final m = Map<String, dynamic>.from(v);
+    final kind = (m['kind'] ?? m['type'] ?? 'skill').toString().trim();
+    final stage = StageWire.parse(m['stage']);
+    final listDyn = (m['cards'] is List) ? (m['cards'] as List) : (m['card'] is Map ? [m['card']] : const []);
+    final cards = <SkillCard>[];
+    for (final e in listDyn) {
+      final c = SkillCard.fromMaybe(e);
+      if (c != null) cards.add(c);
+    }
+    return SkillBlock(kind: kind.ifEmpty(() => 'skill'), stage: stage, cards: cards);
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Legacy/Analysis (beibehalten für Backcompat)
+// ────────────────────────────────────────────────────────────────────────────
 class AnalyzeResult {
   final Analysis analysis;
   final MiniChallenge? challenge;
-
   const AnalyzeResult({required this.analysis, this.challenge});
-
   Map<String, dynamic> toJson() => {
         'analysis': analysis.toJson(),
         if (challenge != null) 'challenge': challenge!.toJson(),
       };
-
   factory AnalyzeResult.fromJson(Map<String, dynamic> json) {
     final analysis = Analysis.fromMaybe(json['analysis']) ??
-        const Analysis(
-          sorc: null,
-          levers: [],
-          mirror: null,
-          question: null,
-          riskLevel: null,
-        );
+        const Analysis(sorc: null, levers: [], mirror: null, question: null, riskLevel: null);
     final challenge = MiniChallenge.fromMaybe(json['challenge']);
     return AnalyzeResult(analysis: analysis, challenge: challenge);
   }
 }
 
-/// ───────────────────────────────────────────────────────────────────────────
-/// ActionType Enum (v6.2.2)
-/// ───────────────────────────────────────────────────────────────────────────
-enum ActionType {
-  reflectionLink,
-  journalLink,
-  storyLink,
-  save,
-  skip,
-  changeTopic,
-  unknown,
-}
-
+// ────────────────────────────────────────────────────────────────────────────
+// ActionType & UserAction (mit Enum-Backcompat)
+// ────────────────────────────────────────────────────────────────────────────
+enum ActionType { reflectionLink, journalLink, storyLink, save, skip, changeTopic, unknown }
 extension ActionTypeWire on ActionType {
   String get wire {
     switch (this) {
-      case ActionType.reflectionLink:
-        return 'reflection_link';
-      case ActionType.journalLink:
-        return 'journal_link';
-      case ActionType.storyLink:
-        return 'story_link';
-      case ActionType.save:
-        return 'save';
-      case ActionType.skip:
-        return 'skip';
-      case ActionType.changeTopic:
-        return 'change_topic';
-      case ActionType.unknown:
-        return 'unknown';
+      case ActionType.reflectionLink: return 'reflection_link';
+      case ActionType.journalLink:    return 'journal_link';
+      case ActionType.storyLink:      return 'story_link';
+      case ActionType.save:           return 'save';
+      case ActionType.skip:           return 'skip';
+      case ActionType.changeTopic:    return 'change_topic';
+      case ActionType.unknown:        return 'unknown';
     }
   }
-
   static ActionType parse(dynamic v) {
     final s = v?.toString().toLowerCase().trim() ?? '';
     switch (s) {
       case 'reflection_link':
-      case 'reflectionlink':
-        return ActionType.reflectionLink;
+      case 'reflectionlink': return ActionType.reflectionLink;
       case 'journal_link':
-      case 'journallink':
-        return ActionType.journalLink;
+      case 'journallink':    return ActionType.journalLink;
       case 'story_link':
-      case 'storylink':
-        return ActionType.storyLink;
-      case 'save':
-        return ActionType.save;
-      case 'skip':
-        return ActionType.skip;
+      case 'storylink':      return ActionType.storyLink;
+      case 'save':           return ActionType.save;
+      case 'skip':           return ActionType.skip;
       case 'change_topic':
       case 'change-topic':
       case 'changetopic':
-      case 'change':
-        return ActionType.changeTopic;
-      default:
-        return ActionType.unknown;
+      case 'change':         return ActionType.changeTopic;
+      default:               return ActionType.unknown;
     }
   }
 }
 
-/// ───────────────────────────────────────────────────────────────────────────
-/// UserAction — vom UI gesendete Aktion (v6.2.2-enum + Backcompat)
-/// ───────────────────────────────────────────────────────────────────────────
 class UserAction {
-  /// Wire-String für Rückwärtskompatibilität (z. B. "journal_link")
-  final String type;
+  final String type;                 // Legacy Wire (z. B. "journal_link")
+  final ActionType actionType;       // Enum (neu)
+  final String? note;                // optional
 
-  /// Optionales Enum (neu v6.2.2). Tolerant aus type/action/action_type geparst.
-  final ActionType actionType;
-
-  /// Freitext-Notiz (optional, kurz halten)
-  final String? note;
-
-  const UserAction({
-    required this.type,
-    this.actionType = ActionType.unknown,
-    this.note,
-  });
+  const UserAction({required this.type, this.actionType = ActionType.unknown, this.note});
 
   Map<String, dynamic> toJson() => {
-        // Beides mitsenden: 'type' (Legacy) + 'action_type' (Enum-Wire)
         'type': type,
         'action_type': actionType.wire,
         if ((note ?? '').trim().isNotEmpty) 'note': note!.trim(),
@@ -162,11 +287,9 @@ class UserAction {
   static UserAction? fromMaybe(dynamic v) {
     if (v is! Map) return null;
     final m = Map<String, dynamic>.from(v);
-    final rawType =
-        (m['type'] ?? m['action'] ?? m['action_type'] ?? '').toString().trim();
+    final rawType = (m['type'] ?? m['action'] ?? m['action_type'] ?? '').toString().trim();
     if (rawType.isEmpty) return null;
-    final enumType =
-        ActionTypeWire.parse(m['action_type'] ?? m['type'] ?? m['action']);
+    final enumType = ActionTypeWire.parse(m['action_type'] ?? m['type'] ?? m['action']);
     final note = (m['note'] ?? m['text'] ?? m['message'])?.toString();
     return UserAction(
       type: rawType,
@@ -176,21 +299,16 @@ class UserAction {
   }
 }
 
-/// ───────────────────────────────────────────────────────────────────────────
-/// TurnAnalysis — strukturierte Analyse der Worker-Antwort (Phase 4)
-/// ───────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
+// TurnAnalysis & ClosureData (unverändert, leicht gesäubert)
+// ────────────────────────────────────────────────────────────────────────────
 class TurnAnalysis {
-  final String? summary; // kurze Zusammenfassung / Kernbeobachtung
-  final String? topic; // erkannter Schwerpunkt (z. B. "Arbeit", "Familie")
-  final double? insightScore; // 0..1 (optional)
-  final List<String> topicSuggestions; // Themenvorschläge / Redirect-Ideen
+  final String? summary;
+  final String? topic;
+  final double? insightScore;               // 0..1 (optional)
+  final List<String> topicSuggestions;
 
-  const TurnAnalysis({
-    this.summary,
-    this.topic,
-    this.insightScore,
-    this.topicSuggestions = const <String>[],
-  });
+  const TurnAnalysis({this.summary, this.topic, this.insightScore, this.topicSuggestions = const <String>[]});
 
   Map<String, dynamic> toJson() => {
         if ((summary ?? '').trim().isNotEmpty) 'summary': summary!.trim(),
@@ -202,48 +320,31 @@ class TurnAnalysis {
   static TurnAnalysis? fromMaybe(dynamic v) {
     if (v is! Map) return null;
     final m = Map<String, dynamic>.from(v);
-
     double? asDouble(dynamic x) {
       if (x is num) return x.toDouble();
       final s = x?.toString();
-      if (s == null) return null;
-      return double.tryParse(s);
+      return (s == null) ? null : double.tryParse(s);
     }
-
     final summary = m['summary']?.toString();
     final topic = (m['topic'] ?? m['focus'] ?? m['theme'])?.toString();
     final insight = asDouble(m['insight_score'] ?? m['insightScore']);
-    final topics = _strings([
-      m['topic_suggestions'],
-      m['topicSuggestions'],
-      m['topics'],
-      m['redirect_suggestions'],
-    ]);
-
-    // sanfte Deduplizierung (stabile Reihenfolge)
-    final dedup = _orderedDedup(topics);
-
+    final topics = _orderedDedup(_strings([m['topic_suggestions'], m['topicSuggestions'], m['topics'], m['redirect_suggestions']]));
     return TurnAnalysis(
       summary: (summary?.trim().isEmpty ?? true) ? null : summary!.trim(),
       topic: (topic?.trim().isEmpty ?? true) ? null : topic!.trim(),
       insightScore: insight,
-      topicSuggestions: dedup,
+      topicSuggestions: topics,
     );
   }
 }
 
-/// ───────────────────────────────────────────────────────────────────────────
-/// ClosureData — DTO für closure_full-Antworten (Plan-Punkt 8)
-/// ───────────────────────────────────────────────────────────────────────────
 class ClosureData {
-  final String moodIntroText; // closure.mood_intro.text
-  final String hopeReply; // closure.hope_reply
-  final String closurePrompt; // closure.closure_prompt
-
-  /// Optionale Meta-Felder (können vom Worker kommen)
-  final String? mode; // z. B. "user_end" | "panda_end"
-  final String? reason; // z. B. "insight_high" | "fatigue"
-  final String? tone; // z. B. "hope" | "ritual" | "insight" | "light"
+  final String moodIntroText;
+  final String hopeReply;
+  final String closurePrompt;
+  final String? mode;
+  final String? reason;
+  final String? tone;
 
   const ClosureData({
     required this.moodIntroText,
@@ -267,17 +368,12 @@ class ClosureData {
     if (v is! Map) return null;
     final m = Map<String, dynamic>.from(v);
     Map<String, dynamic>? mm(dynamic x) => _asMap(x);
-
-    final closure =
-        mm(m['closure']) ?? m; // sowohl Top-Level als auch verschachtelt
+    final closure = mm(m['closure']) ?? m;
     final moodIntro = mm(closure['mood_intro']) ?? const <String, dynamic>{};
-
     final text = (moodIntro['text'] ?? '').toString();
     final hope = (closure['hope_reply'] ?? '').toString();
     final prompt = (closure['closure_prompt'] ?? '').toString();
-
     if (text.isEmpty && hope.isEmpty && prompt.isEmpty) return null;
-
     return ClosureData(
       moodIntroText: text,
       hopeReply: hope,
@@ -289,47 +385,41 @@ class ClosureData {
   }
 }
 
-/// ───────────────────────────────────────────────────────────────────────────
-/// ReflectionTurn — Kernantwort eines Workers
-/// ───────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
+// ReflectionTurn – Kernantwort inkl. V7-Feldern
+// ────────────────────────────────────────────────────────────────────────────
 class ReflectionTurn {
-  final String outputText; // Primärtext (Frage/Prompt)
-  final String? mirror; // Empathische Spiegelung (optional)
-  final List<String> context; // Hinweise/Aspekte (robust als Liste geführt)
-  final List<String> followups; // kleine Nachfragen (KEINE Chips)
-  final List<String> answerHelpers; // v12.2+: Echte Worker-Chips (Satzstarter)
-
-  /// Optional: sanfter 0–1-Satz direkt unter der Leitfrage (Worker-Feld)
+  final String outputText;
+  final String? mirror;
+  final List<String> context;
+  final List<String> followups;
+  final List<String> answerHelpers;
   final String? helperSuggestion;
 
-  final ReflectionFlow? flow; // Flow-Metadaten/Flags
-  final ReflectionSession session; // Session-Metadaten (immer vorhanden)
-  final List<String> tags; // Themen/Tags
-  final String riskFlag; // 'none' | 'support' | 'crisis'
-  final List<String> questions; // gelieferte Fragen (roh)
-  final List<String> talk; // talk-Zeilen
+  final ReflectionFlow? flow;
+  final ReflectionSession session;
+  final List<String> tags;
+  final String riskFlag;
+  final List<String> questions;
+  final List<String> talk;
 
-  /// NEU/optional: vollständige Sprecher-Sequenz (z. B. für Hope-Kompat)
   final List<dynamic> speechSequence;
-
-  /// NEU: strukturierte Analyse + optionale Top-Level-Topic-Vorschläge
   final TurnAnalysis? analysis;
   final List<String> topicSuggestions;
 
-  /// NEU (Plan-Punkt 8): Vorschläge, was lokal gespeichert werden könnte
-  /// (vom Worker geliefert; App entscheidet nach Consent).
   final List<dynamic> memoriesToSave;
-
-  /// NEU (Plan-Punkt 8): Hinweis des Workers auf Themenwechsel.
   final String? understandingTopicShift;
 
-  /// NEU (v6.4.4): Meta-Flag vom Client — Merge-Signal
-  /// meta.flags.client_memory (bool?), tolerant geparst
   final bool? metaClientMemory;
-
-  /// NEU (v6.4.4): context.memories — beliebige Struktur, tolerant als Liste
-  /// (Map → [Map], String/Num → [v], List → unverändert)
   final List<dynamic> contextMemories;
+
+  // ── V7 A1: neue Felder
+  final SpeechMeta? speechMeta;
+  final SkillBlock? skill;                 // strukturierter Block
+  final List<SkillCard> skillCards;        // flache Kartenliste (falls ohne Block)
+  final Facets? facets;                    // Facet-Queue/Active
+  final String? topicPin;                  // UI-Pin / Thema
+  final List<String> availableActions;     // Worker-Aktionen (snake_case)
 
   const ReflectionTurn({
     required this.outputText,
@@ -343,7 +433,7 @@ class ReflectionTurn {
     required this.tags,
     required this.riskFlag,
     this.questions = const [],
-       this.talk = const [],
+    this.talk = const [],
     this.speechSequence = const <dynamic>[],
     this.analysis,
     this.topicSuggestions = const <String>[],
@@ -351,22 +441,22 @@ class ReflectionTurn {
     this.understandingTopicShift,
     this.metaClientMemory,
     this.contextMemories = const <dynamic>[],
+    // V7
+    this.speechMeta,
+    this.skill,
+    this.skillCards = const <SkillCard>[],
+    this.facets,
+    this.topicPin,
+    this.availableActions = const <String>[],
   });
 
-  // Fallback-Fehlertext-Kopie, damit dtos.dart unabhängig bleibt
   static const String kErrorHintFallback =
       'ZenYourself hat die Blümchen nicht gefunden. Bitte Verbindung prüfen.';
 
-  /// 'high' | 'mild' | 'none' (abgeleitet aus riskFlag)
   // ignore: non_constant_identifier_names
-  String get risk_level => (riskFlag == 'crisis')
-      ? 'high'
-      : (riskFlag == 'support' ? 'mild' : 'none');
-
-  /// true, wenn Unterstützung/Alarm signalisiert ist (Legacy-Shim)
+  String get risk_level => (riskFlag == 'crisis') ? 'high' : (riskFlag == 'support' ? 'mild' : 'none');
   bool get risk => riskFlag == 'support' || riskFlag == 'crisis';
 
-  /// Primäre Frage (falls vorhanden) mit garantiertem Fragezeichen.
   String? get primaryQuestion {
     if (questions.isNotEmpty) {
       final q = questions.first.trim();
@@ -385,148 +475,88 @@ class ReflectionTurn {
       if (context.isNotEmpty) 'context': context,
       if (followups.isNotEmpty) 'followups': followups,
       if (answerHelpers.isNotEmpty) 'answer_helpers': answerHelpers,
-      if ((helperSuggestion ?? '').trim().isNotEmpty)
-        'helper_suggestion': helperSuggestion!.trim(),
-      'flow': flow?.toJson() ??
-          const ReflectionFlow(recommendEnd: false, suggestBreak: false)
-              .toJson(),
+      if ((helperSuggestion ?? '').trim().isNotEmpty) 'helper_suggestion': helperSuggestion!.trim(),
+      'flow': flow?.toJson() ?? const ReflectionFlow(recommendEnd: false, suggestBreak: false).toJson(),
       'session': session.toJson(),
       if (tags.isNotEmpty) 'tags': tags,
       'risk_level': risk_level,
-      if (risk) 'risk': true, // Legacy-Flag zusätzlich
+      if (risk) 'risk': true,
       if (questions.isNotEmpty) 'questions': questions,
       if (talk.isNotEmpty) 'talk': talk,
-      if (speechSequence.isNotEmpty)
-        'speech_sequence': List<dynamic>.from(speechSequence),
+      if (speechSequence.isNotEmpty) 'speech_sequence': List<dynamic>.from(speechSequence),
       if (analysis != null) 'analysis': analysis!.toJson(),
       if (topicSuggestions.isNotEmpty) 'topic_suggestions': topicSuggestions,
-      if (memoriesToSave.isNotEmpty)
-        'memories_to_save': List<dynamic>.from(memoriesToSave),
-      if (contextMemories.isNotEmpty)
-        'context_memories': List<dynamic>.from(contextMemories),
+      if (memoriesToSave.isNotEmpty) 'memories_to_save': List<dynamic>.from(memoriesToSave),
+      if (contextMemories.isNotEmpty) 'context_memories': List<dynamic>.from(contextMemories),
+      // V7
+      if (speechMeta != null) 'speech_meta': speechMeta!.toJson(),
+      if (skill != null) 'skill': skill!.toJson(),
+      if (skillCards.isNotEmpty) 'skill_cards': skillCards.map((c) => c.toJson()).toList(),
+      if (facets != null) 'facets': facets!.toJson(),
+      if ((topicPin ?? '').trim().isNotEmpty) 'topic_pin': topicPin!.trim(),
+      if (availableActions.isNotEmpty) 'available_actions': availableActions,
     };
-
-    // understanding.topic_shift nur senden, wenn vorhanden
     if ((understandingTopicShift ?? '').trim().isNotEmpty) {
-      map['understanding'] = {
-        'topic_shift': understandingTopicShift!.trim(),
-      };
+      map['understanding'] = {'topic_shift': understandingTopicShift!.trim()};
     }
-
     return map;
   }
 
-  /// Tolerantes Einlesen (Map oder null). Defensive Defaults, keine Throws.
   static ReflectionTurn? fromMaybe(dynamic v) {
     if (v is! Map) return null;
     final m = Map<String, dynamic>.from(v);
-
     Map<String, dynamic>? asMap(dynamic x) => _asMap(x);
 
-    // evtl. verschachtelte Teilbäume
     final primary = asMap(m['primary']);
     final flowMap = asMap(m['flow']);
-    final uiMap = asMap(m['ui']);
+    final uiMap   = asMap(m['ui']);
 
-    // output / question(s)
-    final outputText = (m['output_text'] ??
-            m['outputText'] ??
-            m['question'] ??
-            m['primary_question'] ??
-            _pickString(primary, const ['output_text', 'text', 'question']) ??
-            _pickString(flowMap, const ['output_text', 'text', 'question']) ??
-            '')
-        .toString()
-        .trim();
+    final outputText = (m['output_text'] ?? m['outputText'] ?? m['question'] ?? m['primary_question']
+          ?? _pickString(primary, const ['output_text', 'text', 'question'])
+          ?? _pickString(flowMap, const ['output_text', 'text', 'question']) ?? '')
+        .toString().trim();
 
-    // Fragen: mehrere mögliche Keys + verschachtelt
-    final questions = _strings([
-      m['questions'],
-      m['qs'],
-      m['multi_questions'],
-      primary?['questions'],
-      flowMap?['questions'],
-    ]);
-
-    // context (sowohl Liste als auch Map zulassen)
+    final questions = _strings([m['questions'], m['qs'], m['multi_questions'], primary?['questions'], flowMap?['questions']]);
     final context = _strings([m['context']]);
 
-    // context.memories tolerant sammeln (List | Map | scalar)
     final contextObj = asMap(m['context']);
     final cmem = _ensureListDyn(contextObj?['memories']);
 
-    // simple lists
     final followups = _strings([m['followups']]);
-    final talk = _strings([
-      m['talk'],
-      primary?['talk'],
-      flowMap?['talk'],
-      m['smalltalk_reply'], // v6.3.2+: tolerant
-    ]);
+    final talk = _strings([m['talk'], primary?['talk'], flowMap?['talk'], m['smalltalk_reply']]);
     final tags = _strings([m['tags'], primary?['tags'], flowMap?['tags']]);
 
-    // Chips aus verschiedenen Feldern tolerant einsammeln (geordnet deduplizieren, max 3)
-    final helpersRaw = _strings(
-      [
-        m['answer_helpers'],
-        m['answer_scaffolds'],
-        m['answer_templates'],
-        m['helpers'],
-        m['chips'],
-        m['answers'],
-        asMap(m['ui'])?['answer_helpers'],
-        asMap(m['ui'])?['chips'],
-        flowMap?['answer_helpers'],
-        flowMap?['helpers'],
-        primary?['answer_helpers'],
-        primary?['helpers'],
-        // Optionen (selten)
-        asMap(m['ui'])?['options'],
-        flowMap?['options'],
-        primary?['options'],
-      ],
-    )
-        // echte Fragen rausfiltern
-        .where((s) => s.isNotEmpty && !s.endsWith('?'))
-        // sanfte Normalisierung: Doppelpunkte/Abschluss-Punkte weg
-        .map((s) => s
-            .replaceAll(RegExp(r'\s*[:：]\s*$'), '')
-            .replaceAll(RegExp(r'[.。]+$'), '')
-            .trim())
-        .where((s) => s.isNotEmpty)
-        .toList();
+    final helpersRaw = _strings([
+      m['answer_helpers'], m['answer_scaffolds'], m['answer_templates'],
+      m['helpers'], m['chips'], m['answers'],
+      asMap(m['ui'])?['answer_helpers'], asMap(m['ui'])?['chips'],
+      flowMap?['answer_helpers'], flowMap?['helpers'],
+      primary?['answer_helpers'], primary?['helpers'],
+      asMap(m['ui'])?['options'], flowMap?['options'], primary?['options'],
+    ]).where((s) => s.isNotEmpty && !s.endsWith('?'))
+     .map((s) => s.replaceAll(RegExp(r'\s*[:：]\s*$'), '').replaceAll(RegExp(r'[.。]+$'), '').trim())
+     .where((s) => s.isNotEmpty).toList();
 
     final answerHelpers = _orderedDedup(helpersRaw).take(3).toList();
 
-    // helper_suggestion (tolerant; auch verschachtelt lesen)
     String? helperSuggestion() {
-      final top =
-          (m['helper_suggestion'] ?? m['helperSuggestion'])?.toString().trim();
+      final top = (m['helper_suggestion'] ?? m['helperSuggestion'])?.toString().trim();
       if ((top ?? '').isNotEmpty) return top;
-      final fromPrimary =
-          _pickString(primary, const ['helper_suggestion', 'helperSuggestion']);
+      final fromPrimary = _pickString(primary, const ['helper_suggestion', 'helperSuggestion']);
       if ((fromPrimary ?? '').trim().isNotEmpty) return fromPrimary!.trim();
-      final fromFlow =
-          _pickString(flowMap, const ['helper_suggestion', 'helperSuggestion']);
+      final fromFlow = _pickString(flowMap, const ['helper_suggestion', 'helperSuggestion']);
       if ((fromFlow ?? '').trim().isNotEmpty) return fromFlow!.trim();
-      final fromUi =
-          _pickString(uiMap, const ['helper_suggestion', 'helperSuggestion']);
+      final fromUi = _pickString(uiMap, const ['helper_suggestion', 'helperSuggestion']);
       if ((fromUi ?? '').trim().isNotEmpty) return fromUi!.trim();
       return null;
     }
 
-    // risk: erlaubt bool 'risk' (→ support) ODER level-Strings / risk_flag
-    String riskFlagFrom(
-        dynamic levelDyn, dynamic riskDyn, dynamic riskFlagDyn) {
-      // bool risk=true → 'support'
+    String riskFlagFrom(dynamic levelDyn, dynamic riskDyn, dynamic riskFlagDyn) {
       if (riskDyn == true) return 'support';
-      // direkte Flag-Übernahme (worker kann 'crisis'/'support' senden)
       final rf = riskFlagDyn?.toString().toLowerCase().trim();
       if (rf == 'crisis' || rf == 'support' || rf == 'none') return rf!;
-      // Legacy/Level akzeptieren
       final levelCandidate = levelDyn ?? m['level'];
-      final rl =
-          (levelCandidate ?? riskDyn ?? 'none').toString().toLowerCase().trim();
+      final rl = (levelCandidate ?? riskDyn ?? 'none').toString().toLowerCase().trim();
       if (rl == 'high' || rl == 'crisis') return 'crisis';
       if (rl == 'mild' || rl == 'support' || rl == 'true') return 'support';
       return 'none';
@@ -534,40 +564,22 @@ class ReflectionTurn {
 
     final riskFlag = riskFlagFrom(m['risk_level'], m['risk'], m['risk_flag']);
 
-    // analysis + topic_suggestions (Top-Level + innerhalb analysis)
     final turnAnalysis = TurnAnalysis.fromMaybe(m['analysis']);
-    final topLevelTopicSugs =
-        _strings([m['topic_suggestions'], m['topicSuggestions'], m['topics']]);
+    final topLevelTopicSugs = _strings([m['topic_suggestions'], m['topicSuggestions'], m['topics']]);
+    final tsDedup = _orderedDedup(<String>[...topLevelTopicSugs, if (turnAnalysis != null) ...turnAnalysis.topicSuggestions]);
 
-    // kombinieren & deduplizieren (stabile Reihenfolge)
-    final allTopicSugs = <String>[
-      ...topLevelTopicSugs,
-      if (turnAnalysis != null) ...turnAnalysis.topicSuggestions,
-    ];
-    final tsDedup = _orderedDedup(allTopicSugs);
+    final speechSequence = _listDyn(m['speech_sequence'] ?? m['speechSequence']);
 
-    // speech_sequence (optional)
-    final speechSequence =
-        _listDyn(m['speech_sequence'] ?? m['speechSequence']);
-
-    // memories_to_save (Plan-Punkt 8) — tolerant sammeln (Top-Level & plan{})
     final memoriesToSave = _listDyn(
-      m['memories_to_save'] ??
-          m['memoriesToSave'] ??
-          asMap(m['plan'])?['memories_to_save'] ??
-          asMap(m['plan'])?['memoriesToSave'],
+      m['memories_to_save'] ?? m['memoriesToSave'] ?? asMap(m['plan'])?['memories_to_save'] ?? asMap(m['plan'])?['memoriesToSave'],
     );
 
-    // understanding.topic_shift (Plan-Punkt 8)
     String? understandingTopicShift() {
       final u = asMap(m['understanding']) ?? const <String, dynamic>{};
-      final s = (u['topic_shift'] ?? u['topicShift'] ?? u['shift'])
-          ?.toString()
-          .trim();
+      final s = (u['topic_shift'] ?? u['topicShift'] ?? u['shift'])?.toString().trim();
       return (s == null || s.isEmpty) ? null : s;
     }
 
-    // meta.flags.client_memory (v6.4.4)
     bool? metaClientMemory() {
       final meta = asMap(m['meta']);
       final flags = asMap(meta?['flags']);
@@ -575,18 +587,33 @@ class ReflectionTurn {
       return _parseBoolOrNull(raw);
     }
 
+    // V7: neue Felder parsen
+    final speechMeta = SpeechMeta.fromMaybe(m['speech_meta'] ?? m['speechMeta']);
+    final skill = SkillBlock.fromMaybe(m['skill'] ?? m['skill_block'] ?? m['skillBlock']);
+    final skillCards = <SkillCard>[];
+    final cardsAny = (m['skill_cards'] is List)
+        ? m['skill_cards']
+        : (m['cards'] is List ? m['cards'] : const []);
+    if (cardsAny is List) {
+      for (final e in cardsAny) {
+        final c = SkillCard.fromMaybe(e);
+        if (c != null) skillCards.add(c);
+      }
+    }
+    final facets = Facets.fromMaybe(m['facets'] ?? m['facet_queue'] ?? m['facetQueue']);
+    final topicPin = (m['topic_pin'] ?? m['topicPin'])?.toString().trim();
+    final availableActions = _orderedDedup(_strings([m['available_actions'], m['actions']]));
+
     return ReflectionTurn(
       outputText: outputText.isEmpty ? kErrorHintFallback : outputText,
       mirror: (m['mirror']?.toString().trim().isNotEmpty ?? false)
           ? m['mirror'].toString()
-          : _pickString(primary, const ['mirror']) ??
-              _pickString(flowMap, const ['mirror']),
+          : _pickString(primary, const ['mirror']) ?? _pickString(flowMap, const ['mirror']),
       context: context,
       followups: followups,
       answerHelpers: answerHelpers,
       helperSuggestion: helperSuggestion(),
-      flow: ReflectionFlow.fromMaybe(m['flow']) ??
-          ReflectionFlow.fromMaybe(primary?['flow']),
+      flow: ReflectionFlow.fromMaybe(m['flow']) ?? ReflectionFlow.fromMaybe(primary?['flow']),
       session: ReflectionSession.fromMaybe(m['session']) ??
           ReflectionSession.fromMaybe(primary?['session']) ??
           const ReflectionSession(threadId: '', turnIndex: 0, maxTurns: 3),
@@ -601,13 +628,20 @@ class ReflectionTurn {
       understandingTopicShift: understandingTopicShift(),
       metaClientMemory: metaClientMemory(),
       contextMemories: cmem,
+      // V7
+      speechMeta: speechMeta,
+      skill: skill,
+      skillCards: skillCards,
+      facets: facets,
+      topicPin: (topicPin == null || topicPin.isEmpty) ? null : topicPin,
+      availableActions: availableActions,
     );
   }
 }
 
-/// ───────────────────────────────────────────────────────────────────────────
-/// ReflectionFlow
-/// ───────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
+// ReflectionFlow / Session (unverändert, mit kleinen Helpers)
+// ────────────────────────────────────────────────────────────────────────────
 class ReflectionFlow {
   final bool recommendEnd;
   final bool suggestBreak;
@@ -615,12 +649,7 @@ class ReflectionFlow {
   final int? sessionTurn;
   final bool talkOnly;
   final bool allowReflect;
-
-  /// Optionaler Hinweis des Workers, dass jetzt explizit die Stimmung
-  /// abgefragt werden darf/soll (UI-Gate).
   final bool moodPrompt;
-
-  /// NEU (v6.4.4): optionaler Insight-Wert direkt im Flow (Passthrough)
   final double? insightScore;
 
   const ReflectionFlow({
@@ -645,12 +674,10 @@ class ReflectionFlow {
         if (insightScore != null) 'insight_score': insightScore,
       };
 
-  /// Tolerante Factory, falls der Worker (oder ein Fallback) eine Flow-Map liefert.
   static ReflectionFlow? fromMaybe(dynamic v) {
     if (v is! Map) return null;
     final m = Map<String, dynamic>.from(v);
 
-    // v6.3.2+: verschachteltes mood.prompt erkennen
     bool moodPromptNested() {
       final mood = _asMap(m['mood']);
       if (mood == null) return false;
@@ -682,39 +709,23 @@ class ReflectionFlow {
       sessionTurn: asInt(m['session_turn']),
       talkOnly: m['talk_only'] == true,
       allowReflect: m['allow_reflect'] != false,
-      moodPrompt: m['mood_prompt'] == true ||
-          m['moodPrompt'] == true ||
-          moodPromptNested(),
+      moodPrompt: m['mood_prompt'] == true || m['moodPrompt'] == true || moodPromptNested(),
       insightScore: asDouble(m['insight_score'] ?? m['insightScore']),
     );
   }
 }
 
-/// ───────────────────────────────────────────────────────────────────────────
-/// ReflectionSession
-/// ───────────────────────────────────────────────────────────────────────────
 class ReflectionSession {
   final String threadId;
   final int turnIndex;
   final int maxTurns;
 
-  const ReflectionSession({
-    required this.threadId,
-    required this.turnIndex,
-    required this.maxTurns,
-  });
+  const ReflectionSession({required this.threadId, required this.turnIndex, required this.maxTurns});
 
-  ReflectionSession copyWith(
-          {String? threadId, int? turnIndex, int? maxTurns}) =>
-      ReflectionSession(
-        threadId: threadId ?? this.threadId,
-        turnIndex: turnIndex ?? this.turnIndex,
-        maxTurns: maxTurns ?? this.maxTurns,
-      );
+  ReflectionSession copyWith({String? threadId, int? turnIndex, int? maxTurns}) =>
+      ReflectionSession(threadId: threadId ?? this.threadId, turnIndex: turnIndex ?? this.turnIndex, maxTurns: maxTurns ?? this.maxTurns);
 
   Map<String, dynamic> toJson() => {
-        // Wichtig: 'id' + 'turn' für Kompatibilität (reflection_screen / guidance_service)
-        // Zusätzlich snake_case Shims für robustes Passthrough (v6.3.1)
         'id': threadId,
         'thread_id': threadId,
         'turn': turnIndex,
@@ -725,43 +736,29 @@ class ReflectionSession {
   static ReflectionSession? fromMaybe(dynamic v) {
     if (v is! Map) return null;
     final m = Map<String, dynamic>.from(v);
-
-    int _intOf(dynamic x, int fallback) {
+    int _intOf(dynamic x, int fb) {
       if (x is num) return x.toInt();
       if (x is String) {
         final p = int.tryParse(x.trim());
         if (p != null) return p;
       }
-      return fallback;
+      return fb;
     }
-
     final id = (m['id'] ?? m['thread_id'] ?? m['threadId'] ?? '').toString();
-    final turn = _intOf(
-      m['turn'] ?? m['turn_index'] ?? m['turnIndex'],
-      0,
-    );
-    final max = _intOf(
-      m['max_turns'] ?? m['maxTurns'],
-      3,
-    );
+    final turn = _intOf(m['turn'] ?? m['turn_index'] ?? m['turnIndex'], 0);
+    final max = _intOf(m['max_turns'] ?? m['maxTurns'], 3);
     return ReflectionSession(threadId: id, turnIndex: turn, maxTurns: max);
   }
 }
 
-/// ───────────────────────────────────────────────────────────────────────────
-/// Weitere Value-Types
-/// ───────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
+// Weitere Value-Types (unverändert)
+// ────────────────────────────────────────────────────────────────────────────
 class JourneyInsights {
-  final List<String> insights; // 3–6 Beobachtungen oder Fehlerhinweis
-  final String question; // Leitfrage oder Lade-/Fehlerhinweis
-
+  final List<String> insights;
+  final String question;
   const JourneyInsights({required this.insights, required this.question});
-
-  Map<String, dynamic> toJson() => {
-        'insights': insights,
-        'question': question,
-      };
-
+  Map<String, dynamic> toJson() => {'insights': insights, 'question': question};
   static JourneyInsights? fromMaybe(dynamic v) {
     if (v is! Map) return null;
     final m = Map<String, dynamic>.from(v);
@@ -778,7 +775,6 @@ class StructuredThoughtResult {
   final String? moodHint;
   final List<String> nextSteps;
   final String source; // 'server' | 'offline'
-
   const StructuredThoughtResult({
     required this.bullets,
     required this.coreIdea,
@@ -786,7 +782,6 @@ class StructuredThoughtResult {
     this.moodHint,
     this.source = 'server',
   });
-
   Map<String, dynamic> toJson() => {
         'bullets': bullets,
         'core_idea': coreIdea,
@@ -794,21 +789,14 @@ class StructuredThoughtResult {
         'next_steps': nextSteps,
         'source': source,
       };
-
   factory StructuredThoughtResult.fromJson(Map<String, dynamic> json) {
     final bulletsDyn = (json['bullets'] as List?) ?? const [];
     final nsDyn = (json['next_steps'] as List?) ?? const [];
     return StructuredThoughtResult(
-      bullets: bulletsDyn
-          .map((e) => e.toString())
-          .where((e) => e.trim().isNotEmpty)
-          .toList(),
+      bullets: bulletsDyn.map((e) => e.toString()).where((e) => e.trim().isNotEmpty).toList(),
       coreIdea: (json['core_idea'] ?? '').toString(),
       moodHint: json['mood_hint']?.toString(),
-      nextSteps: nsDyn
-          .map((e) => e.toString())
-          .where((e) => e.trim().isNotEmpty)
-          .toList(),
+      nextSteps: nsDyn.map((e) => e.toString()).where((e) => e.trim().isNotEmpty).toList(),
       source: (json['source'] ?? 'server').toString(),
     );
   }
@@ -816,39 +804,20 @@ class StructuredThoughtResult {
 
 class JourneyEntry {
   final String dateIso; // YYYY-MM-DD
-  final String? moodLabel; // z. B. "Gut" | null
-  final String text; // Rohtext (PII wird serverseitig/heuristisch reduziert)
-
-  const JourneyEntry(
-      {required this.dateIso, required this.text, this.moodLabel});
+  final String? moodLabel;
+  final String text;
+  const JourneyEntry({required this.dateIso, required this.text, this.moodLabel});
 }
 
-class MoodResponse {
-  final bool saved;
-
-  const MoodResponse({required this.saved});
-}
+class MoodResponse { final bool saved; const MoodResponse({required this.saved}); }
 
 class StoryResult {
   final String id;
   final String title;
   final String body;
   final String? audioUrl;
-
-  const StoryResult({
-    required this.id,
-    required this.title,
-    required this.body,
-    this.audioUrl,
-  });
-
-  Map<String, dynamic> toJson() => {
-        'id': id,
-        'title': title,
-        'body': body,
-        if (audioUrl != null) 'audio_url': audioUrl,
-      };
-
+  const StoryResult({required this.id, required this.title, required this.body, this.audioUrl});
+  Map<String, dynamic> toJson() => {'id': id, 'title': title, 'body': body, if (audioUrl != null) 'audio_url': audioUrl};
   static StoryResult? fromMaybe(dynamic v) {
     if (v is! Map) return null;
     final m = Map<String, dynamic>.from(v);
@@ -857,41 +826,18 @@ class StoryResult {
     final body = (m['story'] ?? m['body'] ?? '').toString();
     final audio = (m['audio'] ?? m['audio_url'])?.toString();
     if (id.isEmpty && title.isEmpty && body.isEmpty) return null;
-    return StoryResult(
-      id: id,
-      title: title,
-      body: body,
-      audioUrl: (audio?.trim().isEmpty ?? true) ? null : audio!.trim(),
-    );
+    return StoryResult(id: id, title: title, body: body, audioUrl: (audio?.trim().isEmpty ?? true) ? null : audio!.trim());
   }
 }
 
-/// ───────────────────────────────────────────────────────────────────────────
-/// Platzhalter-/Hilfstypen (Legacy)
-/// ───────────────────────────────────────────────────────────────────────────
 class Analysis {
   final Object? sorc;
   final List<Object?> levers;
   final String? mirror;
   final String? question;
   final String? riskLevel;
-
-  const Analysis({
-    this.sorc,
-    required this.levers,
-    this.mirror,
-    this.question,
-    this.riskLevel,
-  });
-
-  Map<String, dynamic> toJson() => {
-        'sorc': sorc,
-        'levers': levers,
-        'mirror': mirror,
-        'question': question,
-        'riskLevel': riskLevel,
-      };
-
+  const Analysis({this.sorc, required this.levers, this.mirror, this.question, this.riskLevel});
+  Map<String, dynamic> toJson() => {'sorc': sorc, 'levers': levers, 'mirror': mirror, 'question': question, 'riskLevel': riskLevel};
   static Analysis? fromMaybe(dynamic v) {
     if (v is Map<String, dynamic>) {
       return Analysis(
@@ -910,76 +856,42 @@ class MiniChallenge {
   final String id;
   final String title;
   final List<String> steps;
-
-  const MiniChallenge({
-    required this.id,
-    required this.title,
-    required this.steps,
-  });
-
+  const MiniChallenge({required this.id, required this.title, required this.steps});
   Map<String, dynamic> toJson() => {'id': id, 'title': title, 'steps': steps};
-
   static MiniChallenge? fromMaybe(dynamic v) {
     if (v is Map<String, dynamic>) {
-      final steps =
-          ((v['steps'] as List?) ?? const []).map((e) => e.toString()).toList();
-      return MiniChallenge(
-        id: (v['id'] ?? '').toString(),
-        title: (v['title'] ?? '').toString(),
-        steps: steps,
-      );
+      final steps = ((v['steps'] as List?) ?? const []).map((e) => e.toString()).toList();
+      return MiniChallenge(id: (v['id'] ?? '').toString(), title: (v['title'] ?? '').toString(), steps: steps);
     }
     return null;
   }
 }
 
-/// ───────────────────────────────────────────────────────────────────────────
-/// Kleine String-Extension
-/// ───────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
+// Kleine String-Extension
+// ────────────────────────────────────────────────────────────────────────────
 extension IfEmptyX on String {
   String ifEmpty(String Function() alt) => isEmpty ? alt() : this;
 }
 
-/// ───────────────────────────────────────────────────────────────────────────
-/// Interne, wiederverwendbare Parse-Helfer (keine Abhängigkeiten)
-/// ───────────────────────────────────────────────────────────────────────────
-
-/// Führt mehrere dynamische Quellen zusammen und gibt eine getrimmte Liste
-/// nicht-leerer Strings zurück. Unterstützt:
-///  - List<dynamic>
-///  - String (mit tolerantem Split auf Zeilen / Bulletpoints / Semikolons / Gedankenstriche)
-///  - null (ignoriert)
+// ────────────────────────────────────────────────────────────────────────────
+// Interne, wiederverwendbare Parse-Helfer (keine Abhängigkeiten)
+// ────────────────────────────────────────────────────────────────────────────
 List<String> _strings(dynamic many) {
   final out = <String>[];
-
   void addOne(dynamic x) {
     if (x == null) return;
-    if (x is List) {
-      for (final e in x) {
-        addOne(e);
-      }
-      return;
-    }
+    if (x is List) { for (final e in x) { addOne(e); } return; }
     final v = x.toString().trim();
     if (v.isEmpty) return;
-    // tolerant splitten (Zeilen, Bulletpoints, Semikolons – auch ohne Leerraum)
-    final parts = v
-        .split(RegExp(r'\r?\n+|[•\-–—]\s+|\s*;\s*'))
-        .map((e) => e.trim())
-        .where((e) => e.isNotEmpty)
-        .toList();
-    if (parts.isEmpty) {
-      out.add(v);
-    } else {
-      out.addAll(parts);
-    }
+    final parts = v.split(RegExp(r'\r?\n+|[•\-–—]\s+|\s*;\s*'))
+        .map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+    if (parts.isEmpty) { out.add(v); } else { out.addAll(parts); }
   }
-
   addOne(many);
   return out;
 }
 
-/// Stabile Deduplizierung (erster Treffer gewinnt).
 List<String> _orderedDedup(Iterable<String> src) {
   final seen = <String>{};
   final dedup = <String>[];
@@ -991,14 +903,9 @@ List<String> _orderedDedup(Iterable<String> src) {
 }
 
 Map<String, dynamic>? _asMap(dynamic x) {
-  return (x is Map<String, dynamic>)
-      ? x
-      : (x is Map)
-          ? Map<String, dynamic>.from(x)
-          : null;
+  return (x is Map<String, dynamic>) ? x : (x is Map) ? Map<String, dynamic>.from(x) : null;
 }
 
-/// Erstes nicht-leeres Stringfeld aus einer Map anhand mehrerer Keys holen.
 String? _pickString(Map<String, dynamic>? mm, List<String> keys) {
   if (mm == null) return null;
   for (final k in keys) {
@@ -1010,23 +917,14 @@ String? _pickString(Map<String, dynamic>? mm, List<String> keys) {
   return null;
 }
 
-List<dynamic> _listDyn(dynamic v) {
-  if (v is List) return List<dynamic>.from(v);
-  return const <dynamic>[];
-}
+List<dynamic> _listDyn(dynamic v) => (v is List) ? List<dynamic>.from(v) : const <dynamic>[];
 
-/// Beliebigen Wert in eine (flache) Liste überführen:
-/// - List → Kopie
-/// - Map/String/Num/bool → [v]
-/// - null → []
 List<dynamic> _ensureListDyn(dynamic v) {
   if (v == null) return const <dynamic>[];
   if (v is List) return List<dynamic>.from(v);
   return <dynamic>[v];
 }
 
-/// Bool tolerant parsen:
-/// true/false, "true"/"false", "1"/"0", "yes"/"no", "y"/"n"
 bool? _parseBoolOrNull(dynamic v) {
   if (v == null) return null;
   if (v is bool) return v;

@@ -1,42 +1,12 @@
-// [BASELINE] lib/core/memory/memory_mapper.dart — v6.3.2 (Stand: 30.10.2025)
+// [BASELINE] lib/core/memory/memory_mapper.dart — v6.4.2 (31.10.2025)
 //
-// MemoryMapper — toleranter Worker→MemoryEntry-Merger
-// ----------------------------------------------------
-// Ziele
-// • Robust gegenüber variierenden Worker-Schemata (Map/DTO/JSON-String)
-// • Deduplizierte Facets (case-insensitive by key) — Hits werden zusammengeführt
-// • Liefert null, wenn *kein* relevantes Signal vorhanden ist
+// MemoryMapper — toleranter Worker→MemoryEntry-Merger + Facts-Extractor
+// --------------------------------------------------------------------
+// Neu (v6.4.2):
+// • factsFromWorker(turn): extrahiert/normalisiert memories_to_save[*] → List<MemoryFact> (default type=insight).
+// • buildContextHint(..., activeFacet, topicPin): kurzer Bridge-Satz (priorisiert Pins).
 //
-// Erfasste Signalquellen (inkl. neuer Hint-/Fallback-Pfade):
-//   facets:
-//     • facets | context_facets
-//     • understanding.facets | analysis.context_facets | analysis.facets
-//     • context.memories.facets | context.memories.context_facets
-//     • context.memories.hint.facets | context.memories.hint.recent_facets
-//     • context.hint.facets | context.hint.recent_facets
-//     • context_hint.facets | context_hint.hint.facets
-//     • ui.facets
-//   topics → Facet-Fallback:
-//     • topics | topic_suggestions | analysis.topic_suggestions | analysis.recent_topics
-//     • understanding.topics | flow.topics | ui.topics
-//     • context.memories.recent_topics | context.memories.hint.topics | context.memories.hint.recent_topics
-//     • context.hint.topics | context_hint.topics | context_hint.last_themes | context_hint.recent_facets (als Keys; Label = Key)
-//   insight_score:
-//     • insight_score | understanding.insight_score | analysis.insight_score | flow.insight_score
-//     • insight.score  (camel/legacy)
-//     • insight_baseline | insight.baseline (optional)
-//   mood:
-//     • mood | closure.mood | context.mood | flow.mood
-//   summary (sanfter Text, z. B. Hoffnung/Schluss):
-//     • summary | understanding.summary | analysis.summary
-//     • closure.hope_reply | closure.text | flow.hope | hope | ui.hope
-//   next_hint (sanfter Ausblick/Frage für nächsten Turn):
-//     • next_hint | flow.next_hint | closure.closure_prompt | context.next_hint | analysis.next_hint | ui.next_hint
-//
-// Hinweise
-// • Wir tolerieren Map-, DTO- und JSON-String-Eingaben.
-// • Facet-Dedupe führt hits zusammen und bevorzugt das längere (informativere)
-//   Label, falls mehrere Labels zu demselben Key auftauchen.
+// Bestehende fromWorker(...) bleibt unverändert nutzbar (rückwärtskompatibel).
 
 import 'dart:convert' show jsonDecode;
 
@@ -50,17 +20,13 @@ class MemoryMapper {
   // Low-level helpers
   // ───────────────────────────────────────────────────────────────────────────
 
-  /// Versucht, ein beliebiges Objekt in eine Map zu verwandeln.
-  /// Unterstützt: Map, DTO via toJson(), JSON-String (nur wenn er wie ein Objekt aussieht).
   static Map<String, dynamic>? _asMap(dynamic x) {
     if (x == null) return null;
     if (x is Map) return Map<String, dynamic>.from(x);
-    // DTO → toJson()
     try {
       final j = (x as dynamic).toJson?.call();
       if (j is Map) return Map<String, dynamic>.from(j);
     } catch (_) {}
-    // JSON-String → Map
     if (x is String) {
       final s = x.trim();
       if (s.isNotEmpty && s.startsWith('{') && s.endsWith('}')) {
@@ -73,26 +39,19 @@ class MemoryMapper {
     return null;
   }
 
-  /// Interner Pfad-Leser. Toleriert Map/DTO/JSON-String auf jedem Level.
   static dynamic _walk(dynamic cur, List<String> path) {
     var v = cur;
     for (final k in path) {
       if (v == null) return null;
-
-      // Direkt als Map?
       if (v is Map) {
         v = v[k];
         continue;
       }
-
-      // DTO → toJson()
       final as = _asMap(v);
       if (as != null) {
         v = as[k];
         continue;
       }
-
-      // Fallback
       return null;
     }
     return v;
@@ -169,9 +128,7 @@ class MemoryMapper {
         for (final e in v) {
           try {
             out.add(Facet.fromWorker(e)); // tolerant: Map | String | DTO
-          } catch (_) {
-            // einzelnes defektes Element ignorieren
-          }
+          } catch (_) {/* ignore */}
         }
         if (out.isNotEmpty) return _dedupeFacets(out);
       }
@@ -191,8 +148,6 @@ class MemoryMapper {
     return _dedupeFacets(raw);
   }
 
-  /// Dedupliziert Facets by key (case-insensitive), summiert hits und
-  /// wählt das „informativere“ Label.
   static List<Facet> _dedupeFacets(List<Facet> list) {
     if (list.isEmpty) return const <Facet>[];
     final byKey = <String, Facet>{};
@@ -213,15 +168,12 @@ class MemoryMapper {
   }
 
   // ───────────────────────────────────────────────────────────────────────────
-  // Public API
+  // Public API — MemoryEntry
   // ───────────────────────────────────────────────────────────────────────────
 
-  /// Baut einen MemoryEntry aus einer Worker-Response.
-  /// Gibt null zurück, wenn kein relevantes Signal vorhanden ist.
   static MemoryEntry? fromWorker(dynamic raw) {
     if (raw == null) return null;
 
-    // Session-ID (viele mögliche Aliasse)
     final sessionId = _stringAt(raw, const [
       ['session', 'id'],
       ['session', 'thread_id'],
@@ -239,7 +191,6 @@ class MemoryMapper {
       ['id'],
     ]);
 
-    // Facets (mehrere mögliche Pfade)
     var facets = _facetsAt(raw, const [
       ['understanding', 'facets'],
       ['facets'],
@@ -258,7 +209,6 @@ class MemoryMapper {
       ['ui', 'facets'],
     ]);
 
-    // Optionaler Fallback: Themenlisten (Labels) in Facets konvertieren
     if (facets.isEmpty) {
       final topicLabels = _stringListAt(raw, const [
         ['topics'],
@@ -277,20 +227,18 @@ class MemoryMapper {
         ['context_hint', 'last_themes'],
       ]);
 
-      // Falls nur „recent_facets“ (Keys) vorhanden sind, als Labels/Keys übernehmen
       final facetKeys = _stringListAt(raw, const [
         ['context_hint', 'recent_facets'],
       ]);
 
       final asLabels = <String>[
         ...topicLabels,
-        ...facetKeys, // Label=Key
+        ...facetKeys,
       ];
 
       facets = _facetsFromLabels(asLabels);
     }
 
-    // Insight-Score (+Baseline optional)
     final insightVal = _numAt(raw, const [
       ['insight_score'],
       ['understanding', 'insight_score'],
@@ -306,7 +254,6 @@ class MemoryMapper {
         ? InsightScore(insightVal.toDouble(), baseline: baseline?.toDouble())
         : null;
 
-    // Mood
     final moodMap = _mapAt(raw, const [
       ['mood'],
       ['closure', 'mood'],
@@ -315,7 +262,6 @@ class MemoryMapper {
     ]);
     final mood = (moodMap != null) ? MoodPair.fromWorker(moodMap) : null;
 
-    // Summary (inkl. Hope-Fallbacks)
     final summary = _stringAt(raw, const [
       ['summary'],
       ['understanding', 'summary'],
@@ -327,7 +273,6 @@ class MemoryMapper {
       ['ui', 'hope'],
     ]);
 
-    // Next hint
     final nextHint = _stringAt(raw, const [
       ['next_hint'],
       ['flow', 'next_hint'],
@@ -355,5 +300,99 @@ class MemoryMapper {
       summary: summary.isNotEmpty ? summary : null,
       nextHint: nextHint.isNotEmpty ? nextHint : null,
     );
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Public API — Facts & Bridge
+  // ───────────────────────────────────────────────────────────────────────────
+
+  static List<MemoryFact> factsFromWorker(dynamic turn) {
+    final candidates = <List<String>>[
+      ['memories_to_save'],
+      ['primary', 'memories_to_save'],
+      ['flow', 'memories_to_save'],
+      ['reflection', 'memories_to_save'],
+      ['closure', 'memories_to_save'],
+    ];
+
+    final out = <MemoryFact>[];
+    for (final p in candidates) {
+      final v = _walk(turn, p);
+      if (v is List) {
+        for (final e in v) {
+          try {
+            if (e is Map) {
+              final m = Map<String, dynamic>.from(e);
+              m['type'] = m['type'] ?? 'insight';
+              out.add(MemoryFact.fromMap(m));
+            } else if (e is String) {
+              out.add(MemoryFact.fromMap({
+                'type': 'insight',
+                'line': e,
+              }));
+            }
+          } catch (_) {/* ignore */}
+        }
+      }
+    }
+
+    // simple Dedupe nach (topic,line)
+    final seen = <String>{};
+    final deduped = <MemoryFact>[];
+    for (final f in out) {
+      final k =
+          '${(f.topic ?? '').toLowerCase()}::${(f.line ?? '').toLowerCase()}';
+      if (k.trim().isEmpty) {
+        deduped.add(f);
+        continue;
+      }
+      if (seen.add(k)) deduped.add(f);
+    }
+    return deduped;
+  }
+
+  /// Kurzer Bridge-Satz für UI/Worker-Kontext.
+  static String? buildContextHint({
+    List<MemoryFact> facts = const [],
+    String? activeFacet,
+    String? topicPin,
+    int maxLen = 180,
+  }) {
+    final tokens = <String>[];
+
+    void push(String? s) {
+      final t = (s ?? '').trim();
+      if (t.isEmpty) return;
+      if (!tokens.any((x) => x.toLowerCase() == t.toLowerCase())) {
+        tokens.add(t);
+      }
+    }
+
+    push(activeFacet);
+    push(topicPin);
+
+    for (final f in facts) {
+      if (tokens.length >= 2) break;
+      push(f.topic);
+      if (tokens.length >= 2) break;
+      push(f.line);
+    }
+
+    if (tokens.isEmpty) return null;
+
+    final t1 = tokens[0];
+    final t2 = tokens.length >= 2 ? tokens[1] : null;
+    final body = t2 == null
+        ? 'Ich erinnere mich an **$t1**.'
+        : 'Ich erinnere mich an **$t1** und **$t2**.';
+    final res =
+        '$body Falls das heute noch mitschwingt – magst du dort anknüpfen?';
+    return _cap(res, maxLen);
+  }
+
+  static String _cap(String s, int maxLen) {
+    final t = s.trim();
+    if (t.length <= maxLen) return t;
+    return '${t.substring(0, maxLen).trimRight()}…';
   }
 }
