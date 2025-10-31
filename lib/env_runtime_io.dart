@@ -86,8 +86,7 @@ class EnvRuntime {
     return int.tryParse(v.trim());
   }
 
-  static int readIntOr(String key, int fallback) =>
-      readInt(key) ?? fallback;
+  static int readIntOr(String key, int fallback) => readInt(key) ?? fallback;
 
   /// Duration aus „15s“, „2m“, „3h“, „1d“ oder nackten Sekunden (z. B. „45“).
   static Duration? readDuration(String key) {

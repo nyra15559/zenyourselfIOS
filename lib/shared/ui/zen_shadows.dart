@@ -115,7 +115,7 @@ class ZenShadow {
   /// Jade-Glow – dezent für aktive Elemente
   static List<BoxShadow> glowJade([double k = 1.0]) => <BoxShadow>[
         BoxShadow(
-          color: zs.ZenColors.jade.withValues(alpha: 0.10 * k),
+          color: zs.ZenColors.jade.withValue(alpha: 0.10 * k),
           blurRadius: 18 * k,
           spreadRadius: 1.2 * k,
           offset: const Offset(0, 6),
@@ -125,7 +125,7 @@ class ZenShadow {
   /// Golden-Mist-Glow – passend zu Warm-Glow Hintergründen
   static List<BoxShadow> glowGolden([double k = 1.0]) => <BoxShadow>[
         BoxShadow(
-          color: zs.ZenColors.goldenMist.withValues(alpha: 0.18 * k),
+          color: zs.ZenColors.goldenMist.withValue(alpha: 0.18 * k),
           blurRadius: 26 * k,
           spreadRadius: 2.0 * k,
           offset: const Offset(0, 6),
@@ -147,7 +147,7 @@ class ZenShadow {
       case ZenElevationLevel.xs:
         return <BoxShadow>[
           BoxShadow(
-            color: Colors.black.withValues(alpha: darkFactor(0.06)),
+            color: Colors.black.withValue(alpha: darkFactor(0.06)),
             blurRadius: 8,
             offset: const Offset(0, 3),
           ),
@@ -155,12 +155,12 @@ class ZenShadow {
       case ZenElevationLevel.s:
         return <BoxShadow>[
           BoxShadow(
-            color: Colors.black.withValues(alpha: darkFactor(0.08)),
+            color: Colors.black.withValue(alpha: darkFactor(0.08)),
             blurRadius: 12,
             offset: const Offset(0, 5),
           ),
           BoxShadow(
-            color: Colors.black.withValues(alpha: darkFactor(0.04)),
+            color: Colors.black.withValue(alpha: darkFactor(0.04)),
             blurRadius: 4,
             offset: const Offset(0, 1),
           ),
@@ -168,12 +168,12 @@ class ZenShadow {
       case ZenElevationLevel.m:
         return <BoxShadow>[
           BoxShadow(
-            color: Colors.black.withValues(alpha: darkFactor(0.10)),
+            color: Colors.black.withValue(alpha: darkFactor(0.10)),
             blurRadius: 18,
             offset: const Offset(0, 8),
           ),
           BoxShadow(
-            color: Colors.black.withValues(alpha: darkFactor(0.05)),
+            color: Colors.black.withValue(alpha: darkFactor(0.05)),
             blurRadius: 6,
             offset: const Offset(0, 2),
           ),
@@ -181,12 +181,12 @@ class ZenShadow {
       case ZenElevationLevel.l:
         return <BoxShadow>[
           BoxShadow(
-            color: Colors.black.withValues(alpha: darkFactor(0.12)),
+            color: Colors.black.withValue(alpha: darkFactor(0.12)),
             blurRadius: 24,
             offset: const Offset(0, 12),
           ),
           BoxShadow(
-            color: Colors.black.withValues(alpha: darkFactor(0.06)),
+            color: Colors.black.withValue(alpha: darkFactor(0.06)),
             blurRadius: 8,
             offset: const Offset(0, 3),
           ),
@@ -194,13 +194,13 @@ class ZenShadow {
       case ZenElevationLevel.xl:
         return <BoxShadow>[
           BoxShadow(
-            color: Colors.black.withValues(alpha: darkFactor(0.18)),
+            color: Colors.black.withValue(alpha: darkFactor(0.18)),
             blurRadius: 36,
             spreadRadius: 2,
             offset: const Offset(0, 18),
           ),
           BoxShadow(
-            color: Colors.black.withValues(alpha: darkFactor(0.08)),
+            color: Colors.black.withValue(alpha: darkFactor(0.08)),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -216,12 +216,12 @@ class ZenShadow {
       borderRadius: const BorderRadius.all(zs.ZenRadii.l),
       boxShadow: [
         BoxShadow(
-          color: zs.ZenColors.focus.withValues(alpha: .55),
+          color: zs.ZenColors.focus.withValue(alpha: .55),
           blurRadius: 0,
           spreadRadius: width,
         ),
         BoxShadow(
-          color: zs.ZenColors.focus.withValues(alpha: .22),
+          color: zs.ZenColors.focus.withValue(alpha: .22),
           blurRadius: 10,
           spreadRadius: 1.0,
         ),
@@ -235,12 +235,12 @@ class ZenShadow {
       borderRadius: const BorderRadius.all(zs.ZenRadii.l),
       boxShadow: [
         BoxShadow(
-          color: zs.ZenColors.error.withValues(alpha: .45),
+          color: zs.ZenColors.error.withValue(alpha: .45),
           blurRadius: 0,
           spreadRadius: width,
         ),
         BoxShadow(
-          color: zs.ZenColors.error.withValues(alpha: .18),
+          color: zs.ZenColors.error.withValue(alpha: .18),
           blurRadius: 8,
           spreadRadius: 0.8,
         ),
@@ -262,7 +262,7 @@ class ZenShadow {
       boxShadow: shadows ?? ZenShadow.card,
       border: Border.all(
         color: borderSide?.color ??
-            Colors.black.withValues(alpha: 0.03), // feine Kontaktkante
+            Colors.black.withValue(alpha: 0.03), // feine Kontaktkante
         width: borderSide?.width ?? 1,
       ),
     );
@@ -319,8 +319,7 @@ class ZenGlowWrap extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DecoratedBox(
-      decoration:
-          BoxDecoration(borderRadius: borderRadius, boxShadow: glows),
+      decoration: BoxDecoration(borderRadius: borderRadius, boxShadow: glows),
       child: child,
     );
   }

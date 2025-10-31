@@ -85,7 +85,8 @@ class ReflectionEntriesProvider with ChangeNotifier {
   bool get _isBatching => _batchDepth > 0;
 
   /// Ephemerer Session-Store
-  final Map<String, ReflectionSessionState> _sessionsByThread = {}; // threadId -> state
+  final Map<String, ReflectionSessionState> _sessionsByThread =
+      {}; // threadId -> state
   String? _activeThreadId; // aktuell im UI aktive Session
 
   // ---------- Public Read-only Views ----------
@@ -164,7 +165,8 @@ class ReflectionEntriesProvider with ChangeNotifier {
     bool notify = true,
   }) {
     final now = DateTime.now();
-    _sessionsByThread.removeWhere((_, s) => now.difference(s.startedAt) > maxAge);
+    _sessionsByThread
+        .removeWhere((_, s) => now.difference(s.startedAt) > maxAge);
     if (notify && !_isBatching) notifyListeners();
   }
 
@@ -233,7 +235,8 @@ class ReflectionEntriesProvider with ChangeNotifier {
   }
 
   /// Mehrere Einträge hinzufügen (Dedupe by ID, letztes Vorkommen gewinnt).
-  void addAll(Iterable<ReflectionEntry> entries, {bool sort = true, bool notify = true}) {
+  void addAll(Iterable<ReflectionEntry> entries,
+      {bool sort = true, bool notify = true}) {
     for (final e in entries) {
       final i = _idIndex[e.id];
       if (i == null) {
@@ -252,7 +255,8 @@ class ReflectionEntriesProvider with ChangeNotifier {
   }
 
   /// Upsert für viele (stabil & schnell).
-  void upsertAll(Iterable<ReflectionEntry> entries, {bool sort = true, bool notify = true}) {
+  void upsertAll(Iterable<ReflectionEntry> entries,
+      {bool sort = true, bool notify = true}) {
     for (final e in entries) {
       final i = _idIndex[e.id];
       if (i == null) {
@@ -368,12 +372,14 @@ class ReflectionEntriesProvider with ChangeNotifier {
   }
 
   /// Setzt komplette Liste (z. B. Import/Sync).
-  void setAll(List<ReflectionEntry> entries, {bool sort = true, bool notify = true}) {
+  void setAll(List<ReflectionEntry> entries,
+      {bool sort = true, bool notify = true}) {
     replaceAll(entries, sort: sort, notify: notify);
   }
 
   /// Ersetzt alle Einträge. Dedupe by ID (letztes Vorkommen gewinnt) + Sort DESC.
-  void replaceAll(Iterable<ReflectionEntry> items, {bool sort = true, bool notify = true}) {
+  void replaceAll(Iterable<ReflectionEntry> items,
+      {bool sort = true, bool notify = true}) {
     _items
       ..clear()
       ..addAll(_dedupById(items));
@@ -414,7 +420,8 @@ class ReflectionEntriesProvider with ChangeNotifier {
 
   /// Einträge in Datumsspanne [start, end] (inklusive).
   /// Nutzt frühes Abbrechen, da _items DESC sortiert sind.
-  List<ReflectionEntry> inRange(DateTime start, DateTime end, {bool inclusive = true}) {
+  List<ReflectionEntry> inRange(DateTime start, DateTime end,
+      {bool inclusive = true}) {
     final s = start.isBefore(end) ? start : end;
     final e = end.isAfter(start) ? end : start;
     final out = <ReflectionEntry>[];
@@ -423,7 +430,8 @@ class ReflectionEntriesProvider with ChangeNotifier {
       final t = x.timestamp;
       final inLower = inclusive ? !t.isBefore(s) : t.isAfter(s);
       final inUpper = inclusive ? !t.isAfter(e) : t.isBefore(e);
-      if (inLower && inUpper) { // fix: 'und' → '&&'
+      if (inLower && inUpper) {
+        // fix: 'und' → '&&'
         out.add(x);
       }
       // Da DESC: sobald t < s (untere Grenze), können wir abbrechen
@@ -436,7 +444,8 @@ class ReflectionEntriesProvider with ChangeNotifier {
   double averageMoodScore({int days = 7}) {
     if (days <= 0 || _items.isEmpty) return 0;
     final now = DateTime.now();
-    final from = DateTime(now.year, now.month, now.day).subtract(Duration(days: days - 1));
+    final from = DateTime(now.year, now.month, now.day)
+        .subtract(Duration(days: days - 1));
     final list = inRange(from, now);
     int sum = 0, count = 0;
     for (final e in list) {
@@ -465,10 +474,11 @@ class ReflectionEntriesProvider with ChangeNotifier {
   List<double> moodSparkline({int days = 7}) {
     if (days <= 0) return const [];
     final now = DateTime.now();
-    final start = DateTime(now.year, now.month, now.day).subtract(Duration(days: days - 1));
+    final start = DateTime(now.year, now.month, now.day)
+        .subtract(Duration(days: days - 1));
 
     final bucketSum = <int, int>{}; // dayKey -> sum of moodScore
-    final bucketN = <int, int>{};   // dayKey -> count
+    final bucketN = <int, int>{}; // dayKey -> count
 
     for (final e in _items) {
       final d = DateTime(e.timestamp.year, e.timestamp.month, e.timestamp.day);
@@ -502,7 +512,8 @@ class ReflectionEntriesProvider with ChangeNotifier {
   }
 
   /// Import aus JSON-String (ersetzen).
-  void importJsonString(String jsonString, {bool sort = true, bool notify = true}) {
+  void importJsonString(String jsonString,
+      {bool sort = true, bool notify = true}) {
     try {
       final raw = jsonDecode(jsonString);
       if (raw is! List) {
@@ -540,7 +551,9 @@ class ReflectionEntriesProvider with ChangeNotifier {
   bool applyTurn({
     required String entryId,
     required ReflectionTurnLike turn,
-    required ReflectionEntry Function(ReflectionEntry old, ReflectionTurnLike turn) mapper,
+    required ReflectionEntry Function(
+            ReflectionEntry old, ReflectionTurnLike turn)
+        mapper,
     bool notify = true,
   }) {
     final ok = updateById(
@@ -551,7 +564,8 @@ class ReflectionEntriesProvider with ChangeNotifier {
     );
     if (ok) {
       // Session-Info ephemer nachführen
-      final threadId = turn.sessionThreadId ?? (turn.meta['thread_id']?.toString() ?? '');
+      final threadId =
+          turn.sessionThreadId ?? (turn.meta['thread_id']?.toString() ?? '');
       if (threadId.isNotEmpty) {
         upsertSession(
           ReflectionSessionState(
@@ -571,7 +585,8 @@ class ReflectionEntriesProvider with ChangeNotifier {
 
   // ---------- intern ----------
 
-  void _afterMutation({required bool sort, required bool notify, required bool persist}) {
+  void _afterMutation(
+      {required bool sort, required bool notify, required bool persist}) {
     if (sort) {
       _items.sort((a, b) {
         final c = b.timestamp.compareTo(a.timestamp);

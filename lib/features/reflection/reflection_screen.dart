@@ -1,17 +1,23 @@
+// [BASELINE] lib/features/reflection/reflection_screen.dart (Stand: 31.10., cleaned)
 // lib/features/reflection/reflection_screen.dart
 //
-// ReflectionScreen — Panda v3.23.1 (Oxford level; CH risk actions; no auto-nav)
+// ReflectionScreen — Panda v3.26.0 (bereinigt: keine Action-Footer / keine Topic-/Skill-Actions)
+// Oxford level; CH risk actions; no auto-nav; ContextPin entfernt
 // -----------------------------------------------------------------------------
-// Änderungen in diesem Build:
-// • Intro-Bubble ist jetzt "pinned" und bleibt immer sichtbar.
-// • Memory-Bridge (Recall-Bubble) wird NICHT mehr angezeigt.
-// • Save-Hinweis erscheint, sobald Speichern möglich ist (nach 2 Runden):
-//   „Lies die Frage kurz, antworte in 1–2 Sätzen, speichere bitte deine Session …“
-// • Antwort-Chips: Minimum 2 — bei nur 1 Worker-Chip ergänzt der Screen sanft einen zweiten.
-// • Bestehende Guarantees bleiben: deterministischer Save→Mood Flow, keine Auto-Navigation,
-//   CH-Safety-Hinweise & Hotlines, Enter-/Shift+Enter-Handling.
-// • Kleinfix: expliziter Import der Whisper-Engine.
+// Handshake / Merge-Signal (Plan v6.4.4):
+// • Der Screen setzt KEINE eigenen Memories und KEIN meta.flags.client_memory.
+// • Die ApiService injiziert – bei aktivem Consent – automatisch context.memories
+//   und setzt meta.flags.client_memory:true selbst (Single Source of Truth).
 // -----------------------------------------------------------------------------
+// In diesem Build:
+// • Meta-Ebene: Alle Worker-Calls (start/next/closure) bekommen ein `meta`-Objekt.
+// • Phase-9 Hooks (on-device, unsichtbar):
+//   – Vor Worker-Call:  unawaited(MemoryService.saveUserTurn(...))
+//   – Nach Worker-Turn: unawaited(MemoryService.savePandaTurn(...));
+//                        unawaited(MemoryService.saveFromWorker(turn))
+// • Mini-Einbau Name-Lernen (lokal, on-device):
+//   – Beim Start der Runde:     unawaited(MemoryService.instance.learnNameFromText(userText));
+//   – Beim Fortsetzen/Antwort:  unawaited(MemoryService.instance.learnNameFromText(userAnswer));
 library reflection_screen;
 
 import 'dart:async';
@@ -51,16 +57,16 @@ import '../../providers/journal_entries_provider.dart';
 // Services
 import '../../services/guidance_service.dart';
 import '../../services/speech_service.dart';
-import '../../services/whisper_service.dart'; // STT-Engine
+import '../../services/whisper_service.dart'; // STT-Engine (re-aktiviert)
 import '../../services/core/api_service.dart'; // Mood speichern
 
-// NEU: Memory-Layer (Recall / Bridge)
+// Memory-Layer
 import '../../core/memory/memory_service.dart';
 
 // CH Hotlines (Call-Buttons) + Launcher-Utilities
 import '../../widgets/hotline_widget.dart'; // SwissHotlineCard / Section
 
-// Parts
+// Parts (belassen)
 part 'reflection_models.dart';
 part 'reflection_widgets.dart';
 
@@ -157,21 +163,17 @@ class _ReflectionScreenState extends State<ReflectionScreen>
           defaultTargetPlatform == TargetPlatform.windows ||
           defaultTargetPlatform == TargetPlatform.macOS);
 
-  // ---------------- NEW: Memory Recall / Bridge ------------------------------
-  String? _bridgeText; // (nicht mehr angezeigt; nur für Worker-Kontext)
-  // ignore: unused_element
-  bool get _hasBridge => (_bridgeText != null && _bridgeText!.trim().isNotEmpty);
+  // ---------------- Memory Recall / Bridge (visuell unsichtbar) --------------
+  String? _bridgeText; // (nicht angezeigt; nur für Worker-Kontext)
 
+  // Prefetch Recall (best effort)
   Future<void> _prefetchRecall() async {
-    // Best-effort: Recall laden, UI bleibt nie blockiert.
     try {
       final recall = await MemoryService.instance.recall(limit: 6);
       final text = _composeBridgeText(recall);
       if (!mounted) return;
       setState(() => _bridgeText = text);
-    } catch (_) {
-      // Fehlende Memory-Implementierung darf niemals bremsen
-    }
+    } catch (_) {}
   }
 
   /// Baut einen warmen, kurzen Brückensatz aus Recall-Items (nur intern).
@@ -215,6 +217,67 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     return '$body Falls das heute noch mitschwingt – magst du dort anknüpfen?';
   }
 
+  // ---------------- META: Builder --------------------------------------------
+  Map<String, dynamic> _buildMeta({
+    String? userText,
+    String? userAnswer,
+    String? mode,
+    bool isStart = false,
+    bool isClosure = false,
+    bool reopen = false, // derzeit ohne Verwendung
+  }) {
+    return {
+      'flags': {
+        if (reopen) 'reopen': true, // Closure-Recovery (Reserve)
+      },
+      'ui': {
+        'screen': 'reflection',
+        'version': '3.26.0',
+        'platform': kIsWeb ? 'web' : 'flutter',
+        'is_desktop': _isDesktop,
+        'chip_mode': _chipMode.name,
+        'answer_chips_min': 2,
+        'save_hint_after_rounds': 2,
+      },
+      'session': {
+        'thread_id': _session?.threadId,
+        'turn_index': _session?.turnIndex,
+        'rounds': _rounds.length,
+        'has_mood': _current?.hasMood ?? false,
+        'allow_closure': _current?.allowClosure ?? false,
+        'did_prompt_mood': _didPromptMood,
+        'is_start': isStart,
+        'is_closure': isClosure,
+      },
+      'memory': {
+        'bridge': _bridgeText,
+        'injected': {'present': false},
+      },
+      'input': {
+        if (userText != null) 'user_text': userText,
+        if (userAnswer != null) 'user_answer': userAnswer,
+        if (mode != null) 'mode': mode,
+        'initial_seed_present': (widget.initialUserText ?? '').trim().isNotEmpty,
+      },
+      'safety': {
+        'region': 'CH',
+        'hotlines_card': true,
+      },
+      'privacy': {
+        'pii': false,
+      },
+      'tz': 'Europe/Zurich',
+      'timestamp': DateTime.now().toUtc().toIso8601String(),
+      'telemetry': {
+        'feature_flags': {
+          'reflection.meta': true,
+          'chips.min2': true,
+          'memory.inject': true,
+        },
+      },
+    };
+  }
+
   void _attachSttEngine() {
     final bool simulate = kIsWeb || _isDesktop;
     _speech.attachWhisper(WhisperService(simulate: simulate));
@@ -230,21 +293,31 @@ class _ReflectionScreenState extends State<ReflectionScreen>
   void initState() {
     super.initState();
 
-    _fadeSlideCtrl =
-        AnimationController(vsync: this, duration: _animShort)..value = 1.0;
+    _fadeSlideCtrl = AnimationController(vsync: this, duration: _animShort)
+      ..value = 1.0;
 
     _attachSttEngine();
 
-    // Memory-Recall vorab laden (nur für Worker-Kontext; UI zeigt nichts an)
+    // Identity warm-up (best effort)
+    unawaited(() async {
+      try {
+        await (MemoryService.instance as dynamic).loadIdentityName?.call();
+      } catch (_) {}
+    }());
+
+    // Memory-Recall
     unawaited(_prefetchRecall());
 
-    // Live-Transkript → Eingabe
-    _finalSub = _speech.transcript$.listen((t) {
+    // Live-Transkript → direkt in Input einfügen (keine Voice-Action-Trigger mehr)
+    _finalSub = _speech.transcript$.listen((t) async {
       if (!mounted) return;
+      final spoken = t.trim();
+      if (spoken.isEmpty) return;
+
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         final cur = _controller.text.trim();
-        final joined = (cur.isEmpty ? t : '$cur\n$t').trim();
+        final joined = (cur.isEmpty ? spoken : '$cur\n$spoken').trim();
         _controller
           ..text = joined
           ..selection = TextSelection.fromPosition(
@@ -298,9 +371,8 @@ class _ReflectionScreenState extends State<ReflectionScreen>
 
     final bool isEnter = e.logicalKey == LogicalKeyboardKey.enter ||
         e.logicalKey == LogicalKeyboardKey.numpadEnter;
-    final bool withCtrlOrCmd =
-        HardwareKeyboard.instance.isControlPressed ||
-            HardwareKeyboard.instance.isMetaPressed;
+    final bool withCtrlOrCmd = HardwareKeyboard.instance.isControlPressed ||
+        HardwareKeyboard.instance.isMetaPressed;
     final bool withShift = HardwareKeyboard.instance.isShiftPressed;
 
     if (withCtrlOrCmd && isEnter && !loading) {
@@ -316,7 +388,8 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     return KeyEventResult.ignored;
   }
 
-  // ---------------- Actions ---------------------------------------------------
+  // ---------------- Voice: Start/Stop ----------------------------------------
+
   Future<void> _toggleRecording() async {
     try {
       if (_speech.isRecording) {
@@ -333,6 +406,8 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       _toast('Mikrofon nicht verfügbar. Bitte Berechtigung erlauben.');
     }
   }
+
+  // ---------------- Sending (Text) -------------------------------------------
 
   Future<void> _send() async {
     if (loading) return;
@@ -362,6 +437,21 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       _scrollToBottom();
       _focusInput();
       HapticFeedback.lightImpact();
+
+      // NEU: lokales Namenslernen aus der Antwort (best-effort)
+      unawaited(MemoryService.instance.learnNameFromText(text));
+
+      // Phase-9: User-Turn speichern (unsichtbar)
+      unawaited(() async {
+        try {
+          final dyn = MemoryService.instance as dynamic;
+          await dyn.saveUserTurn?.call(text, {
+            'screen': 'reflection',
+            'mode': 'answer',
+            'ts': DateTime.now().toUtc().toIso8601String(),
+          });
+        } catch (_) {}
+      }());
 
       unawaited(
         _continueReflectionFromWorker(round: _current!, userAnswer: text),
@@ -402,13 +492,16 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       final id = (s['id'] ?? s['thread_id'] ?? '').toString();
       final turnIdx = (s['turn'] is num)
           ? (s['turn'] as num).toInt()
-          : (s['turn_index'] is num) ? (s['turn_index'] as num).toInt() : 0;
+          : (s['turn_index'] is num)
+              ? (s['turn_index'] as num).toInt()
+              : 0;
       final maxTurns =
           (s['max_turns'] is num) ? (s['max_turns'] as num).toInt() : 3;
 
       return ReflectionSession(
-        threadId:
-            id.isNotEmpty ? id : 'local_${DateTime.now().millisecondsSinceEpoch}',
+        threadId: id.isNotEmpty
+            ? id
+            : 'local_${DateTime.now().millisecondsSinceEpoch}',
         turnIndex: turnIdx,
         maxTurns: maxTurns,
       );
@@ -433,6 +526,21 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       _isMoodOpen = false;
     });
 
+    // Name lokal lernen (best-effort)
+    unawaited(MemoryService.instance.learnNameFromText(userText));
+
+    // Phase-9: User-Turn speichern (unsichtbar)
+    unawaited(() async {
+      try {
+        final dyn = MemoryService.instance as dynamic;
+        await dyn.saveUserTurn?.call(userText, {
+          'screen': 'reflection',
+          'mode': mode,
+          'ts': DateTime.now().toUtc().toIso8601String(),
+        });
+      } catch (_) {}
+    }());
+
     try {
       final round = ReflectionRound(
         id: _makeId(),
@@ -449,17 +557,38 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       _scrollToBottom();
 
       dynamic turn;
+      final meta = _buildMeta(
+        userText: userText,
+        mode: mode,
+        isStart: true,
+      );
+
       try {
-        turn = await GuidanceService.instance
-            .startSessionFull(text: userText, locale: 'de', tz: 'Europe/Zurich')
+        // 1) Neuer Endpunkt
+        turn = await (GuidanceService.instance as dynamic)
+            .startSessionFull(
+              text: userText,
+              locale: 'de',
+              tz: 'Europe/Zurich',
+              meta: meta,
+            )
             .timeout(_netTimeout);
       } on NoSuchMethodError {
         try {
-          turn = await GuidanceService.instance
-              .startSession(text: userText, locale: 'de', tz: 'Europe/Zurich')
+          // 2) Alter Endpunkt ohne Meta
+          turn = await (GuidanceService.instance as dynamic)
+              .startSessionFull(
+                text: userText,
+                locale: 'de',
+                tz: 'Europe/Zurich',
+              )
               .timeout(_netTimeout);
-        } catch (_) {
-          rethrow;
+        } on NoSuchMethodError {
+          // 3) Ganz alter Fallback
+          turn = await GuidanceService.instance
+              .startSessionFull(
+                  text: userText, locale: 'de', tz: 'Europe/Zurich')
+              .timeout(_netTimeout);
         }
       } on TimeoutException {
         if (!mounted) return;
@@ -479,8 +608,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
         return;
       }
 
-      final bool flagMoodPrompt =
-          _safeBool(turn, ['mood', 'prompt']) ||
+      final bool flagMoodPrompt = _safeBool(turn, ['mood', 'prompt']) ||
           _safeBool(turn, ['flow', 'mood_prompt']);
       final bool flagRecommendEnd = _safeBool(turn, ['flow', 'recommend_end']);
 
@@ -493,9 +621,26 @@ class _ReflectionScreenState extends State<ReflectionScreen>
         round.allowClosure = wantClosure;
 
         final hasHelpers = step.followups.isNotEmpty;
-        _chipMode =
-            (step.expectsAnswer || hasHelpers) ? _ChipMode.answer : _ChipMode.none;
+        _chipMode = (step.expectsAnswer || hasHelpers)
+            ? _ChipMode.answer
+            : _ChipMode.none;
       });
+
+      // Persist best-effort
+      unawaited(() async {
+        try {
+          final mirror = _coerceMirror(turn);
+          final q = _coerceQuestion(turn);
+          final out = (q.isNotEmpty) ? ('$mirror\n\n$q') : mirror;
+          final dyn = MemoryService.instance as dynamic;
+          await dyn.savePandaTurn?.call(out, {
+            'screen': 'reflection',
+            'session': _session?.threadId,
+            'ts': DateTime.now().toUtc().toIso8601String(),
+          });
+          await dyn.saveFromWorker?.call(turn);
+        } catch (_) {}
+      }());
 
       _fadeSlideCtrl.forward(from: 0);
       _scrollToBottom();
@@ -508,7 +653,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
               round: round, moodPrompt: true, afterClosure: false);
         });
       }
-
       if (flagRecommendEnd) {
         unawaited(_requestClosureFromWorker(round: round, userAnswer: ''));
       }
@@ -517,7 +661,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     }
   }
 
-  // --- Continue: weitere Spiegelung/Frage per /reflect_full ------------------
+  // --- Continue --------------------------------------------------------------
   Future<void> _continueReflectionFromWorker({
     required ReflectionRound round,
     required String userAnswer,
@@ -526,28 +670,51 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     setState(() => loading = true);
     _scrollToBottom();
 
+    // Name lokal lernen
+    unawaited(MemoryService.instance.learnNameFromText(userAnswer));
+
+    // Phase-9: User-Turn speichern (unsichtbar)
+    unawaited(() async {
+      try {
+        final dyn = MemoryService.instance as dynamic;
+        await dyn.saveUserTurn?.call(userAnswer, {
+          'screen': 'reflection',
+          'mode': 'answer',
+          'ts': DateTime.now().toUtc().toIso8601String(),
+        });
+      } catch (_) {}
+    }());
+
     dynamic turn;
+    final meta = _buildMeta(userAnswer: userAnswer);
+
     try {
       if (_session != null) {
         try {
-          turn = await GuidanceService.instance
+          // 1) Neuer Name mit Meta
+          turn = await (GuidanceService.instance as dynamic)
               .nextTurnFull(
                 session: _session!,
                 text: userAnswer,
                 locale: 'de',
                 tz: 'Europe/Zurich',
+                meta: meta,
               )
               .timeout(_netTimeout);
         } on NoSuchMethodError {
           try {
+            // 2) Älterer Name (reflectFull) mit Meta
             turn = await (GuidanceService.instance as dynamic)
                 .reflectFull(
-                    session: _session!,
-                    text: userAnswer,
-                    locale: 'de',
-                    tz: 'Europe/Zurich')
+                  session: _session!,
+                  text: userAnswer,
+                  locale: 'de',
+                  tz: 'Europe/Zurich',
+                  meta: meta,
+                )
                 .timeout(_netTimeout);
           } on NoSuchMethodError {
+            // 3) Fallback ohne Meta
             turn = await GuidanceService.instance
                 .startSessionFull(
                   text: userAnswer,
@@ -559,13 +726,25 @@ class _ReflectionScreenState extends State<ReflectionScreen>
           }
         }
       } else {
-        turn = await GuidanceService.instance
-            .startSessionFull(
-              text: userAnswer,
-              locale: 'de',
-              tz: 'Europe/Zurich',
-            )
-            .timeout(_netTimeout);
+        // Keine Session bekannt → (re)start
+        try {
+          turn = await (GuidanceService.instance as dynamic)
+              .startSessionFull(
+                text: userAnswer,
+                locale: 'de',
+                tz: 'Europe/Zurich',
+                meta: meta,
+              )
+              .timeout(_netTimeout);
+        } on NoSuchMethodError {
+          turn = await GuidanceService.instance
+              .startSessionFull(
+                text: userAnswer,
+                locale: 'de',
+                tz: 'Europe/Zurich',
+              )
+              .timeout(_netTimeout);
+        }
       }
     } on TimeoutException {
       if (!mounted) return;
@@ -589,8 +768,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
 
     if (!mounted) return;
 
-    final bool flagMoodPrompt =
-        _safeBool(turn, ['mood', 'prompt']) ||
+    final bool flagMoodPrompt = _safeBool(turn, ['mood', 'prompt']) ||
         _safeBool(turn, ['flow', 'mood_prompt']);
     final bool flagRecommendEnd = _safeBool(turn, ['flow', 'recommend_end']);
 
@@ -604,9 +782,26 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       if (flagMoodPrompt || flagRecommendEnd) round.allowClosure = true;
 
       final hasHelpers = step.followups.isNotEmpty;
-      _chipMode =
-          (step.expectsAnswer || hasHelpers) ? _ChipMode.answer : _ChipMode.none;
+      _chipMode = (step.expectsAnswer || hasHelpers)
+          ? _ChipMode.answer
+          : _ChipMode.none;
     });
+
+    // Persist best-effort
+    unawaited(() async {
+      try {
+        final mirror = _coerceMirror(turn);
+        final q = _coerceQuestion(turn);
+        final out = (q.isNotEmpty) ? ('$mirror\n\n$q') : mirror;
+        final dyn = MemoryService.instance as dynamic;
+        await dyn.savePandaTurn?.call(out, {
+          'screen': 'reflection',
+          'session': _session?.threadId,
+          'ts': DateTime.now().toUtc().toIso8601String(),
+        });
+        await dyn.saveFromWorker?.call(turn);
+      } catch (_) {}
+    }());
 
     _fadeSlideCtrl.forward(from: 0);
     _scrollToBottom();
@@ -648,8 +843,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
 
   // ---------------- Turn → Step ----------------------------------------------
   _PandaStep _buildStepFromTurn(dynamic t) {
-    final bool isClosure =
-        _safeBool(t, ['mood', 'prompt']) ||
+    final bool isClosure = _safeBool(t, ['mood', 'prompt']) ||
         _safeBool(t, ['flow', 'mood_prompt']) ||
         _safeBool(t, ['flow', 'recommend_end']);
 
@@ -682,8 +876,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       talkLines: talk,
       risk: risk,
       followups: helpers,
-      helperSuggestion:
-          helperSuggestion.isNotEmpty ? helperSuggestion : null,
+      helperSuggestion: helperSuggestion.isNotEmpty ? helperSuggestion : null,
     );
   }
 
@@ -799,7 +992,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     _toast('Gelöscht.');
   }
 
-  // ---------------- Abschluss/Mood-Einleitung (Worker-kompatibel) -----------
+  // ---------------- Abschluss/Mood-Einleitung --------------------------------
   Future<void> _requestClosureFromWorker({
     required ReflectionRound round,
     required String userAnswer,
@@ -809,18 +1002,34 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     _scrollToBottom();
 
     dynamic res;
+    final meta = _buildMeta(userAnswer: userAnswer, isClosure: true);
+
     try {
-      res = await GuidanceService.instance
+      // 1) Neuer Closure-Endpunkt mit Meta
+      res = await (GuidanceService.instance as dynamic)
           .closureFull(
             session: _session,
             answer: userAnswer,
             locale: 'de',
             tz: 'Europe/Zurich',
+            meta: meta,
           )
           .timeout(_netTimeout);
     } on NoSuchMethodError {
-      if (mounted) setState(() => loading = false);
-      return;
+      try {
+        // 2) Fallback ohne Meta
+        res = await GuidanceService.instance
+            .closureFull(
+              session: _session,
+              answer: userAnswer,
+              locale: 'de',
+              tz: 'Europe/Zurich',
+            )
+            .timeout(_netTimeout);
+      } on NoSuchMethodError {
+        if (mounted) setState(() => loading = false);
+        return;
+      }
     } on TimeoutException {
       if (mounted) setState(() => loading = false);
       return;
@@ -833,8 +1042,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
 
     final closure = _safeString(res, ['closure', 'mood_intro', 'text']).trim();
     final level = _safeString(res, ['risk_level']).toLowerCase();
-    final risk =
-        _safeBool(res, ['risk']) || level == 'high' || level == 'mild';
+    final risk = _safeBool(res, ['risk']) || level == 'high' || level == 'mild';
 
     setState(() => loading = false);
 
@@ -856,8 +1064,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       if (round.steps.isNotEmpty) {
         final last = round.steps.last;
         if (risk && !last.risk) {
-          round.steps[round.steps.length - 1] =
-              last.copyWith(risk: true);
+          round.steps[round.steps.length - 1] = last.copyWith(risk: true);
         }
       }
     });
@@ -866,7 +1073,8 @@ class _ReflectionScreenState extends State<ReflectionScreen>
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      _maybeAskMood(context, round: round, moodPrompt: true, afterClosure: true);
+      _maybeAskMood(context,
+          round: round, moodPrompt: true, afterClosure: true);
     });
   }
 
@@ -909,12 +1117,10 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     ];
 
     bool matchesAny(String s) => patterns.any((p) => p.hasMatch(s));
-
     final kept = <String>[];
     for (final line in lines) {
       if (!matchesAny(line)) kept.add(line);
     }
-
     final joined = kept.join('\n').trim();
     return joined.replaceAll(RegExp(r'\n{3,}'), '\n\n');
   }
@@ -1009,6 +1215,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     var s = raw.toString().trim();
     if (s.isEmpty) return '';
     s = s.replaceAll(RegExp(r'^[„“"»«]+|[„“"»«]+$'), '');
+    s = s.replaceAll(RegExp(r'\s*[:：]\s*$'), ''); // trailing ':' entfernen
     s = s.replaceAll(RegExp(r'[?？]+$'), '');
     s = s.replaceAll(RegExp(r'\s+'), ' ').trim();
     if (s.length > 72) s = '${s.substring(0, 72).trimRight()}…';
@@ -1044,7 +1251,9 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     final clean = text.replaceAll(RegExp(r'\s+'), ' ').trim();
     if (clean.isEmpty) return 'Reflexion';
     const max = 36;
-    return clean.length <= max ? clean : '${clean.substring(0, max).trimRight()}…';
+    return clean.length <= max
+        ? clean
+        : '${clean.substring(0, max).trimRight()}…';
   }
 
   String _firstWords(String s, int n) {
@@ -1151,66 +1360,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     setState(() => _showConfirmBanner = false);
   }
 
-  Future<void> _showPostSheet() async {
-    if (!mounted) return;
-    await showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
-      ),
-      builder: (ctx) {
-        return SafeArea(
-          top: false,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 10, 12, 18),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 40,
-                  height: 4,
-                  margin: const EdgeInsets.only(bottom: 12),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: .12),
-                    borderRadius: BorderRadius.circular(99),
-                  ),
-                ),
-                ListTile(
-                  leading: const Icon(Icons.chat_bubble_outline_rounded),
-                  title: const Text('Weiter reflektieren'),
-                  onTap: () => Navigator.of(ctx).pop(),
-                ),
-                ListTile(
-                  leading: const Icon(Icons.apps_rounded),
-                  title: const Text('Hauptmenü'),
-                  onTap: () {
-                    Navigator.of(ctx).pop();
-                    if (widget.onGoHome != null) {
-                      widget.onGoHome!();
-                    } else {
-                      Navigator.of(context).maybePop();
-                    }
-                  },
-                ),
-                ListTile(
-                  leading: const Icon(Icons.book_rounded),
-                  title: const Text('Gedankenbuch öffnen'),
-                  onTap: () {
-                    Navigator.of(ctx).pop();
-                    if (widget.onOpenJournal != null) {
-                      widget.onOpenJournal!();
-                    }
-                  },
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
   // ---------------- Build -----------------------------------------------------
   String get _headerTitle => 'Ordne deine Gedanken';
   String get _headerSubtitle => '';
@@ -1241,7 +1390,9 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     final bool showStarter = _rounds.isEmpty && _chipMode == _ChipMode.starter;
 
     final bool showAnswerChips = !closureActive &&
-        (r != null && r.steps.isNotEmpty && r.steps.last.followups.isNotEmpty) &&
+        (r != null &&
+            r.steps.isNotEmpty &&
+            r.steps.last.followups.isNotEmpty) &&
         _chipMode == _ChipMode.answer;
 
     final List<String> rawTemplates = showAnswerChips
@@ -1249,16 +1400,19 @@ class _ReflectionScreenState extends State<ReflectionScreen>
         : (showStarter ? _starterChips() : const <String>[]);
 
     final lastQ = r?.steps.isNotEmpty == true ? r!.steps.last.question : '';
-    final lastA = r?.steps.isNotEmpty == true ? (r!.steps.last.answer ?? '') : '';
+    final lastA =
+        r?.steps.isNotEmpty == true ? (r!.steps.last.answer ?? '') : '';
     final List<String> answerTemplatesRefined =
         _refineChips(rawTemplates, question: lastQ, lastAnswer: lastA);
 
-    // --- NEU: Mindestens 2 Chips (sanfter Fallback)
+    // --- Mindestens 2 Chips (sanfter Fallback)
     final List<String> answerTemplates =
         _ensureMinTwoChips(answerTemplatesRefined, lastQ, lastA);
 
+    // Save-Hinweis soll explizit erst NACH 2 Runden erscheinen
     final bool canPermanentSave =
         r != null && r.answered && (r.entryId == null);
+    final bool showSaveHint = canPermanentSave && _rounds.length >= 2;
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: overlay,
@@ -1319,7 +1473,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                               ),
                               const SizedBox(height: 10),
 
-                              // Intro (pinned) – bleibt als Anker sichtbar
+                              // Intro
                               Padding(
                                 padding: const EdgeInsets.only(bottom: 6),
                                 child: Center(
@@ -1339,12 +1493,12 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                                   key: ValueKey(_rounds[index].id),
                                   child: Builder(
                                     builder: (_) {
-                                      final isLast = index == _rounds.length - 1;
+                                      final isLast =
+                                          index == _rounds.length - 1;
                                       final isTyping = isLast && lastIsTyping;
-                                      final hasRisk = _rounds[index]
-                                              .steps
-                                              .isNotEmpty &&
-                                          _rounds[index].steps.last.risk;
+                                      final hasRisk =
+                                          _rounds[index].steps.isNotEmpty &&
+                                              _rounds[index].steps.last.risk;
 
                                       final thread = _RoundThread(
                                         maxWidth: cardMaxW,
@@ -1356,8 +1510,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                                                 _rounds[index])
                                             : null,
                                         onDelete: _rounds[index].entryId != null
-                                            ? () =>
-                                                _deleteRound(_rounds[index])
+                                            ? () => _deleteRound(_rounds[index])
                                             : null,
                                         onSelectMood: (score, label) async {
                                           setState(() {
@@ -1411,8 +1564,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                                   ),
                                 ),
 
-                              // ------------------ (Bridge bewusst entfernt) ------------------
-
                               // Hinweis – nur wenn Frage offen & kein Abschluss
                               AnimatedSize(
                                 duration: _animShort,
@@ -1436,14 +1587,14 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                                 ),
                               ),
 
-                              // NEU: Save-Hinweis, sobald Speichern möglich
+                              // Save-Hinweis
                               AnimatedSize(
                                 duration: _animShort,
                                 curve: Curves.easeOut,
                                 child: AnimatedOpacity(
                                   duration: _animShort,
-                                  opacity: canPermanentSave ? 1 : 0,
-                                  child: canPermanentSave
+                                  opacity: showSaveHint ? 1 : 0,
+                                  child: showSaveHint
                                       ? Padding(
                                           padding: const EdgeInsets.only(
                                               top: 0, bottom: 8),
@@ -1457,7 +1608,8 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                                                 children: [
                                                   ExcludeSemantics(
                                                     child: Icon(
-                                                      Icons.info_outline_rounded,
+                                                      Icons
+                                                          .info_outline_rounded,
                                                       size: 16,
                                                       color: Colors.black54,
                                                     ),
@@ -1465,8 +1617,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                                                   SizedBox(width: 6),
                                                   Expanded(
                                                     child: Text(
-                                                      'Speichere bitte deine Session, damit du sie später nochmal lesen kannst '
-                                                      'oder damit der Panda sich an dich erinnert.',
+                                                      'Lies die Frage kurz, antworte in 1–2 Sätzen, speichere bitte deine Session …',
                                                       style: TextStyle(
                                                         color: Colors.black54,
                                                       ),
@@ -1514,7 +1665,8 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                                                       in answerTemplates)
                                                     ZenChipGhost(
                                                       label: s,
-                                                      onPressed: () => _onTapChip(
+                                                      onPressed: () =>
+                                                          _onTapChip(
                                                         s,
                                                         isAnswerTemplate:
                                                             !showStarter,
@@ -1591,8 +1743,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                             child: ConstrainedBox(
                               constraints: BoxConstraints(maxWidth: cardMaxW),
                               child: Padding(
-                                padding:
-                                    const EdgeInsets.fromLTRB(0, 0, 0, 8),
+                                padding: const EdgeInsets.fromLTRB(0, 0, 0, 8),
                                 child: _InputBar(
                                   controller: _controller,
                                   focusNode: _inputFocus,
@@ -1667,16 +1818,24 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     required String question,
     String lastAnswer = '',
   }) {
-    final qTokens =
-        question.toLowerCase().split(RegExp(r'[^a-zäöüß0-9]+')).where((w) => w.length >= 3).toSet();
-    final aTokens =
-        lastAnswer.toLowerCase().split(RegExp(r'[^a-zäöüß0-9]+')).where((w) => w.length >= 3).toSet();
+    final qTokens = question
+        .toLowerCase()
+        .split(RegExp(r'[^a-zäöüß0-9]+'))
+        .where((w) => w.length >= 3)
+        .toSet();
+    final aTokens = lastAnswer
+        .toLowerCase()
+        .split(RegExp(r'[^a-zäöüß0-9]+'))
+        .where((w) => w.length >= 3)
+        .toSet();
     final anchors = {...qTokens, ...aTokens};
 
     bool looksInAxis(String t) {
       if (anchors.isEmpty) return true;
-      final toks =
-          t.toLowerCase().split(RegExp(r'[^a-zäöüß0-9]+')).where((w) => w.length >= 3);
+      final toks = t
+          .toLowerCase()
+          .split(RegExp(r'[^a-zäöüß0-9]+'))
+          .where((w) => w.length >= 3);
       return toks.any(anchors.contains);
     }
 
@@ -1703,13 +1862,10 @@ class _ReflectionScreenState extends State<ReflectionScreen>
   List<String> _ensureMinTwoChips(List<String> chips, String q, String a) {
     if (chips.length >= 2) return chips;
     final List<String> out = List<String>.from(chips);
-    // Sanfter, universeller Satzstarter
     const fallback = 'Noch etwas dazu … ';
-    // Falls Frage Kontext gibt, baue einen neutralen Starter daraus
     String fromQ(String qq) {
       final s = qq.trim();
       if (s.isEmpty) return fallback;
-      // sehr neutraler Ableitungs-Text:
       return 'Wichtig ist mir außerdem … ';
     }
     out.add(_ensureEllipsisSuffix(fromQ(q)));
@@ -1732,7 +1888,8 @@ class _ReflectionScreenState extends State<ReflectionScreen>
 
     _controller
       ..text = next
-      ..selection = TextSelection.fromPosition(TextPosition(offset: next.length));
+      ..selection =
+          TextSelection.fromPosition(TextPosition(offset: next.length));
     _focusInput();
     if (isAnswerTemplate) setState(() => _chipMode = _ChipMode.answer);
     if (_rounds.isEmpty) setState(() => _chipMode = _ChipMode.none);
@@ -1789,6 +1946,17 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     return false;
   }
 
+  double? _safeNum(dynamic obj, List<String> path) {
+    final v = _getPath(obj, path);
+    if (v is num) return v.toDouble();
+    if (v is String) {
+      final s = v.trim().replaceAll(',', '.');
+      final n = double.tryParse(s);
+      return n;
+    }
+    return null;
+  }
+
   List<String> _safeStringList(dynamic obj, List<String> path) {
     final v = _getPath(obj, path);
     if (v is List) {
@@ -1821,8 +1989,9 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     if (_didPromptMood || _isMoodOpen) return;
 
     _isMoodOpen = true;
-    final title =
-        afterClosure ? 'Wie fühlst du dich jetzt?' : 'Wie fühlst du dich gerade?';
+    final title = afterClosure
+        ? 'Wie fühlst du dich jetzt?'
+        : 'Wie fühlst du dich gerade?';
 
     final chosen = await showPandaMoodPicker(
       context,
@@ -1852,8 +2021,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
 
   void _appendThankYouAfterSave(ReflectionRound r) {
     if (!mounted) return;
-    const thankYou =
-        'Danke dir fürs Speichern und Reflektieren. 💛\n'
+    const thankYou = 'Danke dir fürs Speichern und Reflektieren. 💛\n'
         'Möchtest du weiterreden? Wenn nicht, wünsche ich dir einen ruhigen Tag.';
     final step = _PandaStep(
       mirror: _capChars(thankYou, kMirrorMaxChars),
@@ -1911,4 +2079,8 @@ class _CalmGlassBanner extends StatelessWidget {
 // ============================== Extensions ===================================
 extension _Utc on DateTime {
   DateTime toUtcDateTime() => isUtc ? this : toUtc();
+}
+
+extension _FirstOrNull<T> on List<T> {
+  T? get firstOrNull => isEmpty ? null : first;
 }

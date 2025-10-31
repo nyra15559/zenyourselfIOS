@@ -46,7 +46,8 @@ class SpeechService with ChangeNotifier {
 
   bool get isRecording => _state == SpeechState.recording;
   bool get isPaused => _state == SpeechState.paused;
-  bool get isActive => _state == SpeechState.recording || _state == SpeechState.paused;
+  bool get isActive =>
+      _state == SpeechState.recording || _state == SpeechState.paused;
 
   DateTime? _recordingSince;
   DateTime? get recordingSince => _recordingSince;
@@ -60,10 +61,12 @@ class SpeechService with ChangeNotifier {
   bool _disposed = false;
 
   // ---------------- Streams (UI-API) ----------------
-  final _transcriptCtrl = StreamController<String>.broadcast(); // finale Segmente
+  final _transcriptCtrl =
+      StreamController<String>.broadcast(); // finale Segmente
   Stream<String> get transcript$ => _transcriptCtrl.stream;
 
-  final _partialCtrl = StreamController<String>.broadcast(); // partielle Hypothesen
+  final _partialCtrl =
+      StreamController<String>.broadcast(); // partielle Hypothesen
   Stream<String> get partial$ => _partialCtrl.stream;
 
   final _levelCtrl = StreamController<double>.broadcast(); // 0.0..1.0
@@ -73,7 +76,8 @@ class SpeechService with ChangeNotifier {
   Stream<Duration> get elapsed$ => _elapsedCtrl.stream;
 
   /// Praktisch für Timings im UI (distinct).
-  Stream<int> get elapsedSeconds$ => _elapsedCtrl.stream.map((d) => d.inSeconds).distinct();
+  Stream<int> get elapsedSeconds$ =>
+      _elapsedCtrl.stream.map((d) => d.inSeconds).distinct();
 
   final _errorCtrl = StreamController<String>.broadcast();
   Stream<String> get error$ => _errorCtrl.stream;
@@ -92,7 +96,8 @@ class SpeechService with ChangeNotifier {
   Timer? _simuTimer;
 
   // ---------------- Transcriber-Engine (Whisper etc.) ----------------
-  stt.SpeechTranscriber? _engine; // optional – ohne Engine Simulation/Web/Desktop
+  stt.SpeechTranscriber?
+      _engine; // optional – ohne Engine Simulation/Web/Desktop
   StreamSubscription<String>? _engPartialSub;
   StreamSubscription<String>? _engFinalSub;
   StreamSubscription<double>? _engLevelSub;
@@ -116,13 +121,14 @@ class SpeechService with ChangeNotifier {
   bool get _isDesktop =>
       !kIsWeb &&
       (defaultTargetPlatform == TargetPlatform.linux ||
-       defaultTargetPlatform == TargetPlatform.macOS ||
-       defaultTargetPlatform == TargetPlatform.windows);
+          defaultTargetPlatform == TargetPlatform.macOS ||
+          defaultTargetPlatform == TargetPlatform.windows);
 
   // ---------------- Public Helpers ----------------
 
   /// Idempotenter Toggle: Startet (falls idle) oder stoppt (falls aktiv).
-  Future<void> toggle({bool? simulate, Duration? maxDuration, String? locale}) async {
+  Future<void> toggle(
+      {bool? simulate, Duration? maxDuration, String? locale}) async {
     if (_disposed) return;
     if (isRecording || isPaused) {
       await stop();
@@ -138,7 +144,8 @@ class SpeechService with ChangeNotifier {
   ///   - true  → Simulation erzwingen (überall)
   ///   - false → Simulation unterbinden (auch Web/Desktop)
   ///   - null  → Standard: Web/Desktop auto-sim, Mobile kein auto-sim
-  Future<void> start({bool? simulate, Duration? maxDuration, String? locale}) async {
+  Future<void> start(
+      {bool? simulate, Duration? maxDuration, String? locale}) async {
     if (_disposed) return;
     if (_state == SpeechState.stopping) return; // mitten im Stop → ignoriere
     if (isRecording || isPaused) return; // idempotent
@@ -194,7 +201,8 @@ class SpeechService with ChangeNotifier {
       } catch (e) {
         if (_simulate) {
           if (!_errorCtrl.isClosed) {
-            _errorCtrl.add('Transcriber-Start fehlgeschlagen – wechsle in Simulation');
+            _errorCtrl.add(
+                'Transcriber-Start fehlgeschlagen – wechsle in Simulation');
           }
           _startSimulation();
           return;
@@ -433,9 +441,15 @@ class SpeechService with ChangeNotifier {
   // ---------------- Engine-Subs Cleanup ----------------
 
   Future<void> _cancelEngineSubs() async {
-    try { await _engPartialSub?.cancel(); } catch (_) {}
-    try { await _engFinalSub?.cancel(); } catch (_) {}
-    try { await _engLevelSub?.cancel(); } catch (_) {}
+    try {
+      await _engPartialSub?.cancel();
+    } catch (_) {}
+    try {
+      await _engFinalSub?.cancel();
+    } catch (_) {}
+    try {
+      await _engLevelSub?.cancel();
+    } catch (_) {}
     _engPartialSub = null;
     _engFinalSub = null;
     _engLevelSub = null;
@@ -476,7 +490,9 @@ class SpeechService with ChangeNotifier {
   }
 
   Future<void> _closeSafely(StreamController c) async {
-    try { await c.close(); } catch (_) {}
+    try {
+      await c.close();
+    } catch (_) {}
   }
 
   @override
@@ -490,16 +506,29 @@ class SpeechService with ChangeNotifier {
     _limitTimer = null;
 
     // Engine-Subs lösen
-    _engPartialSub?.cancel(); _engPartialSub = null;
-    _engFinalSub?.cancel();   _engFinalSub = null;
-    _engLevelSub?.cancel();   _engLevelSub = null;
+    _engPartialSub?.cancel();
+    _engPartialSub = null;
+    _engFinalSub?.cancel();
+    _engFinalSub = null;
+    _engLevelSub?.cancel();
+    _engLevelSub = null;
 
     // Controller schließen (sync, defensive)
-    try { _transcriptCtrl.close(); } catch (_) {}
-    try { _partialCtrl.close(); } catch (_) {}
-    try { _levelCtrl.close(); } catch (_) {}
-    try { _elapsedCtrl.close(); } catch (_) {}
-    try { _errorCtrl.close(); } catch (_) {}
+    try {
+      _transcriptCtrl.close();
+    } catch (_) {}
+    try {
+      _partialCtrl.close();
+    } catch (_) {}
+    try {
+      _levelCtrl.close();
+    } catch (_) {}
+    try {
+      _elapsedCtrl.close();
+    } catch (_) {}
+    try {
+      _errorCtrl.close();
+    } catch (_) {}
 
     super.dispose();
   }

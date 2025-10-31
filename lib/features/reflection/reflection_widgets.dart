@@ -1,11 +1,24 @@
+// [BASELINE] lib/features/reflection/reflection_widgets.dart (Stand: 29.10., v6.3.2)
 // lib/features/reflection/reflection_widgets.dart
 // Part: UI-Widgets (library: reflection_screen)
 // -----------------------------------------------------------------------------
-// Oxford–Zen v6.10 — Reflection UI (calm type & fixes, 2025-appear)
+// Oxford–Zen v6.11 — Reflection UI (calm type & fixes, 2025-appear)
 // - Intro-Text angepasst (Hallo – wie geht es dir? … Schreib’s mir in 1–2 Sätzen …)
 // - Typing-Row: Punkte NACH dem Text, kein führendes „…“
 // - Leitfrage: gleicher ruhiger Stil wie Mirror (keine Bold-Überschrift)
-// - Memory/RecentTopics weiterhin vorhanden, aber Screen zeigt sie nicht an
+// - Memory/RecentTopics vorhanden (Kompat.), Screen zeigt sie aber nicht an
+// - Hope Slot integriert (kurzer, hoffnungsvoller Satz unter der Frage)
+// - v6.10.1: Hope-Compat (s.hopeText → s.hopeTextCompat()) + withValues-Fixes
+// - v6.11: Kleiner Dev-Indikator (nur Debug) – dezenter Punkt mit Tooltip
+// - v6.3.2 (29.10.): A11y/Copy-Tooltips verlässlich, leichte Const/Spacing-Polish
+// -----------------------------------------------------------------------------
+//
+// + v6.12 (neu):
+//   • PandaBubbleFooter(actions): Footer-Aktionen (max. 2 + Overflow „Mehr“)
+//   • SkillCardList(cards): horizontale Skill-/Info-Karten (Glas), mit Demo-Fallback
+//   • ContextPinBar(...): „sticky“ nutzbar (durch Parent), Outline-Pills mit klarer
+//     Abgrenzung zu Antwort-Chips; A11y-Labels, Fokus-Reihenfolge & Ellipsis.
+//
 // -----------------------------------------------------------------------------
 
 part of 'reflection_screen.dart';
@@ -42,8 +55,10 @@ bool get _isDesktop {
 class _ZenAppear extends StatefulWidget {
   final Widget child;
   final Duration? delay;
+
   /// Von -> nach; Standard: leicht von unten (zartes Auftauchen).
   final Offset slide;
+
   /// Start-Skalierung für minimalen „Pop“.
   final double beginScale;
 
@@ -51,7 +66,7 @@ class _ZenAppear extends StatefulWidget {
     required this.child,
     this.delay,
     this.slide = const Offset(0, 0.02), // ✅ Default
-    this.beginScale = 0.98,              // ✅ Default
+    this.beginScale = 0.98, // ✅ Default
   });
 
   @override
@@ -123,6 +138,9 @@ class _ReflectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _ZenAppear(
+      // explizit setzen ⇒ vermeidet "optional parameter ... isn't ever given"
+      slide: const Offset(0, 0.02),
+      beginScale: 0.98,
       child: PandaHeader(
         title: title,
         caption: subtitle.trim().isEmpty ? null : subtitle,
@@ -236,8 +254,10 @@ class _RoundThread extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: _kRadius18,
-                    border:
-                        Border.all(color: Colors.black.withValues(alpha: .06), width: 1),
+                    border: Border.all(
+                      color: Colors.black.withValue(alpha: .06),
+                      width: 1,
+                    ),
                     boxShadow: const [
                       BoxShadow(
                         color: Color(0x14000000),
@@ -253,7 +273,7 @@ class _RoundThread extends StatelessWidget {
                       Text(
                         title,
                         style: tt.labelSmall?.copyWith(
-                          color: _kInk.withValues(alpha: .75),
+                          color: _kInk.withValue(alpha: .75),
                           fontWeight: FontWeight.w700,
                         ),
                       ),
@@ -281,13 +301,13 @@ class _RoundThread extends StatelessWidget {
   Widget _buildPandaStepCard(
     BuildContext context,
     _PandaStep s, {
-    required bool showTyping, // ✅ kein Unterstrich mehr
+    required bool showTyping, // ✅ wird bewusst als Trigger behalten
     bool suppressQuestion = false,
     Duration appearDelay = Duration.zero,
   }) {
-    // Referenz, damit der Analyzer keinen unused_element_parameter meldet.
+    // bewusstes no-op, damit Analyzer keinen unused_element_parameter meldet
     if (showTyping) {
-      // no-op: Typing-Indicator wird an anderer Stelle gehandhabt.
+      // Typing-Indicator wird an anderer Stelle gehandhabt.
     }
 
     final tooltip =
@@ -302,10 +322,10 @@ class _RoundThread extends StatelessWidget {
     if (!suppressQuestion && s.question.trim().isNotEmpty) {
       buffer.writeln(s.question.trim());
     }
-    if (!suppressQuestion &&
-        (s.helperSuggestion ?? '').trim().isNotEmpty) {
+    if (!suppressQuestion && (s.helperSuggestion ?? '').trim().isNotEmpty) {
       buffer.writeln((s.helperSuggestion ?? '').trim());
     }
+    // Hope nicht in die Kopie erzwingen – bleibt kurz/optional in der UI.
     final copyAll = buffer.toString();
 
     return Center(
@@ -340,8 +360,10 @@ class _RoundThread extends StatelessWidget {
     final children = <Widget>[];
 
     // Abschluss-Phase aktiv? -> suppressQuestion für die letzte Panda-Karte setzen
-    final bool closureActive =
-        round.answered && round.allowClosure && !round.hasPendingQuestion && !round.hasMood;
+    final bool closureActive = round.answered &&
+        round.allowClosure &&
+        !round.hasPendingQuestion &&
+        !round.hasMood;
 
     // Benutzer-Gedanke
     final userText = round.userInput.trim();
@@ -364,7 +386,7 @@ class _RoundThread extends StatelessWidget {
           child: _buildPandaStepCard(
             context,
             s,
-            showTyping: isLast && isTyping && isLastStep, // ✅ umbenannter Arg
+            showTyping: isLast && isTyping && isLastStep,
             suppressQuestion: closureActive && isLastStep,
             appearDelay: stagger,
           ),
@@ -429,7 +451,10 @@ class _RoundThread extends StatelessWidget {
         ..add(
           _ZenAppear(
             delay: const Duration(milliseconds: 140),
-            child: _MoodChooserInline(onSelected: onSelectMood, maxWidth: maxWidth),
+            child: _MoodChooserInline(
+              onSelected: onSelectMood,
+              maxWidth: maxWidth,
+            ),
           ),
         )
         ..add(const SizedBox(height: 10));
@@ -504,7 +529,7 @@ class _DividerThin extends StatelessWidget {
     return Container(
       height: 1,
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: .10),
+        color: Colors.black.withValue(alpha: .10),
         borderRadius: BorderRadius.circular(1),
       ),
     );
@@ -682,7 +707,7 @@ class _InputBar extends StatelessWidget {
               offset: Offset(0, 4),
             ),
             BoxShadow(
-              color: _kJade.withValues(alpha: 0.30),
+              color: _kJade.withValue(alpha: 0.30),
               blurRadius: 22,
               spreadRadius: 1.2,
             ),
@@ -736,8 +761,8 @@ class _InputBar extends StatelessWidget {
                     cursorColor: _kJade,
                     decoration: InputDecoration(
                       hintText: hint,
-                      hintStyle:
-                          tt.bodyMedium!.copyWith(color: _kInk.withValues(alpha: .55)),
+                      hintStyle: tt.bodyMedium!
+                          .copyWith(color: _kInk.withValue(alpha: .55)),
                       border: InputBorder.none,
                       isCollapsed: true,
                       suffixIconConstraints:
@@ -752,8 +777,8 @@ class _InputBar extends StatelessWidget {
                               style: tt.bodySmall!.copyWith(
                                 fontSize: 12,
                                 color: overSoft
-                                    ? Colors.redAccent.withValues(alpha: .85)
-                                    : _kInk.withValues(alpha: .65),
+                                    ? Colors.redAccent.withValue(alpha: .85)
+                                    : _kInk.withValue(alpha: .65),
                                 fontWeight: FontWeight.w600,
                               ),
                               child: Text(
@@ -764,9 +789,8 @@ class _InputBar extends StatelessWidget {
                             ),
                           ),
                           IconButton(
-                            tooltip: isRecording
-                                ? 'Aufnahme stoppen'
-                                : 'Sprechen',
+                            tooltip:
+                                isRecording ? 'Aufnahme stoppen' : 'Sprechen',
                             onPressed: onMicTap,
                             icon: Icon(
                               isRecording
@@ -777,13 +801,14 @@ class _InputBar extends StatelessWidget {
                           ),
                           IconButton(
                             tooltip: 'Senden (Enter)',
-                            onPressed:
-                                (hasText && canSend && onSend != null) ? onSend : null,
+                            onPressed: (hasText && canSend && onSend != null)
+                                ? onSend
+                                : null,
                             icon: Icon(
                               Icons.send_rounded,
                               color: (hasText && canSend && onSend != null)
                                   ? _kJade
-                                  : _kJade.withValues(alpha: 0.45),
+                                  : _kJade.withValue(alpha: 0.45),
                             ),
                           ),
                         ],
@@ -840,7 +865,7 @@ class _TypingDotsState extends State<_TypingDots>
                 height: 4 + 3 * n(0),
                 margin: const EdgeInsets.only(right: 3),
                 decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: op0),
+                  color: Colors.black.withValue(alpha: op0),
                   shape: BoxShape.circle,
                 ),
               ),
@@ -849,7 +874,7 @@ class _TypingDotsState extends State<_TypingDots>
                 height: 4 + 3 * n(1),
                 margin: const EdgeInsets.only(right: 3),
                 decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: op1),
+                  color: Colors.black.withValue(alpha: op1),
                   shape: BoxShape.circle,
                 ),
               ),
@@ -857,7 +882,7 @@ class _TypingDotsState extends State<_TypingDots>
                 width: 4,
                 height: 4 + 3 * n(2),
                 decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: op2),
+                  color: Colors.black.withValue(alpha: op2),
                   shape: BoxShape.circle,
                 ),
               ),
@@ -892,7 +917,6 @@ class _MoodIntroBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final tt = Theme.of(context).textTheme;
     return Center(
       child: ConstrainedBox(
         constraints: BoxConstraints(maxWidth: maxWidth),
@@ -943,7 +967,8 @@ class PandaBridgeBubble extends StatelessWidget {
           child: Tooltip(
             message: tooltip,
             child: GestureDetector(
-              onLongPress: () => Clipboard.setData(ClipboardData(text: display)),
+              onLongPress: () =>
+                  Clipboard.setData(ClipboardData(text: display)),
               onSecondaryTap: () =>
                   Clipboard.setData(ClipboardData(text: display)),
               child: Semantics(
@@ -958,15 +983,16 @@ class PandaBridgeBubble extends StatelessWidget {
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        ExcludeSemantics(
-                          child: Icon(icon, size: 18, color: _kInk),
+                        const ExcludeSemantics(
+                          child:
+                              Icon(Icons.link_rounded, size: 18, color: _kInk),
                         ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: SelectableText(
                             display,
                             style: tt.bodyMedium?.copyWith(
-                              color: _kInk.withValues(alpha: .87),
+                              color: _kInk.withValue(alpha: .87),
                               height: 1.33,
                               fontWeight: FontWeight.w500,
                             ),
@@ -1005,7 +1031,7 @@ class _PandaCardInner extends StatelessWidget {
         SelectableText(
           s.mirror.trim(),
           style: tt.bodyMedium?.copyWith(
-            color: _kInk.withValues(alpha: .87),
+            color: _kInk.withValue(alpha: .87),
             height: 1.35,
             fontWeight: FontWeight.w500,
           ),
@@ -1021,7 +1047,7 @@ class _PandaCardInner extends StatelessWidget {
         SelectableText(
           t,
           style: tt.bodyMedium?.copyWith(
-            color: _kInk.withValues(alpha: .87),
+            color: _kInk.withValue(alpha: .87),
             height: 1.34,
             fontWeight: FontWeight.w400,
           ),
@@ -1047,22 +1073,22 @@ class _PandaCardInner extends StatelessWidget {
     }
 
     // HelperSuggestion: nur zeigen, wenn Frage sichtbar (gleiche Achse, sanfter Satz)
-    if (!suppressQuestion &&
-        (s.helperSuggestion ?? '').trim().isNotEmpty) {
+    if (!suppressQuestion && (s.helperSuggestion ?? '').trim().isNotEmpty) {
       children.add(const SizedBox(height: 8));
       children.add(
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const ExcludeSemantics(
-              child: Icon(Icons.tips_and_updates_rounded, size: 18, color: _kInk),
+              child:
+                  Icon(Icons.tips_and_updates_rounded, size: 18, color: _kInk),
             ),
             const SizedBox(width: 8),
             Expanded(
               child: SelectableText(
                 (s.helperSuggestion ?? '').trim(),
                 style: tt.bodySmall?.copyWith(
-                  color: _kInk.withValues(alpha: .87),
+                  color: _kInk.withValue(alpha: .87),
                   height: 1.30,
                   fontWeight: FontWeight.w500,
                 ),
@@ -1073,17 +1099,48 @@ class _PandaCardInner extends StatelessWidget {
       );
     }
 
-    // Timestamp bottom-right
+    // ---------------------- Hope Slot (optional) ----------------------
+    // Kurzer, hoffnungsvoller Satz unterhalb der Frage/HelperSuggestion.
+    final hope = s.hopeTextCompat();
+    if (!suppressQuestion && (hope ?? '').trim().isNotEmpty) {
+      children.add(const SizedBox(height: 8));
+      children.add(
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const ExcludeSemantics(
+              child: Icon(Icons.auto_awesome_rounded, size: 18, color: _kInk),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: SelectableText(
+                (hope ?? '').trim(),
+                style: tt.bodySmall?.copyWith(
+                  color: _kInk.withValue(alpha: .87),
+                  height: 1.30,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Timestamp + (nur Debug) kleiner Dev-Indikator
     children.add(const SizedBox(height: 6));
     children.add(
-      const Align(
-        alignment: Alignment.bottomRight,
-        child: ExcludeSemantics(
-          child: Opacity(
-            opacity: .55,
-            child: _TimeStampText(),
+      const Row(
+        children: [
+          _DevIndicator(), // zeigt in Release NICHTS
+          Spacer(),
+          ExcludeSemantics(
+            child: Opacity(
+              opacity: .55,
+              child: _TimeStampText(),
+            ),
           ),
-        ),
+        ],
       ),
     );
 
@@ -1107,6 +1164,54 @@ class _TimeStampText extends StatelessWidget {
   }
 }
 
+// --- Kleiner Dev-Indikator (nur Debug) ---------------------------------------
+
+class _DevIndicator extends StatelessWidget {
+  const _DevIndicator();
+
+  @override
+  Widget build(BuildContext context) {
+    if (!kDebugMode) return const SizedBox.shrink();
+
+    final scope = _PandaStepScope.of(context);
+    final s = scope.step;
+
+    final hasQ = s.question.trim().isNotEmpty;
+    final helpers = s.followups.length;
+    final risk = s.risk;
+    final hope = (s.hopeTextCompat() ?? '').trim().isNotEmpty;
+    final talk = s.talkLines.length;
+    final mirrorLen = s.mirror.trim().length;
+
+    // Farb-Codierung: Risk > Helpers > Neutral
+    final Color dotColor = risk
+        ? Colors.orange
+        : (helpers > 0 ? _kJade : Colors.black.withValue(alpha: .45));
+
+    final tooltip =
+        'm:$mirrorLen  q:${hasQ ? 1 : 0}  h:$helpers  talk:$talk  hope:${hope ? 1 : 0}';
+
+    return Tooltip(
+      message: 'DEV $tooltip',
+      child: ExcludeSemantics(
+        child: Container(
+          width: 10,
+          height: 10,
+          margin: const EdgeInsets.only(left: 2),
+          decoration: BoxDecoration(
+            color: dotColor,
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: Colors.black.withValue(alpha: .10),
+              width: 1,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _MoodIntroRow extends StatelessWidget {
   const _MoodIntroRow();
   @override
@@ -1124,7 +1229,7 @@ class _MoodIntroRow extends StatelessWidget {
           child: SelectableText(
             scope?.text ?? '',
             style: tt.bodyMedium?.copyWith(
-              color: _kInk.withValues(alpha: .87),
+              color: _kInk.withValue(alpha: .87),
               height: 1.35,
               fontWeight: FontWeight.w500,
             ),
@@ -1207,9 +1312,9 @@ class _GhostChip extends StatelessWidget {
     final child = Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: .66),
+        color: Colors.white.withValue(alpha: .66),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: _kJade.withValues(alpha: .65), width: 1.2),
+        border: Border.all(color: _kJade.withValue(alpha: .65), width: 1.2),
         boxShadow: const [
           BoxShadow(
             color: Color(0x0F000000),
@@ -1254,6 +1359,7 @@ class _RecentTopicsChips extends StatelessWidget {
   const _RecentTopicsChips({
     required this.topics,
     required this.maxWidth,
+    // ignore: unused_element_parameter
     this.onPick,
   });
 
@@ -1279,7 +1385,7 @@ class _RecentTopicsChips extends StatelessWidget {
               Text(
                 'Zuletzt bewegt:',
                 style: tt.labelSmall?.copyWith(
-                  color: _kInk.withValues(alpha: .75),
+                  color: _kInk.withValue(alpha: .75),
                   fontWeight: FontWeight.w700,
                 ),
               ),
@@ -1312,12 +1418,13 @@ class _RecentTopicsChips extends StatelessWidget {
 /// Chips: „Antwort-Chips“ (answer_helpers vom Worker)
 // ignore: unused_element
 class _AnswerHelperChips extends StatelessWidget {
-  final List<String> helpers;         // max. 3
+  final List<String> helpers; // max. 3
   final void Function(String text)? onPick;
   final double maxWidth;
   const _AnswerHelperChips({
     required this.helpers,
     required this.maxWidth,
+    // ignore: unused_element_parameter
     this.onPick,
   });
 
@@ -1390,7 +1497,7 @@ class _MoodIntroScope extends InheritedWidget {
   });
 
   static _MoodIntroScope? maybeOf(BuildContext context) =>
-    context.dependOnInheritedWidgetOfExactType<_MoodIntroScope>();
+      context.dependOnInheritedWidgetOfExactType<_MoodIntroScope>();
 
   @override
   bool updateShouldNotify(_MoodIntroScope oldWidget) => oldWidget.text != text;
@@ -1404,8 +1511,575 @@ class _SafetyScope extends InheritedWidget {
   });
 
   static _SafetyScope? maybeOf(BuildContext context) =>
-    context.dependOnInheritedWidgetOfExactType<_SafetyScope>();
+      context.dependOnInheritedWidgetOfExactType<_SafetyScope>();
 
   @override
   bool updateShouldNotify(_SafetyScope oldWidget) => oldWidget.text != text;
+}
+
+// -----------------------------------------------------------------------------
+// Kompatibilitäts-Extension für Hope-Text (_PandaStep.hopeTextCompat())
+// Liest robust aus alten/neuen Feldern oder aus speech_sequence (type == "hope").
+// -----------------------------------------------------------------------------
+extension _PandaStepCompatExt on _PandaStep {
+  String? hopeTextCompat() {
+    // 1) Legacy: direkter Getter/Feld "hopeText"
+    try {
+      final v = (this as dynamic).hopeText;
+      if (v is String && v.trim().isNotEmpty) return v.trim();
+    } catch (_) {}
+
+    // 2) Neues Feld "hope"
+    try {
+      final v = (this as dynamic).hope;
+      if (v is String && v.trim().isNotEmpty) return v.trim();
+    } catch (_) {}
+
+    // 3) Sequenz durchsuchen
+    try {
+      final seq = (this as dynamic).speechSequence;
+      if (seq is List) {
+        for (final e in seq) {
+          if (e is Map && e['type'] == 'hope' && e['text'] is String) {
+            final t = (e['text'] as String).trim();
+            if (t.isNotEmpty) return t;
+          } else {
+            try {
+              final t = (e as dynamic).type;
+              final txt = (e as dynamic).text;
+              if (t == 'hope' && txt is String && txt.trim().isNotEmpty) {
+                return txt.trim();
+              }
+            } catch (_) {}
+          }
+        }
+      }
+    } catch (_) {}
+
+    return null;
+  }
+}
+
+// ============================================================================
+// v6.12 — NEU: Footer-Aktionen (max. 2 + Overflow), SkillCardList, ContextPinBar
+// ============================================================================
+
+/// Datenobjekt für Footer-Aktionen (klar getrennt von Antwort-Chips).
+class PandaFooterAction {
+  final String label;
+  final IconData icon;
+  final VoidCallback onPressed;
+  final String? tooltip;
+  final String? semanticsLabel;
+
+  const PandaFooterAction({
+    required this.label,
+    required this.icon,
+    required this.onPressed,
+    this.tooltip,
+    this.semanticsLabel,
+  });
+}
+
+/// Outline-Pill (klarer Outline-Look; unterscheidet sich bewusst von Ghost-Chips).
+class _OutlinePillButton extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final VoidCallback? onPressed;
+  final String? semanticsLabel;
+
+  const _OutlinePillButton({
+    required this.label,
+    required this.icon,
+    this.onPressed,
+    this.semanticsLabel,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+
+    return Semantics(
+      button: true,
+      label: semanticsLabel ?? label,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minWidth: 118, minHeight: 40),
+        child: OutlinedButton.icon(
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            shape:
+                const StadiumBorder(side: BorderSide(color: ZenColors.outline)),
+            side: const BorderSide(color: ZenColors.outline, width: 1.0),
+            foregroundColor: _kInkStrong,
+            textStyle: tt.labelLarge?.copyWith(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+            ),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+          onPressed: onPressed,
+          icon: Icon(icon, size: 18),
+          label: Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Footer unter einer Panda-Karte. Zeigt max. 2 Primär-Aktionen; Rest im Overflow.
+class PandaBubbleFooter extends StatelessWidget {
+  final List<PandaFooterAction> actions;
+  final double maxWidth;
+  final String overflowLabel;
+  final IconData overflowIcon;
+
+  const PandaBubbleFooter({
+    super.key,
+    required this.actions,
+    this.maxWidth = 680,
+    this.overflowLabel = 'Mehr',
+    this.overflowIcon = Icons.more_horiz_rounded,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final visible = actions.take(2).toList(growable: false);
+    final overflow = actions.length > 2 ? actions.sublist(2) : const <PandaFooterAction>[];
+
+    return Center(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: maxWidth),
+        child: _ZenAppear(
+          delay: const Duration(milliseconds: 80),
+          child: RepaintBoundary(
+            child: ZenGlassCard(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+              topOpacity: _kGlassTop,
+              bottomOpacity: _kGlassBottom,
+              borderOpacity: _kGlassBorder,
+              borderRadius: _kRadius16,
+              child: FocusTraversalGroup(
+                policy: OrderedTraversalPolicy(),
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  alignment: WrapAlignment.center,
+                  children: [
+                    for (int i = 0; i < visible.length; i++)
+                      FocusTraversalOrder(
+                        order: NumericFocusOrder(i.toDouble()),
+                        child: _OutlinePillButton(
+                          label: visible[i].label,
+                          icon: visible[i].icon,
+                          onPressed: visible[i].onPressed,
+                          semanticsLabel:
+                              visible[i].semanticsLabel ?? visible[i].label,
+                        ),
+                      ),
+                    if (overflow.isNotEmpty)
+                      FocusTraversalOrder(
+                        order: NumericFocusOrder(visible.length.toDouble()),
+                        child: _OverflowPillMenu(
+                          label: overflowLabel,
+                          icon: overflowIcon,
+                          items: overflow,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _OverflowPillMenu extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final List<PandaFooterAction> items;
+
+  const _OverflowPillMenu({
+    required this.label,
+    required this.icon,
+    required this.items,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+
+    return Semantics(
+      button: true,
+      label: '$label – weitere Aktionen',
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minWidth: 118, minHeight: 40),
+        child: PopupMenuButton<int>(
+          tooltip: label,
+          position: PopupMenuPosition.under,
+          itemBuilder: (ctx) => [
+            for (int i = 0; i < items.length; i++)
+              PopupMenuItem<int>(
+                value: i,
+                child: Row(
+                  children: [
+                    Icon(items[i].icon, size: 18, color: _kInkStrong),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        items[i].label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: tt.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: _kInkStrong,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+          onSelected: (i) {
+            if (i >= 0 && i < items.length) items[i].onPressed();
+          },
+          // Wichtig: Kein "deaktivierter" Button als Child, damit es visuell nicht disabled wirkt.
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: ShapeDecoration(
+              shape: StadiumBorder(
+                side: BorderSide(color: ZenColors.outline),
+                ),
+              color: Colors.transparent,
+              shadows: const [],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 18, color: _kInkStrong),
+                const SizedBox(width: 8),
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: tt.labelLarge?.copyWith(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: _kInkStrong,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Datenmodell für eine Skill-/Info-Karte.
+class SkillCardData {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback? onTap;
+  final String? semanticsLabel;
+
+  const SkillCardData({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    this.onTap,
+    this.semanticsLabel,
+  });
+}
+
+/// Horizontale Liste kleiner Glas-Karten (klar getrennt von Antwort-Chips).
+class SkillCardList extends StatelessWidget {
+  final List<SkillCardData> cards;
+  final double maxWidth;
+  final EdgeInsetsGeometry padding;
+  final bool dense;
+
+  const SkillCardList({
+    super.key,
+    required this.cards,
+    this.maxWidth = 680,
+    this.padding = const EdgeInsets.symmetric(vertical: 4),
+    this.dense = true,
+  });
+
+  /// Bequemer Demo-Ctor mit Platzhalterdaten.
+  factory SkillCardList.demo({double maxWidth = 680}) {
+    return SkillCardList(
+      maxWidth: maxWidth,
+      cards: const [
+        SkillCardData(
+          icon: Icons.tips_and_updates_rounded,
+          title: 'Kleiner Tipp',
+          subtitle: 'Atme einmal ruhig aus, bevor du antwortest.',
+        ),
+        SkillCardData(
+          icon: Icons.bookmark_border_rounded,
+          title: 'Gedankenbuch',
+          subtitle: 'Du entscheidest, was gespeichert wird.',
+        ),
+        SkillCardData(
+          icon: Icons.lock_rounded,
+          title: 'Datenschutz',
+          subtitle: 'Ghost-Mode lässt alles lokal.',
+        ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final itemW = dense ? 220.0 : 260.0;
+    final itemH = dense ? 84.0 : 100.0;
+
+    if (cards.isEmpty) return const SizedBox.shrink();
+
+    return Center(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: maxWidth),
+        child: _ZenAppear(
+          delay: const Duration(milliseconds: 60),
+          child: SizedBox(
+            height: itemH,
+            child: ListView.separated(
+              padding: padding,
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              itemCount: cards.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 10),
+              itemBuilder: (context, i) {
+                final c = cards[i];
+                return _SkillCard(
+                  data: c,
+                  width: itemW,
+                  height: itemH,
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SkillCard extends StatelessWidget {
+  final SkillCardData data;
+  final double width;
+  final double height;
+
+  const _SkillCard({
+    required this.data,
+    required this.width,
+    required this.height,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+
+    final card = SizedBox(
+      width: width,
+      height: height,
+      child: ZenGlassCard(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        topOpacity: _kGlassTop,
+        bottomOpacity: _kGlassBottom,
+        borderOpacity: _kGlassBorder,
+        borderRadius: _kRadius14,
+        child: Row(
+          children: [
+            ExcludeSemantics(
+              child: Icon(data.icon, size: 20, color: _kInkStrong),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    data.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: tt.labelLarge?.copyWith(
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w800,
+                      color: _kInkStrong,
+                      height: 1.18,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    data.subtitle,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: tt.bodySmall?.copyWith(
+                      fontWeight: FontWeight.w500,
+                      color: _kInk.withValue(alpha: .85),
+                      height: 1.22,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (data.onTap == null) {
+      return card;
+    }
+
+    return Semantics(
+      button: true,
+      label: data.semanticsLabel ?? data.title,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: _kRadius14,
+          onTap: data.onTap,
+          child: card,
+        ),
+      ),
+    );
+  }
+}
+
+/// Kontext-Leiste mit Outline-Pills (z. B. Name/Consent/Modus). „Sticky“ über
+/// Parent (z. B. SliverPersistentHeader) nutzbar; hier nur der visuelle Block.
+class ContextPinBar extends StatelessWidget {
+  final List<Widget> pills;
+  final double maxWidth;
+  final bool elevated;
+  final EdgeInsetsGeometry padding;
+  final String? semanticsLabel;
+
+  const ContextPinBar({
+    super.key,
+    required this.pills,
+    this.maxWidth = 680,
+    this.elevated = true,
+    this.padding = const EdgeInsets.fromLTRB(10, 8, 10, 8),
+    this.semanticsLabel,
+  });
+
+  /// Bequeme Fabrik mit einfachen Text-Pills (Outline-Stil).
+  factory ContextPinBar.simple({
+    required List<String> labels,
+    double maxWidth = 680,
+    bool elevated = true,
+  }) {
+    return ContextPinBar(
+      maxWidth: maxWidth,
+      elevated: elevated,
+      pills: labels
+          .map((t) => _OutlineTextPill(label: t))
+          .toList(growable: false),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final shadow = elevated
+        ? const [
+            BoxShadow(
+              color: Color(0x14000000),
+              blurRadius: 18,
+              offset: Offset(0, 6),
+            )
+          ]
+        : const <BoxShadow>[];
+
+    return Center(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: maxWidth),
+        child: _ZenAppear(
+          delay: const Duration(milliseconds: 60),
+          child: Semantics(
+            container: true,
+            header: true,
+            label: semanticsLabel ?? 'Kontextleiste',
+            child: RepaintBoundary(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: ZenColors.surface.withValue(alpha: .88),
+                  borderRadius: _kRadius16,
+                  border: Border.all(color: ZenColors.outline),
+                  boxShadow: shadow,
+                ),
+                padding: padding,
+                child: FocusTraversalGroup(
+                  policy: OrderedTraversalPolicy(),
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    physics: const BouncingScrollPhysics(),
+                    child: Row(
+                      children: [
+                        for (int i = 0; i < pills.length; i++) ...[
+                          FocusTraversalOrder(
+                            order: NumericFocusOrder(i.toDouble()),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 4),
+                              child: pills[i],
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _OutlineTextPill extends StatelessWidget {
+  final String label;
+  const _OutlineTextPill({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: 32),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: ZenColors.surfaceAlt.withValue(alpha: .66),
+          border: Border.all(color: ZenColors.outline),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: tt.bodySmall?.copyWith(
+            fontWeight: FontWeight.w700,
+            color: _kInkStrong,
+            height: 1.10,
+          ),
+        ),
+      ),
+    );
+  }
 }

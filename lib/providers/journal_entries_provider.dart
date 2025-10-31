@@ -66,11 +66,13 @@ class JournalEntriesProvider with ChangeNotifier {
   bool get isEmpty => _entries.isEmpty;
   bool get isNotEmpty => _entries.isNotEmpty;
 
-  List<JournalEntry> get diaries =>
-      _entries.where((e) => e.kind == EntryKind.journal).toList(growable: false);
+  List<JournalEntry> get diaries => _entries
+      .where((e) => e.kind == EntryKind.journal)
+      .toList(growable: false);
 
-  List<JournalEntry> get reflections =>
-      _entries.where((e) => e.kind == EntryKind.reflection).toList(growable: false);
+  List<JournalEntry> get reflections => _entries
+      .where((e) => e.kind == EntryKind.reflection)
+      .toList(growable: false);
 
   List<JournalEntry> get stories =>
       _entries.where((e) => e.kind == EntryKind.story).toList(growable: false);
@@ -82,7 +84,7 @@ class JournalEntriesProvider with ChangeNotifier {
       if (e.kind == EntryKind.reflection) return e;
     }
     return null;
-    }
+  }
 
   JournalEntry? byId(String id) {
     final i = _idIndex[id];
@@ -109,9 +111,15 @@ class JournalEntriesProvider with ChangeNotifier {
     int r = 0, j = 0, s = 0;
     for (final e in _entries) {
       switch (e.kind) {
-        case EntryKind.reflection: r++; break;
-        case EntryKind.journal:    j++; break;
-        case EntryKind.story:      s++; break;
+        case EntryKind.reflection:
+          r++;
+          break;
+        case EntryKind.journal:
+          j++;
+          break;
+        case EntryKind.story:
+          s++;
+          break;
       }
     }
     return {
@@ -124,10 +132,14 @@ class JournalEntriesProvider with ChangeNotifier {
 
   bool _passesFilter(JournalEntry e) {
     switch (_filter) {
-      case JournalFilterKind.all:        return true;
-      case JournalFilterKind.reflection: return e.kind == EntryKind.reflection;
-      case JournalFilterKind.journal:    return e.kind == EntryKind.journal;
-      case JournalFilterKind.story:      return e.kind == EntryKind.story;
+      case JournalFilterKind.all:
+        return true;
+      case JournalFilterKind.reflection:
+        return e.kind == EntryKind.reflection;
+      case JournalFilterKind.journal:
+        return e.kind == EntryKind.journal;
+      case JournalFilterKind.story:
+        return e.kind == EntryKind.story;
     }
   }
 
@@ -172,14 +184,17 @@ class JournalEntriesProvider with ChangeNotifier {
     _hiddenIds.add(id);
     if (notify && !_isBatching) notifyListeners();
   }
+
   void hideMany(Iterable<String> ids, {bool notify = true}) {
     _hiddenIds.addAll(ids);
     if (notify && !_isBatching) notifyListeners();
   }
+
   void unhide(String id, {bool notify = true}) {
     _hiddenIds.remove(id);
     if (notify && !_isBatching) notifyListeners();
   }
+
   bool isHidden(String id) => _hiddenIds.contains(id);
   void clearHidden({bool notify = true}) {
     _hiddenIds.clear();
@@ -204,7 +219,8 @@ class JournalEntriesProvider with ChangeNotifier {
     if (_loadHook == null) return;
     try {
       final loaded = await _loadHook!.call();
-      replaceAll(loaded, persist: false); // beim Laden nicht sofort wieder speichern
+      replaceAll(loaded,
+          persist: false); // beim Laden nicht sofort wieder speichern
     } catch (e, st) {
       debugPrint('JournalEntriesProvider.restore error: $e\n$st');
     }
@@ -314,7 +330,7 @@ class JournalEntriesProvider with ChangeNotifier {
     }
 
     _afterMutation(sort: true, notify: true, persist: true);
-    return _entries[_idIndex[newId]!] ;
+    return _entries[_idIndex[newId]!];
   }
 
   // ───────────────────────── Komfort-APIs ─────────────────────────
@@ -601,8 +617,9 @@ class JournalEntriesProvider with ChangeNotifier {
     for (final e in _entries) {
       final local = e.createdAt.toLocal();
       if (limitDays != null) {
-        final daysDiff =
-            nowLocal.difference(DateTime(local.year, local.month, local.day)).inDays;
+        final daysDiff = nowLocal
+            .difference(DateTime(local.year, local.month, local.day))
+            .inDays;
         if (daysDiff > limitDays) continue;
       }
       final key = _dayKeyLocal(local);
@@ -744,7 +761,8 @@ class JournalEntriesProvider with ChangeNotifier {
     bool reflectionsOnly = false,
     bool diariesOnly = false,
   }) {
-    assert(!(reflectionsOnly && diariesOnly), 'reflectionsOnly XOR diariesOnly');
+    assert(
+        !(reflectionsOnly && diariesOnly), 'reflectionsOnly XOR diariesOnly');
     final out = <JournalEntry>[];
     for (final e in _entries) {
       final l = e.createdAt.toLocal();
@@ -833,8 +851,8 @@ class JournalEntriesProvider with ChangeNotifier {
         dayLocal.month == nowLocal.month &&
         dayLocal.day == nowLocal.day;
 
-    final yesterday =
-        DateTime(nowLocal.year, nowLocal.month, nowLocal.day).subtract(const Duration(days: 1));
+    final yesterday = DateTime(nowLocal.year, nowLocal.month, nowLocal.day)
+        .subtract(const Duration(days: 1));
 
     final isYesterday = dayLocal.year == yesterday.year &&
         dayLocal.month == yesterday.month &&
@@ -891,7 +909,8 @@ class JournalEntriesProvider with ChangeNotifier {
     return m.isEmpty ? const <String>[] : <String>['mood:$m'];
   }
 
-  static String _cleanStr(String? v) => (v ?? '').trim().isEmpty ? '' : v!.trim();
+  static String _cleanStr(String? v) =>
+      (v ?? '').trim().isEmpty ? '' : v!.trim();
 
   static String _firstChars(String s, int n) =>
       s.length <= n ? s : ('${s.substring(0, n).trimRight()}…');
@@ -931,16 +950,23 @@ class JournalEntriesProvider with ChangeNotifier {
     String? storyTeaser,
     List<String> tags = const <String>[],
   }) {
-    String kindCode = kind == EntryKind.journal ? 'j'
-                     : kind == EntryKind.reflection ? 'r' : 's';
+    String kindCode = kind == EntryKind.journal
+        ? 'j'
+        : kind == EntryKind.reflection
+            ? 'r'
+            : 's';
 
     String core;
     if (kind == EntryKind.journal) {
       core = _norm(thoughtText);
     } else if (kind == EntryKind.reflection) {
-      core = [_norm(aiQuestion), _norm(userAnswer)].where((e) => e.isNotEmpty).join('|');
+      core = [_norm(aiQuestion), _norm(userAnswer)]
+          .where((e) => e.isNotEmpty)
+          .join('|');
     } else {
-      core = [_norm(storyTitle), _norm(storyTeaser)].where((e) => e.isNotEmpty).join('|');
+      core = [_norm(storyTitle), _norm(storyTeaser)]
+          .where((e) => e.isNotEmpty)
+          .join('|');
     }
 
     String moodKey = '';
@@ -1012,8 +1038,8 @@ class JournalEntriesProvider with ChangeNotifier {
 // ─────────────────────────────────────────────────────────────────────────────
 // Gruppierungs-Datenträger (öffentlich für Features/Widgets)
 class JournalDayGroup {
-  final DateTime day;               // lokaler Tagesstart (kein UTC!)
-  final String label;               // „Heute“ / „Gestern“ / „TT.MM.JJJJ“
+  final DateTime day; // lokaler Tagesstart (kein UTC!)
+  final String label; // „Heute“ / „Gestern“ / „TT.MM.JJJJ“
   final List<JournalEntry> entries; // DESC nach createdAt (UTC) sortiert
 
   const JournalDayGroup({

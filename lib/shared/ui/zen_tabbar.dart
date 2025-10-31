@@ -30,11 +30,12 @@ class ZenTabBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme   = Theme.of(context);
-    final cs      = theme.colorScheme;
-    final isDark  = theme.brightness == Brightness.dark;
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
 
-    final barColor    = (isDark ? cs.surface : ZenColors.surfaceAlt).withValues(alpha: .98);
+    final barColor =
+        (isDark ? cs.surface : ZenColors.surfaceAlt).withValue(alpha: .98);
     final borderColor = theme.dividerColor;
 
     return Padding(
@@ -104,8 +105,8 @@ class _TabButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme   = Theme.of(context);
-    final cs      = theme.colorScheme;
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
     final borderColor = theme.dividerColor;
 
     return Semantics(
@@ -136,7 +137,7 @@ class _TabButton extends StatelessWidget {
             boxShadow: isSelected
                 ? [
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: .08),
+                      color: Colors.black.withValue(alpha: .08),
                       blurRadius: 12,
                       offset: const Offset(0, 4),
                     ),
@@ -147,9 +148,9 @@ class _TabButton extends StatelessWidget {
             color: Colors.transparent,
             child: InkWell(
               borderRadius: const BorderRadius.all(ZenRadii.l),
-              splashColor: ZenColors.goldenMist.withValues(alpha: .14),
-              hoverColor: ZenColors.focus.withValues(alpha: .06),
-              focusColor: ZenColors.focus.withValues(alpha: .10),
+              splashColor: ZenColors.goldenMist.withValue(alpha: .14),
+              hoverColor: ZenColors.focus.withValue(alpha: .06),
+              focusColor: ZenColors.focus.withValue(alpha: .10),
               highlightColor: Colors.transparent,
               onTap: onPressed,
               child: Padding(
@@ -176,7 +177,7 @@ class _TabButton extends StatelessWidget {
                                 size: isSelected ? 26 : 22,
                                 color: isSelected
                                     ? ZenColors.deepSage
-                                    : ZenColors.sage.withValues(alpha: .70),
+                                    : ZenColors.sage.withValue(alpha: .70),
                                 semanticLabel: item.label,
                               ),
                               if ((item.badgeCount ?? 0) > 0 || item.showDot)
@@ -245,8 +246,8 @@ class ZenTabItem {
   final IconData icon;
   final String label;
   final String? semanticLabel; // optional: explizite Screenreader-Formulierung
-  final int? badgeCount;       // optional: Zahl
-  final bool showDot;          // optional: nur Punkt
+  final int? badgeCount; // optional: Zahl
+  final bool showDot; // optional: nur Punkt
 
   const ZenTabItem(
     this.icon,
@@ -282,7 +283,8 @@ class _Badge extends StatelessWidget {
         color: ZenColors.deepSage,
         borderRadius: BorderRadius.circular(12),
         boxShadow: const [
-          BoxShadow(color: Color(0x33000000), blurRadius: 6, offset: Offset(0, 2)),
+          BoxShadow(
+              color: Color(0x33000000), blurRadius: 6, offset: Offset(0, 2)),
         ],
       ),
       child: Text(

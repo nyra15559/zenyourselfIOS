@@ -1,4 +1,5 @@
 // lib/features/start/start_screen.dart
+import '../../shared/zen_style.dart';
 //
 // StartScreen — ZenYourself · v6.2 (responsive, overflow-safe, a11y-first)
 // -----------------------------------------------------------------------------
@@ -41,7 +42,8 @@ class StartScreen extends StatelessWidget {
         : SystemUiOverlayStyle.dark;
 
     final media = MediaQuery.of(context);
-    final clamped = media.textScaler.clamp(maxScaleFactor: 1.15, minScaleFactor: 0.90);
+    final clamped =
+        media.textScaler.clamp(maxScaleFactor: 1.15, minScaleFactor: 0.90);
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: overlay,
@@ -116,11 +118,16 @@ class _StartContent extends StatelessWidget {
     // Kürzere Texte für xs/sm
     final bullets = isXsSm
         ? const [
-            _BulletRow(icon: Icons.local_florist_rounded, text: 'Geführte Reflexion'),
+            _BulletRow(
+                icon: Icons.local_florist_rounded, text: 'Geführte Reflexion'),
             SizedBox(height: 8),
-            _BulletRow(icon: Icons.lock_outline_rounded, text: 'Privat – du entscheidest, was du teilst'),
+            _BulletRow(
+                icon: Icons.lock_outline_rounded,
+                text: 'Privat – du entscheidest, was du teilst'),
             SizedBox(height: 8),
-            _BulletRow(icon: Icons.groups_2_rounded, text: 'Mit Psychologen & Betroffenen entwickelt'),
+            _BulletRow(
+                icon: Icons.groups_2_rounded,
+                text: 'Mit Psychologen & Betroffenen entwickelt'),
           ]
         : const [
             _BulletRow(
@@ -130,7 +137,8 @@ class _StartContent extends StatelessWidget {
             SizedBox(height: 8),
             _BulletRow(
               icon: Icons.lock_outline_rounded,
-              text: 'Deine Antworten sind privat – du entscheidest, was du teilst',
+              text:
+                  'Deine Antworten sind privat – du entscheidest, was du teilst',
             ),
             SizedBox(height: 8),
             _BulletRow(
@@ -154,7 +162,7 @@ class _StartContent extends StatelessWidget {
                 shape: BoxShape.circle,
                 boxShadow: [
                   BoxShadow(
-                    color: ZenColors.deepSage.withValues(alpha: .14),
+                    color: ZenColors.deepSage.withValue(alpha: .14),
                     blurRadius: 28,
                     spreadRadius: 2,
                     offset: const Offset(0, 6),
@@ -215,7 +223,7 @@ class _StartContent extends StatelessWidget {
               message: isXsSm
                   ? 'Erster Start: „Beginnen“ öffnet die Reflexion. Ab dem ersten Eintrag führt „Beginnen“ zum Hauptmenü.'
                   : 'Erster Start: „Beginnen“ führt dich in die Reflexion.\nAb dem ersten Eintrag öffnet „Beginnen“ das Hauptmenü.',
-              color: ZenColors.jade.withValues(alpha: .08),
+              color: ZenColors.jade.withValue(alpha: .08),
             ),
           ),
 
@@ -258,9 +266,7 @@ class _BeginButton extends StatelessWidget {
     return Semantics(
       button: true,
       label: 'Beginnen',
-      hint: hasEntries
-          ? 'Öffnet das Hauptmenü.'
-          : 'Startet die Reflexion.',
+      hint: hasEntries ? 'Öffnet das Hauptmenü.' : 'Startet die Reflexion.',
       child: FocusableActionDetector(
         actions: <Type, Action<Intent>>{
           ActivateIntent: CallbackAction<Intent>(onInvoke: (_) {
@@ -416,7 +422,8 @@ void _showHowItWorks(BuildContext context) {
             children: [
               Row(
                 children: [
-                  const Icon(Icons.info_outline_rounded, color: ZenColors.deepSage),
+                  const Icon(Icons.info_outline_rounded,
+                      color: ZenColors.deepSage),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -438,7 +445,8 @@ void _showHowItWorks(BuildContext context) {
                 'Der Panda spiegelt und stellt eine ruhige, präzise Frage zurück. '
                 'Du entscheidest, was du teilen möchtest. '
                 'Deine Antworten kannst du später im Gedankenbuch speichern.',
-                style: ZenTextStyles.body.copyWith(color: ZenColors.ink, height: 1.34),
+                style: ZenTextStyles.body
+                    .copyWith(color: ZenColors.ink, height: 1.34),
               ),
               const SizedBox(height: 10),
               Align(
@@ -469,7 +477,8 @@ void _showPrivacy(BuildContext context) {
             children: [
               Row(
                 children: [
-                  const Icon(Icons.lock_outline_rounded, color: ZenColors.deepSage),
+                  const Icon(Icons.lock_outline_rounded,
+                      color: ZenColors.deepSage),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -490,7 +499,8 @@ void _showPrivacy(BuildContext context) {
                 'Deine Antworten sind privat. '
                 'Sie werden lokal angezeigt und nur dann geteilt, wenn du das ausdrücklich möchtest. '
                 'Du kannst jede Reflexion auch als Entwurf behalten oder später löschen.',
-                style: ZenTextStyles.body.copyWith(color: ZenColors.ink, height: 1.34),
+                style: ZenTextStyles.body
+                    .copyWith(color: ZenColors.ink, height: 1.34),
               ),
               const SizedBox(height: 10),
               Align(
@@ -542,7 +552,8 @@ void _showImprint(BuildContext context) {
                 'ZenYourself · Switzerland\n'
                 'Kontakt: info@mta-solution.ch\n'
                 'Hinweis: Dies ist eine mentale Unterstützungs-App und ersetzt keine Therapie.',
-                style: ZenTextStyles.body.copyWith(color: ZenColors.ink, height: 1.34),
+                style: ZenTextStyles.body
+                    .copyWith(color: ZenColors.ink, height: 1.34),
               ),
               const SizedBox(height: 10),
               Align(

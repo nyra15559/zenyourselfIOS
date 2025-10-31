@@ -123,15 +123,19 @@ class ZenUser {
         totalMoodEntries: _toInt(json['totalMoodEntries'], fallback: 0),
         allowExport: _toBool(json['allowExport'], fallback: true),
         lastActive: _parseDate(json['lastActive']) ?? DateTime.now(),
-
-        showCrisisResources: _toBool(json['showCrisisResources'], fallback: true),
-        sensitiveContentFilter: _toBool(json['sensitiveContentFilter'], fallback: true),
+        showCrisisResources:
+            _toBool(json['showCrisisResources'], fallback: true),
+        sensitiveContentFilter:
+            _toBool(json['sensitiveContentFilter'], fallback: true),
         hideGamification: _toBool(json['hideGamification'], fallback: true),
-        allowPushReminders: _toBool(json['allowPushReminders'], fallback: false),
+        allowPushReminders:
+            _toBool(json['allowPushReminders'], fallback: false),
         consentAnalytics: _toBool(json['consentAnalytics'], fallback: false),
-        consentAiSuggestions: _toBool(json['consentAiSuggestions'], fallback: true),
+        consentAiSuggestions:
+            _toBool(json['consentAiSuggestions'], fallback: true),
         retentionDays: _toInt(json['retentionDays'], fallback: 0),
-        autoDeleteOldEntries: _toBool(json['autoDeleteOldEntries'], fallback: false),
+        autoDeleteOldEntries:
+            _toBool(json['autoDeleteOldEntries'], fallback: false),
         regionCode: _toNullableString(json['regionCode']),
         privacyVersion: (json['privacyVersion'] ?? '1.0').toString(),
       );
@@ -221,7 +225,8 @@ class ZenUser {
     if (n.isEmpty || n.toLowerCase() == 'gast') return 'G';
     final parts = n.split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
     if (parts.length == 1) return parts.first.characters.first.toUpperCase();
-    return (parts.first.characters.first + parts.last.characters.first).toUpperCase();
+    return (parts.first.characters.first + parts.last.characters.first)
+        .toUpperCase();
   }
 
   /// Ist das Profil effektiv anonym?
@@ -269,7 +274,8 @@ class ZenUser {
   }) {
     return ZenUser(
       id: id ?? this.id,
-      displayName: displayName != null ? _sanitizeName(displayName) : this.displayName,
+      displayName:
+          displayName != null ? _sanitizeName(displayName) : this.displayName,
       avatarPath: avatarPath ?? this.avatarPath,
       accountType: accountType ?? this.accountType,
       isPro: isPro ?? this.isPro,
@@ -282,7 +288,8 @@ class ZenUser {
       allowExport: allowExport ?? this.allowExport,
       lastActive: lastActive ?? this.lastActive,
       showCrisisResources: showCrisisResources ?? this.showCrisisResources,
-      sensitiveContentFilter: sensitiveContentFilter ?? this.sensitiveContentFilter,
+      sensitiveContentFilter:
+          sensitiveContentFilter ?? this.sensitiveContentFilter,
       hideGamification: hideGamification ?? this.hideGamification,
       allowPushReminders: allowPushReminders ?? this.allowPushReminders,
       consentAnalytics: consentAnalytics ?? this.consentAnalytics,

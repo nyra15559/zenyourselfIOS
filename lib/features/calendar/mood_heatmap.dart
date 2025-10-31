@@ -10,7 +10,7 @@
 //
 // Hinweise:
 // – Keine hartcodierten Marken-Fonts; nutze Theme.
-// – Color.withValues(alpha: …) gemäß Projektstandard.
+// – Color.withValue(alpha: …) gemäß Projektstandard.
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -52,11 +52,13 @@ class MoodHeatmap extends StatelessWidget {
             ))
         .toList();
 
-    final cardBg = Theme.of(context).colorScheme.surfaceContainerHighest
-        .withValues(alpha: .96);
+    final cardBg = Theme.of(context)
+        .colorScheme
+        .surfaceContainerHighest
+        .withValue(alpha: .96);
     final borderColor =
-        Theme.of(context).colorScheme.outlineVariant.withValues(alpha: .18);
-    final shadowColor = zs.ZenColors.deepSage.withValues(alpha: .07);
+        Theme.of(context).colorScheme.outlineVariant.withValue(alpha: .18);
+    final shadowColor = zs.ZenColors.deepSage.withValue(alpha: .07);
     final titleColor = zs.ZenColors.deepSage;
 
     return Stack(
@@ -112,8 +114,8 @@ class MoodHeatmap extends StatelessWidget {
                       ? Theme.of(context)
                           .colorScheme
                           .outlineVariant
-                          .withValues(alpha: .22)
-                      : _scoreColor(score).withValues(alpha: .95);
+                          .withValue(alpha: .22)
+                      : _scoreColor(score).withValue(alpha: .95);
                   final emoji = isEmpty ? '…' : _emojiForScore(score);
                   final isToday = _isSameDay(date, now);
 
@@ -138,8 +140,7 @@ class MoodHeatmap extends StatelessWidget {
                     child: Text(
                       'Tippe für Details · lange halten für Zitat',
                       style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                            color:
-                                zs.ZenColors.deepSage.withValues(alpha: .88),
+                            color: zs.ZenColors.deepSage.withValue(alpha: .88),
                             fontStyle: FontStyle.italic,
                           ),
                     ),
@@ -160,17 +161,17 @@ class MoodHeatmap extends StatelessWidget {
     final jade = zs.ZenColors.jade;
     switch (score) {
       case 0:
-        return jade.withValues(alpha: .16);
+        return jade.withValue(alpha: .16);
       case 1:
-        return jade.withValues(alpha: .28);
+        return jade.withValue(alpha: .28);
       case 2:
-        return jade.withValues(alpha: .42);
+        return jade.withValue(alpha: .42);
       case 3:
-        return jade.withValues(alpha: .62);
+        return jade.withValue(alpha: .62);
       case 4:
-        return jade.withValues(alpha: .82);
+        return jade.withValue(alpha: .82);
       default:
-        return jade.withValues(alpha: .10);
+        return jade.withValue(alpha: .10);
     }
   }
 
@@ -258,7 +259,7 @@ class _ZenDayMoodBubbleState extends State<_ZenDayMoodBubble> {
     );
 
     final ringColor =
-        zs.ZenColors.deepSage.withValues(alpha: .22); // „Heute“-Ring
+        zs.ZenColors.deepSage.withValue(alpha: .22); // „Heute“-Ring
 
     return Semantics(
       button: widget.entry != null,
@@ -277,8 +278,7 @@ class _ZenDayMoodBubbleState extends State<_ZenDayMoodBubble> {
               },
         onLongPress: () {
           final summary = widget.entry?.aiSummary;
-          final hasSummary =
-              summary != null && summary.trim().isNotEmpty;
+          final hasSummary = summary != null && summary.trim().isNotEmpty;
           if (!hasSummary) return;
 
           HapticFeedback.lightImpact();
@@ -291,8 +291,7 @@ class _ZenDayMoodBubbleState extends State<_ZenDayMoodBubble> {
                       color: zs.ZenColors.white,
                     ),
               ),
-              backgroundColor:
-                  zs.ZenColors.deepSage.withValues(alpha: .92),
+              backgroundColor: zs.ZenColors.deepSage.withValue(alpha: .92),
               behavior: SnackBarBehavior.floating,
               duration: const Duration(seconds: 3),
             ),
@@ -327,7 +326,7 @@ class _ZenDayMoodBubbleState extends State<_ZenDayMoodBubble> {
                     boxShadow: [
                       if (widget.highlight)
                         BoxShadow(
-                          color: zs.ZenColors.deepSage.withValues(alpha: .15),
+                          color: zs.ZenColors.deepSage.withValue(alpha: .15),
                           blurRadius: 12,
                           offset: const Offset(0, 2),
                         ),
@@ -357,22 +356,22 @@ class _ZenDayMoodBubbleState extends State<_ZenDayMoodBubble> {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 12, vertical: 6),
                         decoration: BoxDecoration(
-                          color:
-                              zs.ZenColors.deepSage.withValues(alpha: .96),
+                          color: zs.ZenColors.deepSage.withValue(alpha: .96),
                           borderRadius: const BorderRadius.all(zs.ZenRadii.s),
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black.withValues(alpha: .11),
+                              color: Colors.black.withValue(alpha: .11),
                               blurRadius: 7,
                             ),
                           ],
                         ),
                         child: Text(
                           _tooltipText(widget.entry!),
-                          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                                color: zs.ZenColors.white,
-                                fontSize: 12.6,
-                              ),
+                          style:
+                              Theme.of(context).textTheme.labelSmall?.copyWith(
+                                    color: zs.ZenColors.white,
+                                    fontSize: 12.6,
+                                  ),
                         ),
                       ),
                     ),

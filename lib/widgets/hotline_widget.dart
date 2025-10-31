@@ -19,8 +19,8 @@ import '../shared/ui/zen_widgets.dart' show ZenGlassCard, ZenPrimaryButton;
 /// Datenmodell für eine Hotline-Zeile (intern).
 class _Helpline {
   final String title;
-  final String phone;    // 143 / 144 / +41 …
-  final String note;     // Kurzinfo wie „24/7, anonym“
+  final String phone; // 143 / 144 / +41 …
+  final String note; // Kurzinfo wie „24/7, anonym“
   final bool emphasized; // z. B. 144 (Notruf)
 
   const _Helpline({
@@ -161,7 +161,7 @@ class _SectionTitle extends StatelessWidget {
       textAlign: TextAlign.center,
       style: tt.titleMedium?.copyWith(
         fontWeight: FontWeight.w700,
-        color: zs.ZenColors.inkStrong.withValues(alpha: .95),
+        color: zs.ZenColors.inkStrong.withValue(alpha: .95),
       ),
     );
   }
@@ -175,14 +175,15 @@ class _Header extends StatelessWidget {
     final tt = Theme.of(context).textTheme;
     return Row(
       children: [
-        Icon(Icons.health_and_safety_rounded, color: zs.ZenColors.deepSage, size: 20),
+        Icon(Icons.health_and_safety_rounded,
+            color: zs.ZenColors.deepSage, size: 20),
         const SizedBox(width: 8),
         Expanded(
           child: Text(
             'Schnelle Hilfe: 144 · Gespräch: 143',
             style: tt.bodyMedium?.copyWith(
               fontWeight: FontWeight.w600,
-              color: zs.ZenColors.inkStrong.withValues(alpha: .92),
+              color: zs.ZenColors.inkStrong.withValue(alpha: .92),
               height: 1.2,
             ),
           ),
@@ -222,7 +223,10 @@ class _HotlineRow extends StatelessWidget {
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: .12),
+            color: Theme.of(context)
+                .colorScheme
+                .outlineVariant
+                .withValue(alpha: .12),
             width: 1,
           ),
         ),
@@ -241,7 +245,7 @@ class _HotlineRow extends StatelessWidget {
                       helpline.title,
                       style: tt.bodyMedium?.copyWith(
                         fontWeight: FontWeight.w700,
-                        color: zs.ZenColors.inkStrong.withValues(alpha: .95),
+                        color: zs.ZenColors.inkStrong.withValue(alpha: .95),
                         height: 1.2,
                       ),
                     ),
@@ -249,7 +253,7 @@ class _HotlineRow extends StatelessWidget {
                     Text(
                       '${helpline.note} · ${helpline.phone}',
                       style: tt.bodySmall?.copyWith(
-                        color: zs.ZenColors.inkSubtle.withValues(alpha: .92),
+                        color: zs.ZenColors.inkSubtle.withValue(alpha: .92),
                         height: 1.2,
                       ),
                     ),
@@ -282,7 +286,8 @@ class _CallButton extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           backgroundColor: zs.ZenColors.deepSage,
           foregroundColor: zs.ZenColors.white,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           elevation: 0,
         ),
         onPressed: () => Launching.openTel(phone),
@@ -304,7 +309,7 @@ class _FooterHint extends StatelessWidget {
       'Anonyme Unterstützung: 143 · Notfall: 144',
       textAlign: TextAlign.center,
       style: tt.bodySmall?.copyWith(
-        color: zs.ZenColors.inkSubtle.withValues(alpha: .92),
+        color: zs.ZenColors.inkSubtle.withValue(alpha: .92),
         height: 1.25,
       ),
     );

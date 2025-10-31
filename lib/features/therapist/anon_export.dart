@@ -14,6 +14,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' show min;
 import 'package:flutter/foundation.dart' show compute, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
@@ -26,13 +27,13 @@ import '../../core/privacy/privacy_texts.dart';
 
 // ─────────────────────────────── Analytics (Hook) ──────────────────────────────
 // Externe Integrationen können den Logger setzen: `AnonExportAnalytics.logger = ...;`
-typedef _AnalyticsLogger = FutureOr<void> Function(
+typedef AnalyticsLogger = FutureOr<void> Function(
   String event,
   Map<String, Object?> params,
 );
 
 class AnonExportAnalytics {
-  static _AnalyticsLogger logger = (_, __) {};
+  static AnalyticsLogger logger = (_, __) {};
 }
 
 // ─────────────────────────────── Memorystore (SP) ─────────────────────────────
@@ -70,14 +71,14 @@ class AnonExportWidget extends StatefulWidget {
   final List<ReflectionEntry>? reflectionEntries;
 
   /// Optional: Start-Auswahl & Optionen preset’en (z. B. für "PDF"-Soft-Gate)
-  final _ExportKind initialKind;
+  final ExportKind initialKind;
   final bool initialIncludeReflections;
 
   const AnonExportWidget({
     super.key,
     required this.moodEntries,
     this.reflectionEntries,
-    this.initialKind = _ExportKind.csvMood,
+    this.initialKind = ExportKind.csvMood,
     this.initialIncludeReflections = true,
   });
 
@@ -93,7 +94,7 @@ class AnonExportWidget extends StatefulWidget {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         child: AnonExportWidget(
           moodEntries: moods,
-          initialKind: _ExportKind.csvMood,
+          initialKind: ExportKind.csvMood,
           initialIncludeReflections: false,
         ),
       ),
@@ -116,7 +117,7 @@ class AnonExportWidget extends StatefulWidget {
         child: AnonExportWidget(
           moodEntries: moods,
           reflectionEntries: reflections,
-          initialKind: _ExportKind.jsonRedacted,
+          initialKind: ExportKind.jsonRedacted,
           initialIncludeReflections: true,
         ),
       ),
@@ -142,12 +143,12 @@ class AnonExportWidget extends StatefulWidget {
   State<AnonExportWidget> createState() => _AnonExportWidgetState();
 }
 
-enum _ExportKind { csvMood, jsonFull, jsonRedacted }
+enum ExportKind { csvMood, jsonFull, jsonRedacted }
 
 class _AnonExportWidgetState extends State<AnonExportWidget> {
   bool _exporting = false;
   String? _exportMsg;
-  late _ExportKind _kind;
+  late ExportKind _kind;
   late bool _includeReflections; // nur relevant für JSON
   String? _lastPath;
 
@@ -159,6 +160,20 @@ class _AnonExportWidgetState extends State<AnonExportWidget> {
     super.initState();
     _kind = widget.initialKind;
     _includeReflections = widget.initialIncludeReflections;
+    _prefillLastExportPath();
+  }
+
+  Future<void> _prefillLastExportPath() async {
+    try {
+      final last =
+          await _Memorystore.loadLastExport(); // nutzt die Methode → kein Lint
+      if (!mounted) return;
+      setState(() {
+        _lastPath = last['path'];
+      });
+    } catch (_) {
+      // best-effort; UI bleibt unberührt bei Fehlern
+    }
   }
 
   @override
@@ -189,7 +204,7 @@ class _AnonExportWidgetState extends State<AnonExportWidget> {
               ),
 
               // Option: Reflexionen einbeziehen (nur JSON)
-              if (_kind != _ExportKind.csvMood && hasReflections) ...[
+              if (_kind != ExportKind.csvMood && hasReflections) ...[
                 const SizedBox(height: 6),
                 Row(
                   children: [
@@ -223,8 +238,9 @@ class _AnonExportWidgetState extends State<AnonExportWidget> {
                   OutlinedButton.icon(
                     icon: const Icon(Icons.close_rounded),
                     label: const Text('Schließen'),
-                    onPressed:
-                        _exporting ? null : () => Navigator.of(context).maybePop(),
+                    onPressed: _exporting
+                        ? null
+                        : () => Navigator.of(context).maybePop(),
                   ),
                 ],
               ),
@@ -238,13 +254,13 @@ class _AnonExportWidgetState extends State<AnonExportWidget> {
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
                     color: _exportMsg!.startsWith('Fehler')
-                        ? Colors.red.withValues(alpha: 0.08)
-                        : ZenColors.bamboo.withValues(alpha: 0.08),
+                        ? Colors.red.withValue(alpha: 0.08)
+                        : ZenColors.bamboo.withValue(alpha: 0.08),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
                       color: _exportMsg!.startsWith('Fehler')
-                          ? Colors.red.withValues(alpha: 0.32)
-                          : ZenColors.bamboo.withValues(alpha: 0.25),
+                          ? Colors.red.withValue(alpha: 0.32)
+                          : ZenColors.bamboo.withValue(alpha: 0.25),
                     ),
                   ),
                   child: Text(
@@ -262,7 +278,8 @@ class _AnonExportWidgetState extends State<AnonExportWidget> {
                 const SizedBox(height: 8),
                 Text(
                   'Gespeichert unter:',
-                  style: ZenTextStyles.caption.copyWith(color: ZenColors.inkSubtle),
+                  style: ZenTextStyles.caption
+                      .copyWith(color: ZenColors.inkSubtle),
                 ),
                 const SizedBox(height: 4),
                 SelectableText(
@@ -279,7 +296,8 @@ class _AnonExportWidgetState extends State<AnonExportWidget> {
               const SizedBox(height: 8),
               Text(
                 PrivacyTexts.chDisclaimerShort,
-                style: ZenTextStyles.caption.copyWith(color: ZenColors.inkSubtle),
+                style:
+                    ZenTextStyles.caption.copyWith(color: ZenColors.inkSubtle),
               ),
             ],
           ),
@@ -290,11 +308,11 @@ class _AnonExportWidgetState extends State<AnonExportWidget> {
 
   String get _primaryLabel {
     switch (_kind) {
-      case _ExportKind.csvMood:
+      case ExportKind.csvMood:
         return 'CSV (Stimmungen) exportieren';
-      case _ExportKind.jsonFull:
+      case ExportKind.jsonFull:
         return 'JSON (vollständig) exportieren';
-      case _ExportKind.jsonRedacted:
+      case ExportKind.jsonRedacted:
         return 'JSON (redacted) exportieren';
     }
   }
@@ -339,7 +357,7 @@ class _AnonExportWidgetState extends State<AnonExportWidget> {
       late final File file;
       late Map<String, Object?> metrics;
 
-      if (_kind == _ExportKind.csvMood) {
+      if (_kind == ExportKind.csvMood) {
         final csv = await compute(_buildCsvString, moodMaps);
         file = await _saveFile(csv, _timestamped('zenyourself_mood', 'csv'));
         // Metrics (redacted) nur aus moods
@@ -348,7 +366,7 @@ class _AnonExportWidgetState extends State<AnonExportWidget> {
           'reflections': <Map<String, Object?>>[],
         });
       } else {
-        final redacted = _kind == _ExportKind.jsonRedacted;
+        final redacted = _kind == ExportKind.jsonRedacted;
 
         final payload = await compute(_buildJsonPayload, {
           'moods': moodMaps,
@@ -358,7 +376,8 @@ class _AnonExportWidgetState extends State<AnonExportWidget> {
         final jsonStr = payload['json'] as String;
         metrics = payload['metrics'] as Map<String, Object?>;
 
-        file = await _saveFile(jsonStr, _timestamped('zenyourself_export', 'json'));
+        file = await _saveFile(
+            jsonStr, _timestamped('zenyourself_export', 'json'));
       }
 
       final topFacet = (metrics['topFacet'] as Map?)?['label'] as String?;
@@ -387,10 +406,11 @@ class _AnonExportWidgetState extends State<AnonExportWidget> {
       if (mounted) {
         setState(() => _exportMsg = 'Fehler beim Export: $e');
       }
+      final err = e.toString();
       await AnonExportAnalytics.logger('export_failed', {
         'kind': kindLabel,
         'ts': DateTime.now().toIso8601String(),
-        'error': e.toString().substring(0, e.toString().length.clamp(0, 240)),
+        'error': err.substring(0, min(err.length, 240)),
       });
     } finally {
       if (mounted) {
@@ -450,7 +470,7 @@ class _MetricsInline extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: ZenColors.white.withValues(alpha: .72),
+        color: ZenColors.white.withValue(alpha: .72),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: ZenColors.border),
       ),
@@ -470,7 +490,9 @@ class _MetricsInline extends StatelessWidget {
   Widget _kv(String k, String v) => Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text('$k: ', style: ZenTextStyles.caption.copyWith(fontWeight: FontWeight.w700)),
+          Text('$k: ',
+              style:
+                  ZenTextStyles.caption.copyWith(fontWeight: FontWeight.w700)),
           Text(v, style: ZenTextStyles.caption),
         ],
       );
@@ -580,8 +602,12 @@ Map<String, Object?> _buildRedactedMetrics(Map<String, Object?> args) {
     maxT = (maxT == null || dt.isAfter(maxT!)) ? dt : maxT;
   }
 
-  for (final m in moods) accTs(m['timestamp']?.toString());
-  for (final r in refl) accTs(r['timestamp']?.toString());
+  for (final m in moods) {
+    accTs(m['timestamp']?.toString());
+  }
+  for (final r in refl) {
+    accTs(r['timestamp']?.toString());
+  }
 
   // Mood-Verteilung
   final Map<String, int> moodDist = {};
@@ -604,11 +630,17 @@ Map<String, Object?> _buildRedactedMetrics(Map<String, Object?> args) {
       }
     }
 
-    if (r['tags'] != null) addAll(r['tags']);
-    if (r['facets'] != null) addAll(r['facets']);
+    if (r['tags'] != null) {
+      addAll(r['tags']);
+    }
+    if (r['facets'] != null) {
+      addAll(r['facets']);
+    }
 
     final meta = r['metadata'];
-    if (meta is Map && meta['facets'] != null) addAll(meta['facets']);
+    if (meta is Map && meta['facets'] != null) {
+      addAll(meta['facets']);
+    }
   }
 
   String? topFacetLabel;
@@ -636,12 +668,12 @@ Map<String, Object?> _buildRedactedMetrics(Map<String, Object?> args) {
           },
   };
 }
- 
+
 // -------------------------------- UI-Subwidget: Export-Auswahl --------------------------------
 
 class _ExportSelector extends StatelessWidget {
-  final _ExportKind kind;
-  final ValueChanged<_ExportKind> onChanged;
+  final ExportKind kind;
+  final ValueChanged<ExportKind> onChanged;
   final bool hasReflections;
 
   const _ExportSelector({
@@ -652,20 +684,20 @@ class _ExportSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SegmentedButton<_ExportKind>(
+    return SegmentedButton<ExportKind>(
       segments: const [
         ButtonSegment(
-          value: _ExportKind.csvMood,
+          value: ExportKind.csvMood,
           icon: Icon(Icons.table_chart_outlined),
           label: Text('CSV (Mood)'),
         ),
         ButtonSegment(
-          value: _ExportKind.jsonFull,
+          value: ExportKind.jsonFull,
           icon: Icon(Icons.code_rounded),
           label: Text('JSON'),
         ),
         ButtonSegment(
-          value: _ExportKind.jsonRedacted,
+          value: ExportKind.jsonRedacted,
           icon: Icon(Icons.privacy_tip_outlined),
           label: Text('JSON (red.)'),
         ),

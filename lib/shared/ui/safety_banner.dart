@@ -34,14 +34,18 @@ class SafetyBanner extends StatelessWidget {
 
     final String text = isHigh
         ? 'Wenn es sich akut belastend anfühlt: Du musst da nicht alleine durch. '
-          'Hier findest du Hilfe – in Notfällen wähle 144.'
+            'Hier findest du Hilfe – in Notfällen wähle 144.'
         : 'Danke fürs Teilen. Wenn du magst, findest du hier anonyme Hilfe und Unterstützung.';
 
     // Ruhige Farben aus Theme/Zenschema
-    final bg = Theme.of(context).colorScheme.surfaceContainerHigh.withValues(alpha: .80);
-    final border = Theme.of(context).colorScheme.outlineVariant.withValues(alpha: .30);
-    final iconColor = zs.ZenColors.deepSage;
-    final textColor = zs.ZenColors.inkStrong.withValues(alpha: .96);
+    final bg = Theme.of(context)
+        .colorScheme
+        .surfaceContainerHigh
+        .withValue(alpha: .80);
+    final border =
+        Theme.of(context).colorScheme.outlineVariant.withValue(alpha: .30);
+    const iconColor = zs.ZenColors.deepSage;
+    final textColor = zs.ZenColors.inkStrong.withValue(alpha: .96);
 
     return Semantics(
       container: true,
@@ -58,7 +62,8 @@ class SafetyBanner extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(Icons.health_and_safety_rounded, size: 20, color: iconColor),
+            const Icon(Icons.health_and_safety_rounded,
+                size: 20, color: iconColor),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
@@ -82,7 +87,7 @@ class SafetyBanner extends StatelessWidget {
                     shape: const RoundedRectangleBorder(
                       borderRadius: BorderRadius.all(zs.ZenRadii.m),
                     ),
-                    side: BorderSide(color: iconColor.withValues(alpha: .45)),
+                    side: BorderSide(color: iconColor.withValue(alpha: .45)),
                   ),
                   child: const Text('Hotlines öffnen'),
                 ),

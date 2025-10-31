@@ -39,7 +39,8 @@ class _ZenAppRootState extends State<ZenAppRoot> {
     _TabItem(
       label: 'Reflexion',
       icon: Icons.self_improvement_rounded,
-      builder: () => const ReflectionScreen(), // bewusst ohne aggressive const-Nutzung
+      builder: () =>
+          const ReflectionScreen(), // bewusst ohne aggressive const-Nutzung
     ),
     _TabItem(
       label: 'Journal',
@@ -103,7 +104,8 @@ class _ZenAppRootState extends State<ZenAppRoot> {
         onDestinationSelected: (i) => setState(() => _index = i),
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         destinations: _tabs
-            .map((t) => NavigationDestination(icon: Icon(t.icon), label: t.label))
+            .map((t) =>
+                NavigationDestination(icon: Icon(t.icon), label: t.label))
             .toList(growable: false),
       ),
     );

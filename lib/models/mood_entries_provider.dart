@@ -25,7 +25,8 @@ class MoodEntriesProvider with ChangeNotifier {
   bool get isNotEmpty => _moodEntries.isNotEmpty;
 
   /// Gibt es bereits einen Eintrag für den Tag?
-  bool containsDay(String dayTag) => _moodEntries.any((e) => e.dayTag == dayTag);
+  bool containsDay(String dayTag) =>
+      _moodEntries.any((e) => e.dayTag == dayTag);
 
   /// Neuen MoodEntry hinzufügen (wirft Exception, falls Tag schon existiert)
   void add(MoodEntry entry) {
@@ -55,7 +56,8 @@ class MoodEntriesProvider with ChangeNotifier {
   void update(MoodEntry entry) {
     final idx = _moodEntries.indexWhere((e) => e.dayTag == entry.dayTag);
     if (idx == -1) {
-      throw Exception('Kein MoodEntry für diesen Tag gefunden. Nutze add() oder upsert().');
+      throw Exception(
+          'Kein MoodEntry für diesen Tag gefunden. Nutze add() oder upsert().');
     }
     _moodEntries[idx] = entry;
     _sort();
@@ -103,7 +105,8 @@ class MoodEntriesProvider with ChangeNotifier {
   }
 
   /// Einträge in Datumsspanne [start, end] (inklusive by default)
-  List<MoodEntry> inRange(DateTime start, DateTime end, {bool inclusive = true}) {
+  List<MoodEntry> inRange(DateTime start, DateTime end,
+      {bool inclusive = true}) {
     final s = start.isBefore(end) ? start : end;
     final e = end.isAfter(start) ? end : start;
     return _moodEntries.where((m) {
@@ -204,7 +207,8 @@ class MoodEntriesProvider with ChangeNotifier {
 
   // ---- intern ---------------------------------------------------------------
 
-  void _sort() => _moodEntries.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+  void _sort() =>
+      _moodEntries.sort((a, b) => b.timestamp.compareTo(a.timestamp));
 
   /// Day-Tag (yyyy-mm-dd) aus Datum
   String _toDayTag(DateTime dt) {

@@ -5,7 +5,7 @@
 // • Responsives, barrierearmes Layout (Semantics, große Ziele).
 // • Keine PII im Verlauf (nur Labels/Scores/Datum).
 // • 7-Tage-Heatmap + Legende (Zen-Palette).
-// • Neu: Top-Facet (aus Tags/Facets) & kurzer CH-Disclaimer.
+// • „Top-Stimmung“ (häufigstes Mood-Label) & kurzer CH-Disclaimer.
 // • Export-Kachel nutzt AnonExportWidget (asynchron, redacted-metrics).
 
 import 'package:flutter/material.dart';
@@ -24,7 +24,8 @@ class TherapistDashboard extends StatelessWidget {
   Widget build(BuildContext context) {
     // 7-Tage-Fenster inkl. heute (Start = heute 00:00 - 6 Tage)
     final now = DateTime.now();
-    final start = DateTime(now.year, now.month, now.day).subtract(const Duration(days: 6));
+    final start = DateTime(now.year, now.month, now.day)
+        .subtract(const Duration(days: 6));
     final last7Days = allEntries
         .where((e) => !e.timestamp.isBefore(start))
         .toList(growable: false);
@@ -32,18 +33,20 @@ class TherapistDashboard extends StatelessWidget {
     // Ø-Stimmung & letzte Stimmung (chronologisch)
     final avgMood = allEntries.isEmpty
         ? 0.0
-        : allEntries.fold<int>(0, (a, e) => a + e.moodScore) / allEntries.length;
+        : allEntries.fold<int>(0, (a, e) => a + e.moodScore) /
+            allEntries.length;
 
     final MoodEntry? latest = allEntries.isEmpty
         ? null
         : allEntries.reduce((a, b) => a.timestamp.isAfter(b.timestamp) ? a : b);
 
     // Letzte 5 (DESC)
-    final lastFive = [...allEntries]..sort((a, b) => b.timestamp.compareTo(a.timestamp));
+    final lastFive = [...allEntries]
+      ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
     final recentFive = lastFive.take(5).toList(growable: false);
 
-    // Top-Facet (nur aus MoodEntry.tags, falls vorhanden; robust defensiv)
-    final topFacet = _computeTopFacetFromEntries(allEntries);
+    // „Top-Stimmung“ aus MoodEntry.moodLabel (robust, da immer vorhanden)
+    final topLabel = _computeTopLabelFromEntries(allEntries);
 
     return Semantics(
       label: 'Therapeutisches Reflexions-Dashboard',
@@ -77,8 +80,8 @@ class TherapistDashboard extends StatelessWidget {
                   color: latest?.moodColor ?? ZenColors.jadeMid,
                 ),
                 _StatItem(
-                  label: 'Top-Facette',
-                  value: topFacet ?? '—',
+                  label: 'Top-Stimmung',
+                  value: topLabel ?? '—',
                   icon: Icons.local_florist_rounded,
                   color: ZenColors.deepSage,
                 ),
@@ -89,7 +92,8 @@ class TherapistDashboard extends StatelessWidget {
 
             // --- Heatmap (7 Tage) oder Empty State ---
             Card(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18)),
               elevation: 3,
               color: ZenColors.surface,
               child: Padding(
@@ -123,7 +127,8 @@ class TherapistDashboard extends StatelessWidget {
 
             // --- Export (anonym, asynchron, redacted-metrics) ---
             Card(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18)),
               elevation: 2,
               color: ZenColors.surface,
               child: const Padding(
@@ -171,16 +176,13 @@ class TherapistDashboard extends StatelessWidget {
     );
   }
 
-  String? _computeTopFacetFromEntries(List<MoodEntry> entries) {
+  /// Häufigstes Mood-Label (robust ohne Tags/Faces-Felder).
+  String? _computeTopLabelFromEntries(List<MoodEntry> entries) {
     final Map<String, int> counts = {};
     for (final e in entries) {
-      final t = e.tags; // falls vorhanden; sonst null
-      if (t == null) continue;
-      for (final x in t) {
-        final s = x.trim();
-        if (s.isEmpty) continue;
-        counts[s] = (counts[s] ?? 0) + 1;
-      }
+      final s = (e.moodLabel).trim();
+      if (s.isEmpty) continue;
+      counts[s] = (counts[s] ?? 0) + 1;
     }
     String? label;
     int max = 0;
@@ -229,25 +231,6 @@ class _SectionTitle extends StatelessWidget {
   }
 }
 
-class _TherapistHint extends StatelessWidget {
-  final String text;
-  const _TherapistHint(this.text);
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 10),
-      child: Text(
-        text,
-        style: ZenTextStyles.caption.copyWith(
-          color: ZenColors.inkSubtle,
-          fontStyle: FontStyle.italic,
-        ),
-      ),
-    );
-  }
-}
-
 /// Responsives Grid für Stat-Karten
 class _StatsGrid extends StatelessWidget {
   final List<_StatItem> items;
@@ -259,7 +242,12 @@ class _StatsGrid extends StatelessWidget {
       builder: (_, c) {
         final maxW = c.maxWidth;
         const cardW = 180.0;
-        final cols = (maxW / (cardW + 16)).floor().clamp(1, items.length);
+
+        // Stabil ohne num.clamp()-Typing-Fallen
+        final rawCols = (maxW / (cardW + 16)).floor();
+        final int cols =
+            rawCols < 1 ? 1 : (rawCols > items.length ? items.length : rawCols);
+
         final effectiveW = (maxW - (16 * (cols - 1))) / cols;
 
         return Wrap(
@@ -311,8 +299,8 @@ class _StatCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bg = color.withValues(alpha: 0.08);
-    final border = color.withValues(alpha: 0.18);
+    final bg = color.withValue(alpha: 0.08);
+    final border = color.withValue(alpha: 0.18);
 
     return Semantics(
       label: '$label: $value',
@@ -327,7 +315,7 @@ class _StatCard extends StatelessWidget {
           children: [
             CircleAvatar(
               radius: 18,
-              backgroundColor: color.withValues(alpha: 0.12),
+              backgroundColor: color.withValue(alpha: 0.12),
               child: Icon(icon, color: color, size: 22),
             ),
             const SizedBox(width: 12),
@@ -343,7 +331,7 @@ class _StatCard extends StatelessWidget {
                   const SizedBox(height: 2),
                   Text(label,
                       style: ZenTextStyles.caption.copyWith(
-                        color: color.withValues(alpha: 0.8),
+                        color: color.withValue(alpha: 0.8),
                       )),
                 ],
               ),
@@ -362,11 +350,11 @@ class _HeatmapLegend extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final items = [
-      {'label': 'Sehr gut',     'color': ZenColors.deepSage},
-      {'label': 'Gut',          'color': ZenColors.sage},
-      {'label': 'Neutral',      'color': ZenColors.goldenMist},
-      {'label': 'Weniger gut',  'color': ZenColors.sunHaze},
-      {'label': 'Schwach',      'color': ZenColors.inkSubtle},
+      {'label': 'Sehr gut', 'color': ZenColors.deepSage},
+      {'label': 'Gut', 'color': ZenColors.sage},
+      {'label': 'Neutral', 'color': ZenColors.goldenMist},
+      {'label': 'Weniger gut', 'color': ZenColors.sunHaze},
+      {'label': 'Schwach', 'color': ZenColors.inkSubtle},
     ];
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
@@ -376,7 +364,8 @@ class _HeatmapLegend extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 6),
               child: Row(
                 children: [
-                  CircleAvatar(radius: 6.5, backgroundColor: m['color'] as Color),
+                  CircleAvatar(
+                      radius: 6.5, backgroundColor: m['color'] as Color),
                   const SizedBox(width: 6),
                   Text(m['label'] as String, style: ZenTextStyles.caption),
                 ],
@@ -398,7 +387,8 @@ class _MoodEntryTile extends StatelessWidget {
     final badgeFg = entry.moodScore >= 3 ? Colors.white : Colors.black87;
 
     return Semantics(
-      label: 'Eintrag vom ${_formatDate(entry.timestamp)} mit Stimmung ${entry.moodLabel}',
+      label:
+          'Eintrag vom ${_formatDate(entry.timestamp)} mit Stimmung ${entry.moodLabel}',
       child: Card(
         elevation: 1.5,
         margin: const EdgeInsets.symmetric(vertical: 4),

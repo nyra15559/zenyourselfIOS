@@ -72,10 +72,12 @@ class Launching {
           ? ul.LaunchMode.externalApplication
           : ul.LaunchMode.platformDefault;
 
-      final String? webTarget = isWeb ? '_blank' : null; // ignoriert außerhalb Web
+      final String? webTarget =
+          isWeb ? '_blank' : null; // ignoriert außerhalb Web
 
       if (isWeb && (uri.scheme == 'tel' || uri.scheme == 'sms')) {
-        debugPrint('[Launching] Hinweis: ${uri.scheme}: wird im Web nicht überall unterstützt → $uri');
+        debugPrint(
+            '[Launching] Hinweis: ${uri.scheme}: wird im Web nicht überall unterstützt → $uri');
       }
 
       final ok = await ul.launchUrl(

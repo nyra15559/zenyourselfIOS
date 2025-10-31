@@ -1,4 +1,5 @@
 // lib/widgets/panda_mood_chip.dart
+import '../shared/zen_style.dart';
 //
 // PandaMoodChip — A11y-first Chip (icon + label, large-text-safe, CB-friendly)
 // Update: 2025-10-22
@@ -30,11 +31,11 @@ class PandaMoodChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final bg = selected
-        ? theme.colorScheme.primary.withValues(alpha: .12)
-        : theme.colorScheme.surfaceContainerHighest.withValues(alpha: .45);
+        ? theme.colorScheme.primary.withValue(alpha: .12)
+        : theme.colorScheme.surfaceContainerHighest.withValue(alpha: .45);
     final border = selected
         ? theme.colorScheme.primary
-        : theme.colorScheme.outlineVariant.withValues(alpha: .6);
+        : theme.colorScheme.outlineVariant.withValue(alpha: .6);
 
     return Semantics(
       button: true,
@@ -56,7 +57,7 @@ class PandaMoodChip extends StatelessWidget {
               boxShadow: selected
                   ? [
                       BoxShadow(
-                        color: Colors.black.withValues(alpha: .06),
+                        color: Colors.black.withValue(alpha: .06),
                         blurRadius: 10,
                         offset: const Offset(0, 4),
                       ),
@@ -74,8 +75,8 @@ class PandaMoodChip extends StatelessWidget {
                     width: 22,
                     height: 22,
                     fit: BoxFit.contain,
-                    errorBuilder: (_, __, ___) =>
-                        Icon(Icons.emoji_emotions, size: 22, color: theme.colorScheme.primary),
+                    errorBuilder: (_, __, ___) => Icon(Icons.emoji_emotions,
+                        size: 22, color: theme.colorScheme.primary),
                   ),
                 ),
                 const SizedBox(width: 8),

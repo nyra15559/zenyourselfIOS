@@ -34,7 +34,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-
 class ApiClient {
   ApiClient({
     required Uri baseUrl,
@@ -79,7 +78,8 @@ class ApiClient {
   String get baseUrlStr => _baseUrl.toString();
 
   /// Erfüllt die HttpInvoker-Signatur, die `GuidanceService` erwartet.
-  Future<Map<String, dynamic>> call(String path, Map<String, dynamic> body) async {
+  Future<Map<String, dynamic>> call(
+      String path, Map<String, dynamic> body) async {
     return _send('POST', path, body);
   }
 
@@ -100,7 +100,8 @@ class ApiClient {
       final ct = resp.headers.value(HttpHeaders.contentTypeHeader) ?? '';
       if (ct.toLowerCase().contains('json')) {
         final obj = _tryDecodeJson(text);
-        if (obj is Map && (obj['ok'] == true || obj['status'] == 'ok')) return true;
+        if (obj is Map && (obj['ok'] == true || obj['status'] == 'ok'))
+          return true;
       }
       return text.trim().toLowerCase() == 'ok';
     } catch (_) {
@@ -129,7 +130,8 @@ class ApiClient {
       attempt++;
       final sw = Stopwatch()..start();
       try {
-        final req = await _openRequest(method, uri, effectiveHeaders, reqId: reqId);
+        final req =
+            await _openRequest(method, uri, effectiveHeaders, reqId: reqId);
 
         // Body schreiben (JSON) — nur wenn vorhanden
         if (body != null) {
@@ -141,54 +143,63 @@ class ApiClient {
 
         final status = resp.statusCode;
         final rawText = await resp.transform(utf8.decoder).join();
-        final contentType = resp.headers.value(HttpHeaders.contentTypeHeader) ?? '';
+        final contentType =
+            resp.headers.value(HttpHeaders.contentTypeHeader) ?? '';
         sw.stop();
 
         if (_isOk(status)) {
           // Erfolgsfall → tolerant parsen
           final parsed = _decodeByContentType(rawText, contentType);
-          _log('[HTTP] $status OK ${_short(uri)} in ${sw.elapsed.inMilliseconds}ms (id=$reqId)');
+          _log(
+              '[HTTP] $status OK ${_short(uri)} in ${sw.elapsed.inMilliseconds}ms (id=$reqId)');
           return _normalizeJson(parsed);
         }
 
         // Fehlerfall → ggf. retry
         if (_isRetryable(status) && attempt <= retries.length + 1) {
           final wait = _retryDelay(resp, attempt - 1);
-          _log('[HTTP] $status RETRY in ${wait.inMilliseconds}ms ${_short(uri)} '
-               '(${sw.elapsed.inMilliseconds}ms) (id=$reqId)');
+          _log(
+              '[HTTP] $status RETRY in ${wait.inMilliseconds}ms ${_short(uri)} '
+              '(${sw.elapsed.inMilliseconds}ms) (id=$reqId)');
           await Future.delayed(wait);
           continue;
         }
 
         // Letzter Fehler ohne weiteren Retry
         final parsed = _tryDecodeJson(rawText);
-        _log('[HTTP] $status FAIL ${_short(uri)} in ${sw.elapsed.inMilliseconds}ms (id=$reqId)');
+        _log(
+            '[HTTP] $status FAIL ${_short(uri)} in ${sw.elapsed.inMilliseconds}ms (id=$reqId)');
         throw ApiClientException(status, 'HTTP $status', uri, parsed);
       } on TimeoutException catch (_) {
         sw.stop();
         if (attempt <= retries.length + 1) {
           final wait = _jitter(_retryBaseFor(attempt - 1));
-          _log('[HTTP] TIMEOUT RETRY in ${wait.inMilliseconds}ms ${_short(uri)} '
-               '(${sw.elapsed.inMilliseconds}ms) (id=$reqId)');
+          _log(
+              '[HTTP] TIMEOUT RETRY in ${wait.inMilliseconds}ms ${_short(uri)} '
+              '(${sw.elapsed.inMilliseconds}ms) (id=$reqId)');
           await Future.delayed(wait);
           continue;
         }
-        _log('[HTTP] TIMEOUT ${_short(uri)} after ${sw.elapsed.inMilliseconds}ms (id=$reqId)');
+        _log(
+            '[HTTP] TIMEOUT ${_short(uri)} after ${sw.elapsed.inMilliseconds}ms (id=$reqId)');
         throw ApiClientException(408, 'Request Timeout', uri, null);
       } on SocketException catch (e) {
         sw.stop();
         if (attempt <= retries.length + 1) {
           final wait = _jitter(_retryBaseFor(attempt - 1));
-          _log('[HTTP] NETWORK ${e.osError?.errorCode ?? ''} RETRY in ${wait.inMilliseconds}ms '
-               '${_short(uri)} (${sw.elapsed.inMilliseconds}ms) (id=$reqId)');
+          _log(
+              '[HTTP] NETWORK ${e.osError?.errorCode ?? ''} RETRY in ${wait.inMilliseconds}ms '
+              '${_short(uri)} (${sw.elapsed.inMilliseconds}ms) (id=$reqId)');
           await Future.delayed(wait);
           continue;
         }
-        _log('[HTTP] NETWORK FAIL ${_short(uri)} after ${sw.elapsed.inMilliseconds}ms (id=$reqId)');
+        _log(
+            '[HTTP] NETWORK FAIL ${_short(uri)} after ${sw.elapsed.inMilliseconds}ms (id=$reqId)');
         throw ApiClientException(-1, 'Network error: ${e.message}', uri, null);
       } catch (err) {
         sw.stop();
-        _log('[HTTP] EXCEPTION ${_short(uri)} after ${sw.elapsed.inMilliseconds}ms (id=$reqId): ${err.runtimeType}');
+        _log(
+            '[HTTP] EXCEPTION ${_short(uri)} after ${sw.elapsed.inMilliseconds}ms (id=$reqId): ${err.runtimeType}');
         rethrow;
       }
     }
@@ -229,7 +240,8 @@ class ApiClient {
     headers.forEach((k, v) => request.headers.set(k, v));
     // Zusätzliche Tracking-Header
     request.headers.set('X-Request-Id', reqId);
-    request.headers.set('X-Request-At', DateTime.now().toUtc().toIso8601String());
+    request.headers
+        .set('X-Request-At', DateTime.now().toUtc().toIso8601String());
 
     return request;
   }
@@ -306,7 +318,8 @@ class ApiClient {
 
   dynamic _decodeByContentType(String body, String contentType) {
     final lower = (contentType).toLowerCase();
-    if (lower.contains('application/json') || lower.contains('application/problem+json')) {
+    if (lower.contains('application/json') ||
+        lower.contains('application/problem+json')) {
       return _tryDecodeJson(body);
     }
     // text/plain oder unbekannt → als "output_text" für Guidance-Parsing
@@ -363,7 +376,8 @@ class ApiClient {
     // Telefonnummern
     out = out.replaceAll(RegExp(r'(\+?\d[\d\s\-\(\)]{6,}\d)'), '[Telefon]');
     // URLs
-    out = out.replaceAll(RegExp(r'(https?:\/\/|www\.)\S+', caseSensitive: false), '[Link]');
+    out = out.replaceAll(
+        RegExp(r'(https?:\/\/|www\.)\S+', caseSensitive: false), '[Link]');
     // IBAN
     out = out.replaceAll(RegExp(r'\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b'), '[IBAN]');
     // Kreditkarten

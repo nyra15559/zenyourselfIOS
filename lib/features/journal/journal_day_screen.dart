@@ -61,7 +61,8 @@ class _JournalDayScreenState extends State<JournalDayScreen>
     final canPop = Navigator.of(context).canPop();
 
     final media = MediaQuery.of(context);
-    final clamped = media.textScaler.clamp(maxScaleFactor: 1.20, minScaleFactor: 0.90);
+    final clamped =
+        media.textScaler.clamp(maxScaleFactor: 1.20, minScaleFactor: 0.90);
 
     final isMobile = media.size.width < 470;
     final pandaSize = isMobile ? 88.0 : 112.0;
@@ -79,9 +80,11 @@ class _JournalDayScreenState extends State<JournalDayScreen>
               tooltip: 'Teilen (Kopie in Zwischenablage)',
               icon: const Icon(Icons.ios_share_rounded),
               onPressed: () async {
-                final text = _shareTextForDay(widget.dayLocal, entries, metrics);
+                final text =
+                    _shareTextForDay(widget.dayLocal, entries, metrics);
                 await Clipboard.setData(ClipboardData(text: text));
-                if (!mounted) return;
+                if (!context.mounted)
+                  return; // FIX: use_build_context_synchronously
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Tageszusammenfassung kopiert')),
                 );
@@ -106,7 +109,9 @@ class _JournalDayScreenState extends State<JournalDayScreen>
             RefreshIndicator.adaptive(
               color: ZenColors.deepSage,
               onRefresh: () async {
-                await context.read<jp.JournalEntriesProvider>().restore(); // sanft
+                await context
+                    .read<jp.JournalEntriesProvider>()
+                    .restore(); // sanft
                 HapticFeedback.selectionClick();
               },
               child: CustomScrollView(
@@ -160,8 +165,9 @@ class _JournalDayScreenState extends State<JournalDayScreen>
                           direction: DismissDirection.endToStart,
                           background: _deleteBg(),
                           confirmDismiss: (_) => _confirmDeleteDialog(ctx),
-                          onDismissed: (_) =>
-                              ctx.read<jp.JournalEntriesProvider>().removeById(e.id),
+                          onDismissed: (_) => ctx
+                              .read<jp.JournalEntriesProvider>()
+                              .removeById(e.id),
                           child: Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 12),
                             child: Semantics(
@@ -179,7 +185,9 @@ class _JournalDayScreenState extends State<JournalDayScreen>
                                       await _confirmDeleteDialog(ctx) ?? false;
                                   if (!ok) return;
                                   // ignore: use_build_context_synchronously
-                                  ctx.read<jp.JournalEntriesProvider>().removeById(e.id);
+                                  ctx
+                                      .read<jp.JournalEntriesProvider>()
+                                      .removeById(e.id);
                                 },
                               ),
                             ),
@@ -199,7 +207,8 @@ class _JournalDayScreenState extends State<JournalDayScreen>
 
   // ---- List helpers ---------------------------------------------------------
 
-  List<jm.JournalEntry> _applyFilter(List<jm.JournalEntry> all, _EntryFilter f) {
+  List<jm.JournalEntry> _applyFilter(
+      List<jm.JournalEntry> all, _EntryFilter f) {
     switch (f) {
       case _EntryFilter.all:
         return all;
@@ -216,8 +225,9 @@ class _JournalDayScreenState extends State<JournalDayScreen>
     return Container(
       alignment: Alignment.centerRight,
       padding: const EdgeInsets.symmetric(horizontal: 20),
-      color: Colors.redAccent.withValues(alpha: .14),
-      child: const Icon(Icons.delete_forever, color: Colors.redAccent, size: 28),
+      color: Colors.redAccent.withValue(alpha: .14),
+      child:
+          const Icon(Icons.delete_forever, color: Colors.redAccent, size: 28),
     );
   }
 
@@ -226,7 +236,8 @@ class _JournalDayScreenState extends State<JournalDayScreen>
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Eintrag löschen?'),
-        content: const Text('Dieser Vorgang kann nicht rückgängig gemacht werden.'),
+        content:
+            const Text('Dieser Vorgang kann nicht rückgängig gemacht werden.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -272,14 +283,12 @@ class _JournalDayScreenState extends State<JournalDayScreen>
   // ---- Date & share ---------------------------------------------------------
 
   String _formatDay(DateTime dayLocal, DateTime now) {
-    final isToday =
-        dayLocal.year == now.year &&
+    final isToday = dayLocal.year == now.year &&
         dayLocal.month == now.month &&
         dayLocal.day == now.day;
-    final yest =
-        DateTime(now.year, now.month, now.day).subtract(const Duration(days: 1));
-    final isYesterday =
-        dayLocal.year == yest.year &&
+    final yest = DateTime(now.year, now.month, now.day)
+        .subtract(const Duration(days: 1));
+    final isYesterday = dayLocal.year == yest.year &&
         dayLocal.month == yest.month &&
         dayLocal.day == yest.day;
     if (isToday) return 'Heute';
@@ -359,8 +368,7 @@ class _HeaderCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(dateStr,
-                  style:
-                      ZenTextStyles.h3.copyWith(color: ZenColors.inkStrong)),
+                  style: ZenTextStyles.h3.copyWith(color: ZenColors.inkStrong)),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 14,
@@ -411,20 +419,41 @@ class _HeaderCard extends StatelessWidget {
     );
   }
 
-  ({String text, String label, IconData icon, Color color}) _trend(List<double> v) {
+  ({String text, String label, IconData icon, Color color}) _trend(
+      List<double> v) {
     if (v.isEmpty) {
-      return (text: '–', label: 'Kein Trend', icon: Icons.more_horiz, color: ZenColors.ink);
+      return (
+        text: '–',
+        label: 'Kein Trend',
+        icon: Icons.more_horiz,
+        color: ZenColors.ink
+      );
     }
     final first = v.first, last = v.last;
     final delta = last - first;
     if (delta > 0.25) {
-      return (text: '↑', label: 'steigend', icon: Icons.trending_up, color: ZenColors.jade);
+      return (
+        text: '↑',
+        label: 'steigend',
+        icon: Icons.trending_up,
+        color: ZenColors.jade
+      );
     }
     if (delta < -0.25) {
-      return (text: '↓', label: 'fallend', icon: Icons.trending_down, color: ZenColors.cherry);
+      return (
+        text: '↓',
+        label: 'fallend',
+        icon: Icons.trending_down,
+        color: ZenColors.cherry
+      );
     }
-    return (text: '→', label: 'stabil', icon: Icons.trending_flat, color: ZenColors.jadeMid);
-    }
+    return (
+      text: '→',
+      label: 'stabil',
+      icon: Icons.trending_flat,
+      color: ZenColors.jadeMid
+    );
+  }
 
   IconData _moodIconFromScore(double s) {
     if (s <= -1.0) return Icons.sentiment_very_dissatisfied;
@@ -461,7 +490,7 @@ class _StatBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
       decoration: BoxDecoration(
-        color: ZenColors.white.withValues(alpha: .72),
+        color: ZenColors.white.withValue(alpha: .72),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: ZenColors.border),
         boxShadow: ZenShadows.card,
@@ -515,14 +544,15 @@ class _FilterChips extends StatelessWidget {
             onSelected: (_) => onChanged(f),
             materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
             visualDensity: VisualDensity.compact,
-            selectedColor: ZenColors.jade.withValues(alpha: .10),
+            selectedColor: ZenColors.jade.withValue(alpha: .10),
             side: BorderSide(
               color: selected
-                  ? ZenColors.jade.withValues(alpha: .55)
+                  ? ZenColors.jade.withValue(alpha: .55)
                   : ZenColors.outline,
             ),
             shape: const StadiumBorder(),
-            labelPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            labelPadding:
+                const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
           ),
         ),
       );
@@ -647,7 +677,7 @@ class _SparklinePainter extends CustomPainter {
 
     final paintFill = Paint()
       ..shader = LinearGradient(
-        colors: [ZenColors.jadeMid.withValues(alpha: .22), Colors.transparent],
+        colors: [ZenColors.jadeMid.withValue(alpha: .22), Colors.transparent],
         begin: Alignment.topCenter,
         end: Alignment.bottomCenter,
       ).createShader(Rect.fromLTWH(0, 0, w, h));
@@ -687,13 +717,12 @@ class _DayMetrics {
 
   static _DayMetrics fromEntries(List<jm.JournalEntry> entries) {
     final n = entries.length;
-    final refs =
-        entries.where((e) => e.kind == jm.EntryKind.reflection).length;
+    final refs = entries.where((e) => e.kind == jm.EntryKind.reflection).length;
     double sum = 0;
     int m = 0;
     for (final e in entries) {
       final label = e.moodLabel; // vom Model aus Tags abgeleitet
-      final score = _moodMap[label ?? ''];
+      final score = _moodMap[label]; // FIX: dead_null_aware_expression
       if (score != null) {
         sum += score;
         m++;
@@ -713,7 +742,8 @@ class _EntryBottomSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context);
-    final clamped = media.textScaler.clamp(maxScaleFactor: 1.20, minScaleFactor: 0.90);
+    final clamped =
+        media.textScaler.clamp(maxScaleFactor: 1.20, minScaleFactor: 0.90);
 
     final local = entry.createdAt.toLocal();
     final kindLabel = entry.kind == jm.EntryKind.reflection
@@ -753,7 +783,7 @@ class _EntryBottomSheet extends StatelessWidget {
         margin: const EdgeInsets.all(14),
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: .96),
+          color: Colors.white.withValue(alpha: .96),
           borderRadius: BorderRadius.circular(18),
           border: Border.all(color: ZenColors.border),
           boxShadow: ZenShadows.card,
@@ -778,20 +808,23 @@ class _EntryBottomSheet extends StatelessWidget {
                       kindLabel,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: ZenTextStyles.subtitle.copyWith(fontWeight: FontWeight.w700),
+                      style: ZenTextStyles.subtitle
+                          .copyWith(fontWeight: FontWeight.w700),
                     ),
                   ),
                   const SizedBox(width: 8),
                   Text(
                     _formatTime(local),
-                    style: ZenTextStyles.caption.copyWith(color: ZenColors.jadeMid),
+                    style: ZenTextStyles.caption
+                        .copyWith(color: ZenColors.jadeMid),
                   ),
                 ],
               ),
               const SizedBox(height: 10),
               Text(
                 mainText,
-                style: ZenTextStyles.body.copyWith(fontSize: 16.5, height: 1.38),
+                style:
+                    ZenTextStyles.body.copyWith(fontSize: 16.5, height: 1.38),
               ),
               if (auxQuestion.isNotEmpty)
                 Padding(
@@ -808,7 +841,9 @@ class _EntryBottomSheet extends StatelessWidget {
               Row(
                 children: [
                   Text(
-                    (entry.moodLabel ?? '').isNotEmpty ? (entry.moodLabel ?? '') : '—',
+                    entry.moodLabel.isNotEmpty
+                        ? entry.moodLabel
+                        : '—', // FIX: dead_null_aware_expression (2x)
                     style: ZenTextStyles.caption.copyWith(color: ZenColors.ink),
                   ),
                   const Spacer(),
@@ -819,11 +854,14 @@ class _EntryBottomSheet extends StatelessWidget {
                         TextButton.styleFrom(foregroundColor: Colors.redAccent),
                     onPressed: () async {
                       final ok =
-                          await _JournalDayScreenState._confirmDeleteDialog(context) ??
+                          await _JournalDayScreenState._confirmDeleteDialog(
+                                  context) ??
                               false;
                       if (!ok) return;
                       // ignore: use_build_context_synchronously
-                      context.read<jp.JournalEntriesProvider>().removeById(entry.id);
+                      context
+                          .read<jp.JournalEntriesProvider>()
+                          .removeById(entry.id);
                       // ignore: use_build_context_synchronously
                       Navigator.of(context).pop();
                     },

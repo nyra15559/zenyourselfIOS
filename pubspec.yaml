@@ -1,11 +1,14 @@
 name: zenyourself
 description: ZenYourself App mit Sprach-Input und GPT-Antwort
 publish_to: "none"
-version: 1.0.3+3
+
+# Version-Bump (Patch + Build): vorher 1.0.3+3
+version: 1.0.6+6
 
 # Dart/Flutter Basis – passt zu Flutter ≥3.19 (Dart 3.3)
 environment:
   sdk: ">=3.3.0 <4.0.0"
+  flutter: ">=3.19.0"
 
 dependencies:
   flutter:
@@ -38,11 +41,12 @@ dependencies:
 
   # ---- Device / Permissions / Notifications --------------------------
   permission_handler: ^11.3.0
-  flutter_local_notifications: ^19.0.0    # Falls dein Flutter älter ist, ggf. auf ^17.x pinnen (siehe Kommentar unten)
+  # Hinweis: Falls dein Flutter-Channel älter ist, ggf. auf ^17.x pinnen (siehe Overrides unten)
+  flutter_local_notifications: ^19.0.0
 
   # ---- Utilities ------------------------------------------------------
-  url_launcher: ^6.3.0                   # <— für tel: und https:, nötig für CH-Hotlines
-  share_plus: ^11.0.0                    # Bei sehr alter Flutter-SDK ggf. ^10.0.2 verwenden
+  url_launcher: ^6.3.0            # <— für tel: und https:, nötig für CH-Hotlines
+  share_plus: ^11.0.0             # Bei sehr altem Flutter ggf. ^10.0.2 verwenden
   speech_to_text: ^7.2.0
   flutter_dotenv: ^5.0.2
   screenshot: ^3.0.0
@@ -61,7 +65,7 @@ dev_dependencies:
   flutter_launcher_icons: ^0.13.1
 
 # OPTIONAL: Falls der Pub-Solver wegen älterer Flutter-Channel-Versionen streikt,
-# kannst du temporär pins setzen (eine von beiden Zeilen auskommentieren/aktivieren):
+# kannst du temporär pins setzen (nur aktivieren, wenn nötig):
 # dependency_overrides:
 #   share_plus: ^10.0.2
 #   flutter_local_notifications: ^17.2.0

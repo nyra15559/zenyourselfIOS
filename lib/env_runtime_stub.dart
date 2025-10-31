@@ -13,14 +13,10 @@
 //   final api = EnvRuntime.readOr('API_BASE_URL', 'https://…');
 // -----------------------------------------------------------------------------
 
-import 'dart:collection';
-
 class EnvRuntime {
   EnvRuntime._();
 
   // ---------- Basisschicht ----------
-
-  static Map<String, String> _env() => const {};
 
   static String? read(String key) {
     // Keine Umgebung verfügbar im Stub
@@ -32,12 +28,11 @@ class EnvRuntime {
   static String readOr(String key, String fallback) => fallback;
 
   static Map<String, String> snapshot({String? prefix}) =>
-      const UnmodifiableMapView(<String, String>{});
+      const <String, String>{};
 
   // ---------- Typed Helpers ----------
 
-  static bool readBool(String key, {bool defaultValue = false}) =>
-      defaultValue;
+  static bool readBool(String key, {bool defaultValue = false}) => defaultValue;
 
   static int? readInt(String key) => null;
 

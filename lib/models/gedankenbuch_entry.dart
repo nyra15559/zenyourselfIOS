@@ -18,15 +18,16 @@ import 'package:flutter/material.dart';
 import 'journal_entry.dart';
 
 // ⚠️ Legacy/Übergang.
-@Deprecated('Bitte auf JournalEntry migrieren. Dieser Shim bleibt vorübergehend bestehen.')
+@Deprecated(
+    'Bitte auf JournalEntry migrieren. Dieser Shim bleibt vorübergehend bestehen.')
 class GedankenbuchEntry {
   final String id;
-  final String text;          // Journal: text; Reflexion: userAnswer
-  final String mood;          // freies Label
-  final DateTime date;        // UTC empfohlen
-  final bool isReflection;    // true = Reflexion
-  final String aiQuestion;    // Leitfrage (optional)
-  final int moodScore;        // 0..4, -1 = unbekannt
+  final String text; // Journal: text; Reflexion: userAnswer
+  final String mood; // freies Label
+  final DateTime date; // UTC empfohlen
+  final bool isReflection; // true = Reflexion
+  final String aiQuestion; // Leitfrage (optional)
+  final int moodScore; // 0..4, -1 = unbekannt
   final String detectedEmotion;
   final UnmodifiableListView<String> tags;
 
@@ -152,7 +153,8 @@ class GedankenbuchEntry {
       createdAt: date,
       title: '', // Autotitel greift (computedTitle)
       thoughtText: !isReflection ? text : null,
-      aiQuestion: isReflection ? (aiQuestion.isNotEmpty ? aiQuestion : null) : null,
+      aiQuestion:
+          isReflection ? (aiQuestion.isNotEmpty ? aiQuestion : null) : null,
       userAnswer: isReflection ? text : null,
       storyTitle: null,
       storyTeaser: null,
@@ -165,7 +167,9 @@ class GedankenbuchEntry {
   static GedankenbuchEntry fromJournalEntry(JournalEntry e) {
     final isRefl = e.kind == EntryKind.reflection;
     final legacyText = isRefl
-        ? (e.userAnswer?.trim().isNotEmpty == true ? e.userAnswer!.trim() : (e.thoughtText ?? ''))
+        ? (e.userAnswer?.trim().isNotEmpty == true
+            ? e.userAnswer!.trim()
+            : (e.thoughtText ?? ''))
         : (e.thoughtText ?? e.userAnswer ?? '');
 
     String mood = '';
@@ -229,8 +233,10 @@ class GedankenbuchEntry {
         return '🌞';
       default:
         final l = displayMoodLabel.toLowerCase();
-        if (l.contains('müde') || l.contains('traurig') || l.contains('tief')) return '🌧️';
-        if (l.contains('klar') || l.contains('ruhig') || l.contains('gut')) return '🌤️';
+        if (l.contains('müde') || l.contains('traurig') || l.contains('tief'))
+          return '🌧️';
+        if (l.contains('klar') || l.contains('ruhig') || l.contains('gut'))
+          return '🌤️';
         return '📝';
     }
   }
@@ -261,10 +267,12 @@ class GedankenbuchEntry {
   String get prettyDate {
     final now = DateTime.now().toUtc();
     final d = date;
-    final isToday = now.year == d.year && now.month == d.month && now.day == d.day;
+    final isToday =
+        now.year == d.year && now.month == d.month && now.day == d.day;
     if (isToday) return 'Heute, $timeShort';
     final y = now.subtract(const Duration(days: 1));
-    final isYesterday = y.year == d.year && y.month == d.month && y.day == d.day;
+    final isYesterday =
+        y.year == d.year && y.month == d.month && y.day == d.day;
     if (isYesterday) return 'Gestern, $timeShort';
     return '$dateShort, $timeShort';
   }
@@ -333,7 +341,8 @@ String _asString(dynamic v) {
   return v.toString();
 }
 
-int? _toInt(dynamic v) { // <-- NEU
+int? _toInt(dynamic v) {
+  // <-- NEU
   if (v == null) return null;
   if (v is int) return v;
   if (v is double) return v.toInt();

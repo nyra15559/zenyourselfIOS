@@ -12,19 +12,19 @@ class AppTheme {
   AppTheme._();
 
   static final ThemeData light = _base(zs.zenLightTheme());
-  static final ThemeData dark  = _base(zs.zenDarkTheme());
+  static final ThemeData dark = _base(zs.zenDarkTheme());
 
   static ThemeData _base(ThemeData t) {
     final cs = t.colorScheme;
 
     return t.copyWith(
       // Ruhigeres Feedback
-      splashColor: cs.primary.withValues(alpha: .08),
-      highlightColor: cs.primary.withValues(alpha: .06),
+      splashColor: cs.primary.withValue(alpha: .08),
+      highlightColor: cs.primary.withValue(alpha: .06),
 
       // Dezentere Default-Icons
       iconTheme: t.iconTheme.copyWith(
-        color: cs.onSurface.withValues(alpha: .92),
+        color: cs.onSurface.withValue(alpha: .92),
         size: 22,
       ),
 
@@ -32,11 +32,12 @@ class AppTheme {
       tooltipTheme: t.tooltipTheme.copyWith(
         waitDuration: const Duration(milliseconds: 600),
         decoration: BoxDecoration(
-          color: cs.surface.withValues(alpha: .96),
+          color: cs.surface.withValue(alpha: .96),
           borderRadius: const BorderRadius.all(zs.ZenRadii.s),
-          border: Border.all(color: cs.outline.withValues(alpha: .45)),
+          border: Border.all(color: cs.outline.withValue(alpha: .45)),
           boxShadow: const [
-            BoxShadow(color: Color(0x14000000), blurRadius: 10, offset: Offset(0, 4)),
+            BoxShadow(
+                color: Color(0x14000000), blurRadius: 10, offset: Offset(0, 4)),
           ],
         ),
         textStyle: t.textTheme.bodySmall?.copyWith(
@@ -48,9 +49,9 @@ class AppTheme {
       // (Falls NavigationBar verwendet wird)
       navigationBarTheme: t.navigationBarTheme.copyWith(
         height: 64,
-        backgroundColor: cs.surface.withValues(alpha: .98),
+        backgroundColor: cs.surface.withValue(alpha: .98),
         elevation: 0,
-        indicatorColor: zs.ZenColors.goldenMist.withValues(alpha: .22),
+        indicatorColor: zs.ZenColors.goldenMist.withValue(alpha: .22),
         surfaceTintColor: Colors.transparent,
         labelTextStyle: WidgetStatePropertyAll(
           t.textTheme.labelLarge?.copyWith(
@@ -67,7 +68,7 @@ class AppTheme {
       ),
 
       // Divider global leicht weicher
-      dividerColor: t.dividerColor.withValues(alpha: .9),
+      dividerColor: t.dividerColor.withValue(alpha: .9),
     );
   }
 }

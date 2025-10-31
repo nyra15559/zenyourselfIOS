@@ -1,24 +1,13 @@
-// lib/features/reflection/reflection_models.dart
+// [BASELINE] lib/features/reflection/reflection_models.dart (Stand: 30.10., v3.26.0-mergeflags)
 // Part: Modelle/Typen/Utils (library: reflection_screen)
 // -----------------------------------------------------------------------------
-// v3.24 — Worker v15.x Alignment (Oxford style)
-// - Frage optional (0–1): liest 'question' ODER 'output_text' (Fallback: first of
-//   'questions' | 'qs' | 'multi_questions').
-// - Answer-Chips: liest primär 'answer_helpers' (+ Aliase & verschachtelt in flow/ui);
-//   Fallback: 'followups'; toleriert auch String mit Aufzählungs-Trennzeichen.
-// - helperSuggestion: neues optionales Feld; liest 'helper_suggestion' (+ Aliase,
-//   auch verschachtelt in flow/ui).
-// - risk: wie im Screen → risk_level in {high, mild} → true; Fallback: bool 'risk'.
-// - toMap: schreibt zusätzlich 'answer_helpers' + 'helper_suggestion'.
-// - normalizeForCompare: whitespace-normalisiert (Deckungsgleich mit Screen).
-// - Robustere (De-)Serialisierung: 'talk' akzeptiert List oder String (und
-//   toleriert 'smalltalk_reply').
+// v3.26.0 — Merge-Flags tolerant (meta.flags.*) + Hope passthrough (v3.25.2)
+// - NEU (optional): TurnProbe.coerceMeta(...) / coerceMetaFlags(...) / flag(...)
+//   *liest sicher meta.flags.client_memory & Co., ohne neue Pflichtfelder*
+// - Weiterhin: robuste Hope-Extraktion, risk-Fallbacks, helper-Normalisierung
+// - Ziel: Modelle bleiben schlank; Meta/Flags nur lesen, wenn vorhanden.
 // -----------------------------------------------------------------------------
-//
-// Lints / Analyzer:
-// Private Typen in öffentlicher API sind hier bewusst gewollt.
-// Unterdrücken wir zentral für diese Datei:
-//
+// Lints / Analyzer: Private Typen in öffentlicher API sind hier bewusst gewollt.
 // ignore_for_file: library_private_types_in_public_api
 
 part of 'reflection_screen.dart';
@@ -41,7 +30,8 @@ const int kMaxAnswersForMoodFallback = 3; // spätestens nach so vielen Antworte
 /// - [talkLines]: optionale Zusatzzeilen (max. 2)
 /// - [risk]: Risiko-Hinweis (true = Safety-Hinweis/CH-Card anzeigen)
 /// - [helperSuggestion]: sanfter 0–1-Satz vom Worker (optional)
-/// - [answer]: Nutzerantwort auf die aktuelle Frage (optional)
+/// - [hope]: kurzer, hoffnungsvoller Satz (optional; UI-Hope-Slot)
+/// - [answer]: Nutzerantwort (optional)
 class _PandaStep {
   final String mirror;
   final String question;
@@ -58,6 +48,9 @@ class _PandaStep {
   /// Optionaler sanfter Satz aus dem Worker (key: 'helper_suggestion')
   final String? helperSuggestion;
 
+  /// Optionaler Hope-Satz (siehe UI-Hope-Slot)
+  final String? hope;
+
   /// Frei eingegebene Nutzerantwort (wird getrimmt gespeichert)
   String? answer;
 
@@ -68,10 +61,12 @@ class _PandaStep {
     List<String> talkLines = const [],
     this.risk = false,
     String? helperSuggestion,
+    String? hope,
     String? answer,
   })  : followups = _sanitizeFollowups(followups),
         talkLines = _sanitizeTalk(talkLines),
         helperSuggestion = _trimOrNull(helperSuggestion),
+        hope = _trimOrNull(hope),
         answer = _trimOrNull(answer);
 
   /// Talk-only Schritt (keine Frage/Antwort erwartet).
@@ -81,6 +76,7 @@ class _PandaStep {
     List<String> talkLines = const [],
     bool risk = false,
     String? helperSuggestion,
+    String? hope,
   }) =>
       _PandaStep(
         mirror: mirror,
@@ -89,6 +85,7 @@ class _PandaStep {
         followups: const [],
         risk: risk,
         helperSuggestion: helperSuggestion,
+        hope: hope,
       );
 
   /// true, wenn der Nutzer bereits eine Antwort hinterlegt hat.
@@ -104,6 +101,7 @@ class _PandaStep {
         talkLines: List<String>.from(talkLines),
         risk: risk,
         helperSuggestion: helperSuggestion,
+        hope: hope,
         answer: answer,
       );
 
@@ -114,6 +112,7 @@ class _PandaStep {
     List<String>? talkLines,
     bool? risk,
     String? helperSuggestion,
+    String? hope,
     String? answer,
   }) {
     final step = _PandaStep(
@@ -123,13 +122,14 @@ class _PandaStep {
       talkLines: talkLines ?? List<String>.from(this.talkLines),
       risk: risk ?? this.risk,
       helperSuggestion: helperSuggestion ?? this.helperSuggestion,
+      hope: hope ?? this.hope,
       answer: this.answer,
     );
     if (answer != null) step.answer = _trimOrNull(answer);
     return step;
   }
 
-  /// Serialisierung (schreibt zusätzlich 'answer_helpers' & 'helper_suggestion').
+  /// Serialisierung (schreibt zusätzlich 'answer_helpers' & 'helper_suggestion' & 'hope').
   JsonMap toMap() => <String, dynamic>{
         'mirror': mirror,
         'question': question,
@@ -139,6 +139,7 @@ class _PandaStep {
         'talk': List<String>.from(talkLines),
         'risk': risk,
         'helper_suggestion': helperSuggestion,
+        if ((hope ?? '').toString().trim().isNotEmpty) 'hope': hope,
         'answer': hasAnswer ? answer!.trim() : null,
       };
 
@@ -174,17 +175,33 @@ class _PandaStep {
 
     // risk: wie im Screen — nur 'high' oder 'mild' setzen das UI-Risiko-Flag; sonst Fallback auf bool.
     final rl = _asString(m['risk_level']).toLowerCase();
-    final risk = (rl == 'high' || rl == 'mild') || (m['risk'] == true);
+    final risk = (rl == 'high' || rl == 'mild') || _asBool(m['risk']);
 
     // Helper-Satz: 'helper_suggestion' (oder Aliase), ggf. aus flow/ui verschachtelt.
+    final Map<String, dynamic>? flowMap =
+        (m['flow'] is Map) ? Map<String, dynamic>.from(m['flow']) : null;
+    final Map<String, dynamic>? uiMap =
+        (m['ui'] is Map) ? Map<String, dynamic>.from(m['ui']) : null;
+
     final hs = _pickFirstNonEmptyString([
       m['helper_suggestion'],
       m['helperSuggestion'],
-      if (m['flow'] is Map) (m['flow'] as Map)['helper_suggestion'],
-      if (m['flow'] is Map) (m['flow'] as Map)['helperSuggestion'],
-      if (m['ui'] is Map) (m['ui'] as Map)['helper_suggestion'],
-      if (m['ui'] is Map) (m['ui'] as Map)['helperSuggestion'],
+      flowMap?['helper_suggestion'],
+      flowMap?['helperSuggestion'],
+      uiMap?['helper_suggestion'],
+      uiMap?['helperSuggestion'],
     ]);
+
+    // Hope-Text: direkt + Aliase + verschachtelt + speech_sequence
+    final hope = _pickFirstNonEmptyString([
+          m['hope'],
+          m['hope_text'],
+          flowMap?['hope'],
+          uiMap?['hope'],
+        ]) ??
+        _extractHopeFromSpeechSequence(m) ??
+        _extractHopeFromSpeechSequence(flowMap) ??
+        _extractHopeFromSpeechSequence(uiMap);
 
     return _PandaStep(
       mirror: _asString(m['mirror']),
@@ -193,6 +210,7 @@ class _PandaStep {
       talkLines: talk,
       risk: risk,
       helperSuggestion: hs,
+      hope: hope,
       answer: _asNullableTrimmedString(m['answer']),
     );
   }
@@ -204,7 +222,7 @@ class _PandaStep {
         'question:"${_ellipsis(question, 40)}", '
         'followups:${followups.length}, talk:${talkLines.length}, '
         'risk:$risk, helperSuggestion:${(helperSuggestion ?? '').isNotEmpty}, '
-        'hasAnswer:$a)';
+        'hope:${(hope ?? '').isNotEmpty}, hasAnswer:$a)';
   }
 
   @override
@@ -213,6 +231,7 @@ class _PandaStep {
         question,
         risk,
         helperSuggestion ?? '',
+        hope ?? '',
         Object.hashAll(talkLines),
         Object.hashAll(followups),
         (answer ?? ''),
@@ -226,6 +245,7 @@ class _PandaStep {
         question == other.question &&
         risk == other.risk &&
         (helperSuggestion ?? '') == (other.helperSuggestion ?? '') &&
+        (hope ?? '') == (other.hope ?? '') &&
         _listEquals(talkLines, other.talkLines) &&
         _listEquals(followups, other.followups) &&
         (answer ?? '') == (other.answer ?? '');
@@ -259,6 +279,7 @@ class _PandaStep {
       if (s.isEmpty) return '';
       s = s.replaceAll(RegExp(r'^[„“"»«]+|[„“"»«]+$'), '');
       s = s.replaceAll(RegExp(r'[?？.。!！]+$'), ''); // '…' bleibt bewusst stehen
+      s = s.replaceAll(RegExp(r'\s*[:：]\s*$'), ''); // Doppelpunkte am Ende weg
       s = s.replaceAll(RegExp(r'\s+'), ' ').trim();
       if (s.length > 72) s = '${s.substring(0, 72).trimRight()}…';
       return s;
@@ -293,14 +314,22 @@ class _PandaStep {
       ...asList(m['options']),
     ];
 
-    final flow = (m['flow'] is Map) ? Map<String, dynamic>.from(m['flow'] as Map) : const {};
-    final ui   = (m['ui']   is Map) ? Map<String, dynamic>.from(m['ui']   as Map) : const {};
+    final Map<String, dynamic> flow = (m['flow'] is Map)
+        ? Map<String, dynamic>.from(m['flow'])
+        : const <String, dynamic>{};
+    final Map<String, dynamic> ui = (m['ui'] is Map)
+        ? Map<String, dynamic>.from(m['ui'])
+        : const <String, dynamic>{};
 
     final nested = <String>[
       ...asList(flow['answer_helpers']),
       ...asList(flow['helpers']),
+      ...asList(flow['chips']),
+      ...asList(flow['answers']),
       ...asList(ui['answer_helpers']),
       ...asList(ui['chips']),
+      ...asList(ui['answers']),
+      ...asList(ui['options']),
     ];
 
     final raw = <String>[...top, ...nested]
@@ -322,6 +351,31 @@ class _PandaStep {
       if (out.length >= 3) break;
     }
     return out;
+  }
+
+  /// Extrahiert Hope-Text aus einer 'speech_sequence' Struktur:
+  /// - Liste von Maps: {type:'hope', text:'...'}
+  /// - Liste dynamischer Objekte mit .type/.text
+  static String? _extractHopeFromSpeechSequence(dynamic container) {
+    try {
+      if (container is Map && container['speech_sequence'] is List) {
+        final seq = container['speech_sequence'] as List;
+        for (final e in seq) {
+          if (e is Map) {
+            final t = _asString(e['type']).toLowerCase();
+            final txt = _asString(e['text']).trim();
+            if (t == 'hope' && txt.isNotEmpty) return txt;
+          } else {
+            try {
+              final t = (e as dynamic).type?.toString().toLowerCase();
+              final txt = (e as dynamic).text?.toString().trim();
+              if (t == 'hope' && (txt ?? '').isNotEmpty) return txt;
+            } catch (_) {}
+          }
+        }
+      }
+    } catch (_) {}
+    return null;
   }
 }
 
@@ -380,7 +434,8 @@ class ReflectionRound {
   bool get answered => steps.any((s) => s.hasAnswer);
 
   /// true, wenn die Stimmung gesetzt ist.
-  bool get hasMood => moodScore != null;
+  bool get hasMood =>
+      moodScore != null || ((moodLabel ?? '').trim().isNotEmpty);
 
   /// true, wenn Antwort + Stimmung vorhanden sind.
   bool get isComplete => answered && hasMood;
@@ -480,10 +535,10 @@ class ReflectionRound {
       userInput: _asString(m['userInput']),
       steps: parsedSteps,
       entryId: _asNullableTrimmedString(m['entryId']),
-      moodScore: (m['moodScore'] is int) ? m['moodScore'] as int : null,
+      moodScore: _coerceInt(m['moodScore']),
       moodLabel: _asNullableTrimmedString(m['moodLabel']),
       moodIntro: _asNullableTrimmedString(m['moodIntro']),
-      allowClosure: m['allowClosure'] == true,
+      allowClosure: _asBool(m['allowClosure']),
     );
   }
 
@@ -529,8 +584,7 @@ class ReflectionRound {
   }
 
   @override
-  String toString() =>
-      'ReflectionRound(id:$id, steps:${steps.length}, '
+  String toString() => 'ReflectionRound(id:$id, steps:${steps.length}, '
       'answers:$answersCount, pending:$hasPendingQuestion, '
       'readyForMood:$readyForMood, wantsFollowup:$wantsFollowup, '
       'mood:$moodLabel/$moodScore, moodIntro:$moodIntro, allowClosure:$allowClosure)';
@@ -567,7 +621,7 @@ class ReflectionRound {
 }
 
 // =============================================================================
-// Shared Normalizer & Utils
+/* Shared Normalizer & Utils */
 // =============================================================================
 
 /// Vergleicht Fragen „weich“: nur Leerzeichen werden zusammengezogen, Kleinbuchstaben.
@@ -612,7 +666,7 @@ List<String> _asStringList(dynamic v) {
     final s = v.trim();
     if (s.isEmpty) return const <String>[];
     final parts = s
-        .split(RegExp(r'\n+|[•\-–—]\s+|;\s+'))
+        .split(RegExp(r'\n+|[•\-–—]\s+|\s*;\s*'))
         .map((e) => e.trim())
         .where((e) => e.isNotEmpty)
         .toList();
@@ -659,5 +713,277 @@ String? _pickFirstNonEmptyString(List<dynamic> candidates) {
     final s = _asNullableTrimmedString(c);
     if (s != null && s.isNotEmpty) return s;
   }
+  return null;
+}
+
+// =============================================================================
+// TurnProbe — Session/Flow/Meta Normalizer & Checks (ergänzend, ohne Brüche)
+// =============================================================================
+
+/// Hilfsklasse zur robusten Normalisierung von Session-, Flow- und Meta-Feldern
+/// über unterschiedliche Worker-Versionen hinweg.
+/// * Nicht invasiv: Nur Zusatz-Utilities. Bestehende Modelle bleiben unverändert.
+class TurnProbe {
+  TurnProbe._();
+
+  /// Normalisiert eine Session-Struktur auf den Kanon:
+  /// {thread_id, turn_index, max_turns}
+  static JsonMap coerceSession(dynamic turnOrSession) {
+    dynamic s;
+
+    if (turnOrSession is Map && turnOrSession['session'] != null) {
+      s = turnOrSession['session'];
+    } else if (turnOrSession is Map) {
+      s = turnOrSession;
+    } else {
+      try {
+        final j = (turnOrSession as dynamic).toJson?.call();
+        if (j is Map) s = j['session'] ?? j;
+      } catch (_) {}
+    }
+
+    final map = (s is Map) ? Map<String, dynamic>.from(s) : <String, dynamic>{};
+
+    final threadId = _pickFirstNonEmptyString([
+          map['thread_id'],
+          map['id'],
+          map['threadId'],
+        ]) ??
+        '';
+    final turnIdx =
+        _coerceInt(map['turn_index'] ?? map['turn'] ?? map['turnIndex']) ?? 0;
+    final maxTurns = _coerceInt(map['max_turns'] ?? map['maxTurns']) ?? 3;
+
+    return {
+      'thread_id': threadId,
+      'turn_index': turnIdx,
+      'max_turns': maxTurns,
+    };
+  }
+
+  /// Normalisiert Flow-Flags auf den Kanon:
+  /// {mood_prompt, recommend_end, [question], [insight_score]}
+  static JsonMap coerceFlow(dynamic turnOrFlow) {
+    Map<String, dynamic> f = const <String, dynamic>{};
+    if (turnOrFlow is Map && turnOrFlow['flow'] is Map) {
+      f = Map<String, dynamic>.from(turnOrFlow['flow']);
+    } else if (turnOrFlow is Map) {
+      f = Map<String, dynamic>.from(turnOrFlow);
+    } else {
+      try {
+        final j = (turnOrFlow as dynamic).toJson?.call();
+        if (j is Map && j['flow'] is Map) {
+          f = Map<String, dynamic>.from(j['flow']);
+        }
+      } catch (_) {}
+    }
+
+    final recommendEnd = _asBool(f['recommend_end']);
+    final moodPrompt = _asBool(f['mood_prompt']) ||
+        recommendEnd ||
+        _asBool(_extractNested(turnOrFlow, const ['mood', 'prompt']));
+    final q = _pickFirstNonEmptyString([
+      f['question'],
+      ..._asStringList(f['questions']),
+      _extractNested(turnOrFlow, const ['question']),
+    ]);
+    final iscore = _coerceNum(f['insight_score']);
+
+    return <String, dynamic>{
+      'mood_prompt': moodPrompt,
+      'recommend_end': recommendEnd,
+      if ((q ?? '').toString().trim().isNotEmpty) 'question': q!.trim(),
+      if (iscore != null) 'insight_score': iscore,
+    };
+  }
+
+  /// Risk-Level → 'high' | 'mild' | 'none' (bool 'risk' als Fallback mild).
+  static String riskLevel(dynamic turn) {
+    final rl =
+        _asString(_extractNested(turn, const ['risk_level'])).toLowerCase();
+    final legacy =
+        _asString(_extractNested(turn, const ['level'])).toLowerCase();
+    if (rl == 'high' || rl == 'mild') return rl;
+    if (legacy == 'high' || legacy == 'mild') return legacy;
+    final flag = _asBool(_extractNested(turn, const ['risk']));
+    return flag ? 'mild' : 'none';
+  }
+
+  /// Risk-Flag (true bei high/mild oder bool 'risk' == true).
+  static bool risk(dynamic turn) {
+    final lvl = riskLevel(turn);
+    return (lvl == 'high' || lvl == 'mild') ||
+        _asBool(_extractNested(turn, const ['risk']));
+  }
+
+  /// Prüft, ob die Session dem Kanon entspricht (alle Schlüssel vorhanden).
+  static bool isCanonicalSession(dynamic turnOrSession) {
+    final s = coerceSession(turnOrSession);
+    return _asString(s['thread_id']).isNotEmpty &&
+        s['turn_index'] is int &&
+        s['max_turns'] is int;
+  }
+
+  /// Prüft, ob die Flow-Flags dem Kanon entsprechen (beide Bool-Keys vorhanden).
+  static bool isCanonicalFlow(dynamic turnOrFlow) {
+    final f = coerceFlow(turnOrFlow);
+    return f.containsKey('mood_prompt') && f.containsKey('recommend_end');
+  }
+
+  // ---------------- Meta / Flags (optional, non-invasive) --------------------
+
+  /// Liefert eine *tolerant normalisierte* Meta-Struktur:
+  /// { flags: { <key>: <bool|num|string> ... }, ... }
+  ///
+  /// Akzeptiert folgende Formen:
+  /// - turn{ meta:{ flags:{...} } }
+  /// - turn{ meta:{...} } (Flags ggf. direkt in meta)
+  /// - turn{ flags:{...} } (Top-Level Flags)
+  /// - turn{ client_memory:true } (einzelne Top-Level-Schalter)
+  static JsonMap coerceMeta(dynamic turnOrMeta) {
+    // 1) Meta-Objekt extrahieren (wenn vorhanden)
+    Map<String, dynamic> meta = const <String, dynamic>{};
+    final fromTurn =
+        (turnOrMeta is Map) ? Map<String, dynamic>.from(turnOrMeta) : null;
+
+    if (fromTurn != null) {
+      if (fromTurn['meta'] is Map) {
+        meta = Map<String, dynamic>.from(fromTurn['meta'] as Map);
+      } else {
+        // Keine separate meta-Struktur → leeres Meta
+        meta = <String, dynamic>{};
+      }
+    } else if (turnOrMeta is Map) {
+      meta = Map<String, dynamic>.from(turnOrMeta);
+    }
+
+    // 2) Flags-Quelle ermitteln (Prio: meta.flags → meta → top-level flags)
+    Map<String, dynamic> flags = const <String, dynamic>{};
+
+    if (meta['flags'] is Map) {
+      flags = Map<String, dynamic>.from(meta['flags'] as Map);
+    } else if (fromTurn != null && fromTurn['flags'] is Map) {
+      flags = Map<String, dynamic>.from(fromTurn['flags'] as Map);
+    } else {
+      // Einzelne Top-Level-Schalter in flags spiegeln (tolerant)
+      final candidates = <String>[
+        'client_memory',
+        'memory_consent',
+        'server_memory_merge',
+        'merge_client_memory',
+      ];
+      final f = <String, dynamic>{};
+      for (final k in candidates) {
+        final v = _extractNested(fromTurn, [k]);
+        if (v != null) f[k] = v;
+      }
+      flags = f;
+    }
+
+    return <String, dynamic>{
+      ...meta,
+      'flags': flags,
+    };
+  }
+
+  /// Extrahiert *nur die Flags* (bool-konvertiert, soweit möglich).
+  /// Beispiel: {'client_memory': true, 'memory_consent': false}
+  static JsonMap coerceMetaFlags(dynamic turnOrMeta) {
+    final meta = coerceMeta(turnOrMeta);
+    final raw = (meta['flags'] is Map)
+        ? Map<String, dynamic>.from(meta['flags'] as Map)
+        : const <String, dynamic>{};
+
+    bool? asBoolOrNull(dynamic v) {
+      if (v == null) return null;
+      if (v is bool) return v;
+      if (v is num) return v != 0;
+      if (v is String) {
+        final s = v.trim().toLowerCase();
+        if (s.isEmpty) return null;
+        if (s == 'true' || s == '1' || s == 'yes' || s == 'y' || s == 'on') {
+          return true;
+        }
+        if (s == 'false' || s == '0' || s == 'no' || s == 'n' || s == 'off') {
+          return false;
+        }
+      }
+      return null; // Unbekanntes Format → nicht erzwingen
+    }
+
+    final out = <String, dynamic>{};
+    raw.forEach((k, v) {
+      final b = asBoolOrNull(v);
+      out[k.toString()] = b ?? v; // Bool wenn ermittelbar, sonst Rohwert
+    });
+    return out;
+  }
+
+  /// Liest ein bestimmtes Flag *tolerant* aus turn/meta/flags.
+  /// [name] z. B. 'client_memory'. Fallback nur verwendet, wenn nirgends vorhanden.
+  static bool flag(dynamic turnOrMeta, String name, {bool fallback = false}) {
+    final flags = coerceMetaFlags(turnOrMeta);
+    if (flags.containsKey(name)) {
+      final v = flags[name];
+      return _asBool(v);
+    }
+    // Zusatzpfad: Manchmal liegt der Schalter *nicht* in flags (Top-Level/Meta)
+    final direct =
+        _extractNested(turnOrMeta, ['meta', name]) ?? _extractNested(turnOrMeta, [name]);
+    if (direct != null) return _asBool(direct);
+    return fallback;
+  }
+}
+
+// ---- interne Helfer für TurnProbe ------------------------------------------
+
+dynamic _extractNested(dynamic obj, List<String> path) {
+  dynamic cur = obj;
+  for (final k in path) {
+    if (cur == null) return null;
+    if (cur is Map) {
+      cur = cur[k];
+      continue;
+    }
+    try {
+      final j = (cur as dynamic).toJson?.call();
+      if (j is Map) {
+        cur = j[k];
+        continue;
+      }
+    } catch (_) {}
+    try {
+      cur = (cur as dynamic)[k];
+    } catch (_) {
+      return null;
+    }
+  }
+  return cur;
+}
+
+bool _asBool(dynamic v) {
+  if (v is bool) return v;
+  if (v is num) return v != 0;
+  if (v is String) {
+    final s = v.trim().toLowerCase();
+    return s == 'true' || s == '1' || s == 'yes' || s == 'y' || s == 'on';
+  }
+  return false;
+}
+
+int? _coerceInt(dynamic v) {
+  if (v is int) return v;
+  if (v is num) return v.toInt();
+  if (v is String) {
+    final s = v.trim();
+    if (s.isEmpty) return null;
+    return int.tryParse(s);
+  }
+  return null;
+}
+
+num? _coerceNum(dynamic v) {
+  if (v is num) return v;
+  if (v is String) return num.tryParse(v.trim());
   return null;
 }

@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 /// Guiding Question (nur für Leitfragen – nicht für Community-Fragen!)
 /// - Stabil & nullsafe
+/// - Tolerantes Parsing (Aliasse für Text/Datum/FollowUp)
 /// - Optionales [createdAt] für Sortierung/Analytics (kein Pflichtfeld)
 @immutable
 class Question {
@@ -24,6 +25,7 @@ class Question {
     final dt = _parseDate(
       j['createdAt'] ??
           j['created_at'] ??
+          j['created'] ?? // zusätzlicher Alias
           j['timestamp'] ??
           j['ts'] ??
           j['date'] ??
@@ -31,14 +33,18 @@ class Question {
     );
 
     final String rawId = (j['id'] ?? '').toString().trim();
-    final String text = (j['text'] ?? '').toString();
+
+    // Text: akzeptiere 'text' und (zur Sicherheit) 'question'
+    final String text = (j['text'] ?? j['question'] ?? '').toString();
 
     // isFollowUp: akzeptiere diverse Schreibweisen
     final bool isFollowUp = _readBool(
           j['isFollowUp'] ??
               j['is_follow_up'] ??
+              j['is_followup'] ?? // zusätzlicher Alias
               j['followUp'] ??
-              j['follow_up'],
+              j['follow_up'] ??
+              j['followup'], // zusätzlicher Alias
         ) ??
         false;
 
@@ -53,6 +59,14 @@ class Question {
     );
   }
 
+  /// Toleranter Helfer: gibt `null` zurück, wenn kein Map-Input
+  static Question? fromMaybe(dynamic v) {
+    if (v is Map) {
+      return Question.fromJson(Map<String, dynamic>.from(v));
+    }
+    return null;
+  }
+
   /// Alias
   factory Question.fromMap(Map<String, dynamic> j) => Question.fromJson(j);
 
@@ -61,7 +75,8 @@ class Question {
         'id': id,
         'text': text,
         'isFollowUp': isFollowUp,
-        if (createdAt != null) 'createdAt': createdAt!.toUtc().toIso8601String(),
+        if (createdAt != null)
+          'createdAt': createdAt!.toUtc().toIso8601String(),
       };
 
   /// Alias
@@ -126,7 +141,8 @@ class Question {
     final s = v.toString().trim().toLowerCase();
     if (s.isEmpty) return null;
     if (const ['true', '1', 'yes', 'y', 'ja', 'wahr'].contains(s)) return true;
-    if (const ['false', '0', 'no', 'n', 'nein', 'falsch'].contains(s)) return false;
+    if (const ['false', '0', 'no', 'n', 'nein', 'falsch'].contains(s))
+      return false;
     return null;
   }
 
@@ -138,7 +154,8 @@ class Question {
       final n = v.toInt().abs();
       if (n < 1000000000000) {
         // Sekunden
-        return DateTime.fromMillisecondsSinceEpoch(v.toInt() * 1000, isUtc: true);
+        return DateTime.fromMillisecondsSinceEpoch(v.toInt() * 1000,
+            isUtc: true);
       } else if (n < 10000000000000000) {
         // Millisekunden
         return DateTime.fromMillisecondsSinceEpoch(v.toInt(), isUtc: true);

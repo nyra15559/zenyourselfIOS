@@ -63,7 +63,8 @@ class UserProfileProvider with ChangeNotifier {
     final parts = n.split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
     if (parts.isEmpty) return n.characters.first.toUpperCase();
     if (parts.length == 1) return parts.first.characters.first.toUpperCase();
-    return (parts.first.characters.first + parts.last.characters.first).toUpperCase();
+    return (parts.first.characters.first + parts.last.characters.first)
+        .toUpperCase();
   }
 
   /// Einfaches freundliches Greeting

@@ -32,8 +32,9 @@ class ReflectResponse {
   // ignore: non_constant_identifier_names
   String get output_text => outputText;
   // ignore: non_constant_identifier_names
-  String get risk_level =>
-      (riskFlag == 'crisis') ? 'high' : (riskFlag == 'support' ? 'mild' : 'none');
+  String get risk_level => (riskFlag == 'crisis')
+      ? 'high'
+      : (riskFlag == 'support' ? 'mild' : 'none');
 
   bool get risk => riskFlag == 'support' || riskFlag == 'crisis';
   bool get recommendEnd => flow?.recommendEnd == true;
@@ -54,9 +55,9 @@ class ReflectResponse {
         if (talk.isNotEmpty) 'talk': talk,
       };
 
-  String toJsonString({bool pretty = false}) =>
-      pretty ? const JsonEncoder.withIndent('  ').convert(toJson())
-             : jsonEncode(toJson());
+  String toJsonString({bool pretty = false}) => pretty
+      ? const JsonEncoder.withIndent('  ').convert(toJson())
+      : jsonEncode(toJson());
 
   ReflectResponse copyWith({
     String? outputText,
@@ -122,7 +123,8 @@ class ReflectResponse {
       if (jsonLike is String) {
         final obj = jsonDecode(jsonLike);
         if (obj is Map<String, dynamic>) return ReflectResponse.fromMap(obj);
-        if (obj is Map) return ReflectResponse.fromMap(obj.cast<String, dynamic>());
+        if (obj is Map)
+          return ReflectResponse.fromMap(obj.cast<String, dynamic>());
         final txt = jsonLike.toString().trim();
         return ReflectResponse(
           outputText: txt.isEmpty ? '…' : txt,
@@ -194,7 +196,9 @@ class ReflectResponse {
     final joinedQuestions = _normalizeQuestions(allQs);
     final primaryRaw = candidates.isNotEmpty ? candidates.first : '';
     final primary = joinedQuestions.isNotEmpty ? joinedQuestions : primaryRaw;
-    final output = primary.trim().isEmpty ? _errorHint : _ensureQuestionMark(primary.trim());
+    final output = primary.trim().isEmpty
+        ? _errorHint
+        : _ensureQuestionMark(primary.trim());
 
     // 3) Mirror
     final mirrorRaw = _asString(map['mirror']) ?? _asString(map['empathy']);
@@ -202,21 +206,30 @@ class ReflectResponse {
 
     // 4) Kontext / Followups / Talk
     final ctxDyn = (map['context'] as List?) ??
-                   (map['contexts'] as List?) ??
-                   (map['hints'] as List?) ??
-                   const [];
+        (map['contexts'] as List?) ??
+        (map['hints'] as List?) ??
+        const [];
     final flwDyn = (map['followups'] as List?) ??
-                   (map['follow_up'] as List?) ??
-                   (map['followup_questions'] as List?) ??
-                   const [];
+        (map['follow_up'] as List?) ??
+        (map['followup_questions'] as List?) ??
+        const [];
     final talkDyn = (map['talk'] as List?) ?? const [];
 
-    final ctx  = ctxDyn .map((e) => e?.toString().trim() ?? '')
-                        .where((s) => s.isNotEmpty).take(4).toList(growable: false);
-    final flw  = flwDyn .map((e) => e?.toString().trim() ?? '')
-                        .where((s) => s.isNotEmpty).take(4).toList(growable: false);
-    final talk = talkDyn.map((e) => e?.toString().trim() ?? '')
-                        .where((s) => s.isNotEmpty).take(2).toList(growable: false);
+    final ctx = ctxDyn
+        .map((e) => e?.toString().trim() ?? '')
+        .where((s) => s.isNotEmpty)
+        .take(4)
+        .toList(growable: false);
+    final flw = flwDyn
+        .map((e) => e?.toString().trim() ?? '')
+        .where((s) => s.isNotEmpty)
+        .take(4)
+        .toList(growable: false);
+    final talk = talkDyn
+        .map((e) => e?.toString().trim() ?? '')
+        .where((s) => s.isNotEmpty)
+        .take(2)
+        .toList(growable: false);
 
     // 5) Flow
     final flowJson = (map['flow'] as Map?) ?? const {};
@@ -228,18 +241,18 @@ class ReflectResponse {
 
     // 7) Tags/Schulen
     final schoolsDyn = (map['schools'] as List?) ??
-                       (map['therapeutic_schools'] as List?) ??
-                       (map['approaches'] as List?) ??
-                       const [];
+        (map['therapeutic_schools'] as List?) ??
+        (map['approaches'] as List?) ??
+        const [];
     final normalizedSchools = _normalizeSchools(_parseStringList(schoolsDyn));
     final workerTags = _parseStringList(map['tags']);
     final tags = _dedupeStrings([...workerTags, ...normalizedSchools]);
 
     // 8) Risiko
     final riskLevelRoot = (_asString(map['risk_level']) ??
-                           _asString(map['risk_flag']) ??
-                           _asString(map['risk']) ??
-                           'none')
+            _asString(map['risk_flag']) ??
+            _asString(map['risk']) ??
+            'none')
         .toLowerCase()
         .trim();
 
@@ -282,7 +295,8 @@ class ReflectFlow {
   Map<String, dynamic> toJson() => {
         'recommend_end': recommendEnd,
         'suggest_break': suggestBreak,
-        if (riskNotice != null && riskNotice!.trim().isNotEmpty) 'risk_notice': riskNotice,
+        if (riskNotice != null && riskNotice!.trim().isNotEmpty)
+          'risk_notice': riskNotice,
         if (sessionTurn != null) 'session_turn': sessionTurn,
         if (talkOnly) 'talk_only': true,
         'allow_reflect': allowReflect,
@@ -293,9 +307,12 @@ class ReflectFlow {
       return const ReflectFlow(recommendEnd: false, suggestBreak: false);
     }
     final recommendEnd = (map['recommend_end'] == true) || (map['end'] == true);
-    final suggestBreak = (map['suggest_break'] == true) || (map['break'] == true);
+    final suggestBreak =
+        (map['suggest_break'] == true) || (map['break'] == true);
     final riskNotice = _asString(map['risk_notice']);
-    final sessionTurn = (map['session_turn'] is num) ? (map['session_turn'] as num).toInt() : null;
+    final sessionTurn = (map['session_turn'] is num)
+        ? (map['session_turn'] as num).toInt()
+        : null;
     final talkOnly = map['talk_only'] == true;
     final allowReflect = map['allow_reflect'] != false;
     return ReflectFlow(
@@ -356,7 +373,8 @@ class ReflectSession {
         : (map['turn_index'] is num)
             ? (map['turn_index'] as num).toInt()
             : 0;
-    final max = (map['max_turns'] is num) ? (map['max_turns'] as num).toInt() : 3;
+    final max =
+        (map['max_turns'] is num) ? (map['max_turns'] as num).toInt() : 3;
     return ReflectSession(
       threadId: id,
       turnIndex: turn,
@@ -373,7 +391,8 @@ class ReflectSession {
           other.maxTurns == maxTurns);
 
   @override
-  int get hashCode => threadId.hashCode ^ turnIndex.hashCode ^ maxTurns.hashCode;
+  int get hashCode =>
+      threadId.hashCode ^ turnIndex.hashCode ^ maxTurns.hashCode;
 }
 
 // — Utils (privat) —
@@ -516,7 +535,9 @@ List<String> _normalizeSchools(List<String> raw) {
       out.add(alias);
       continue;
     }
-    if (k.contains('kvt') || k.contains('cognitive') || k.contains('behavior')) {
+    if (k.contains('kvt') ||
+        k.contains('cognitive') ||
+        k.contains('behavior')) {
       out.add('CBT/KVT');
     } else if (k.contains('act')) {
       out.add('ACT');
@@ -528,13 +549,17 @@ List<String> _normalizeSchools(List<String> raw) {
       out.add('Systemisch');
     } else if (k.contains('dynam')) {
       out.add('Psychodynamisch');
-    } else if (k.contains('human') || k.contains('client') || k.contains('person')) {
+    } else if (k.contains('human') ||
+        k.contains('client') ||
+        k.contains('person')) {
       out.add('Humanistisch');
     } else if (k.contains('solution')) {
       out.add('Lösungsfokussiert');
     } else if (k.contains('motiv')) {
       out.add('Motivational Interviewing');
-    } else if (k.contains('mindful') || k.contains('achtsam') || k.contains('mbct')) {
+    } else if (k.contains('mindful') ||
+        k.contains('achtsam') ||
+        k.contains('mbct')) {
       out.add('Achtsamkeit');
     } else {
       out.add(s.length <= 40 ? s : '${s.substring(0, 39)}…');

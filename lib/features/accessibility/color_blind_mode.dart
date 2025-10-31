@@ -1,4 +1,5 @@
 // lib/features/accessibility/color_blind_mode.dart
+import '../../shared/zen_style.dart';
 //
 // Color-Blind Mode — robuste A11y-Farbsteuerung
 // ---------------------------------------------
@@ -32,24 +33,26 @@ class AccessibilityPalette {
   /// Standard (normale App-Farben)
   static const normal = AccessibilityPalette(
     accent: Color(0xFFA5CBA1), // Jade
-    good: Color(0xFF365486),   // Oxford Blue
-    warning: Color(0xFFFFD580),// Gold
-    bad: Color(0xFFB2B2B2),    // Grey
+    good: Color(0xFF365486), // Oxford Blue
+    warning: Color(0xFFFFD580), // Gold
+    bad: Color(0xFFB2B2B2), // Grey
   );
 
   /// Farbenblindenfreundlich (hoher Kontrast, gut unterscheidbar)
   static const colorBlind = AccessibilityPalette(
     accent: Color(0xFF3777B6), // Blau
-    good: Color(0xFF3BA54A),   // Grün
-    warning: Color(0xFFE6A700),// Gelb/Amber
-    bad: Color(0xFFB71C1C),    // Dunkles Rot für Kontrast
+    good: Color(0xFF3BA54A), // Grün
+    warning: Color(0xFFE6A700), // Gelb/Amber
+    bad: Color(0xFFB71C1C), // Dunkles Rot für Kontrast
   );
 
   /// Ermittelt die aktive Palette aus dem Context (Provider)
   static AccessibilityPalette of(BuildContext context) {
     final enabled =
         context.select<ColorBlindModeProvider, bool>((p) => p.enabled);
-    return enabled ? AccessibilityPalette.colorBlind : AccessibilityPalette.normal;
+    return enabled
+        ? AccessibilityPalette.colorBlind
+        : AccessibilityPalette.normal;
   }
 
   /// Lesefarbe (schwarz/weiß) mit solidem Kontrast
@@ -58,8 +61,9 @@ class AccessibilityPalette {
 
   /// Relative Luminanz (WCAG) – Projekt nutzt Color.r/g/b (0..1)
   static double _relativeLuminance(Color c) {
-    double gamma(double s) =>
-        s <= 0.03928 ? s / 12.92 : math.pow((s + 0.055) / 1.055, 2.4).toDouble();
+    double gamma(double s) => s <= 0.03928
+        ? s / 12.92
+        : math.pow((s + 0.055) / 1.055, 2.4).toDouble();
     final r = gamma(c.r);
     final g = gamma(c.g);
     final b = gamma(c.b);
@@ -119,7 +123,7 @@ class ColorBlindModeSwitcher extends StatelessWidget {
     });
     final trackColor = MaterialStateProperty.resolveWith<Color?>((states) {
       if (states.contains(MaterialState.selected)) {
-        return palette.accent.withValues(alpha: .45);
+        return palette.accent.withValue(alpha: .45);
       }
       return null;
     });
@@ -158,7 +162,7 @@ class ColorBlindModeSwitcher extends StatelessWidget {
                 "Optimierte Farben mit hohem Kontrast – zusätzlich nutzen wir Symbole, nicht nur Farbe.",
                 style: TextStyle(
                   fontSize: 13.5,
-                  color: Colors.black.withValues(alpha: 0.6),
+                  color: Colors.black.withValue(alpha: 0.6),
                 ),
               ),
             ),
@@ -170,9 +174,14 @@ class ColorBlindModeSwitcher extends StatelessWidget {
           spacing: 8,
           runSpacing: 8,
           children: [
-            _SignalChip(icon: Icons.check_circle, label: "Gut", kind: _SignalKind.good),
-            _SignalChip(icon: Icons.warning, label: "Hinweis", kind: _SignalKind.warning),
-            _SignalChip(icon: Icons.cancel, label: "Kritisch", kind: _SignalKind.bad),
+            _SignalChip(
+                icon: Icons.check_circle, label: "Gut", kind: _SignalKind.good),
+            _SignalChip(
+                icon: Icons.warning,
+                label: "Hinweis",
+                kind: _SignalKind.warning),
+            _SignalChip(
+                icon: Icons.cancel, label: "Kritisch", kind: _SignalKind.bad),
           ],
         ),
       ],
@@ -221,10 +230,10 @@ class _SignalChip extends StatelessWidget {
         decoration: BoxDecoration(
           color: bg,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+          border: Border.all(color: Colors.black.withValue(alpha: 0.06)),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.06),
+              color: Colors.black.withValue(alpha: 0.06),
               blurRadius: 8,
               offset: const Offset(0, 2),
             ),

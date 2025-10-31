@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../shared/zen_style.dart';
 import 'package:just_audio/just_audio.dart';
 
 /// SoundscapeManager
@@ -260,12 +261,12 @@ class SoundscapeVolumeWidget extends StatelessWidget {
             height: 10 + (manager.volume.clamp(0.0, 1.0)) * 18,
             margin: const EdgeInsets.only(left: 8),
             decoration: BoxDecoration(
-              color: accent.withValues(alpha: 0.38),
+              color: accent.withValue(alpha: 0.38),
               borderRadius: BorderRadius.circular(7),
               boxShadow: [
                 if (manager.volume > 0.01)
                   BoxShadow(
-                    color: ink.withValues(alpha: 0.17 + manager.volume * 0.2),
+                    color: ink.withValue(alpha: 0.17 + manager.volume * 0.2),
                     blurRadius: 4 + manager.volume * 8,
                   ),
               ],
