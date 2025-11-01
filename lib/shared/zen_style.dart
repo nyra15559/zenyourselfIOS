@@ -1,4 +1,5 @@
 // [BASELINE] lib/shared/zen_style.dart (Stand: 31.10.)
+// P2-S8.1-DONE — Rand-Fix (Vignette ohne schwarze Kanten)
 // lib/shared/zen_style.dart
 //
 // ZenYourself — Oxford-Zen Design System (Tokens · Themes · Backdrop · Glass)
@@ -14,6 +15,11 @@
 // • Themes (Light/Dark), Backdrops & Glas-Primitives
 // • NEU: ZenIconSizes, ZenPaddings, ZenA11y, ZenBadge.outline, ZenSkillCard,
 //        ZenBulletList (Bullet-Spacing), Tap-Min 44 für IconButtons
+//
+// P2-S8.1 — RAND-FIX („schwarzer Rand“):
+// 1) Vignette als Ring-Gradient mit tileMode: TileMode.decal und
+//    [transparent, schwarz(alpha), transparent] → kein Schwarz am Rand.
+// 2) Presets: Vignette-Intensität reduziert (Start/Menu/Journal .06, Reflection .08).
 // -----------------------------------------------------------------------------
 
 import 'dart:ui' as ui show ImageFilter;
@@ -832,7 +838,7 @@ class ZenBackdropPresets {
         alignment: ZenArt.alignRightSafe,
         artBaseWidth: ZenArt.baseW,
         artBaseHeight: ZenArt.baseH,
-        vignette: .10,
+        vignette: .06, // reduziert
         glow: .24,
         enableHaze: true,
         hazeStrength: .10,
@@ -846,7 +852,7 @@ class ZenBackdropPresets {
         alignment: ZenArt.alignRightSafe,
         artBaseWidth: ZenArt.baseW,
         artBaseHeight: ZenArt.baseH,
-        vignette: .12,
+        vignette: .06, // reduziert
         glow: .22,
         enableHaze: true,
         hazeStrength: .08,
@@ -860,7 +866,7 @@ class ZenBackdropPresets {
         alignment: ZenArt.alignRightSafe,
         artBaseWidth: ZenArt.baseW,
         artBaseHeight: ZenArt.baseH,
-        vignette: .14,
+        vignette: .08, // reduziert
         glow: .20,
         enableHaze: true,
         hazeStrength: .12,
@@ -874,7 +880,7 @@ class ZenBackdropPresets {
         alignment: ZenArt.alignRightSafe,
         artBaseWidth: ZenArt.baseW,
         artBaseHeight: ZenArt.baseH,
-        vignette: .10,
+        vignette: .06, // reduziert
         glow: .26,
         enableHaze: true,
         hazeStrength: .10,
@@ -942,7 +948,8 @@ class ZenBackdrop extends StatelessWidget {
 
     return Stack(fit: StackFit.expand, children: [
       const DecoratedBox(
-          decoration: BoxDecoration(gradient: ZenGradients.screen)),
+        decoration: BoxDecoration(gradient: ZenGradients.screen),
+      ),
 
       // Blur-Fill als Unterfütterung
       applySaturation(
@@ -950,7 +957,9 @@ class ZenBackdrop extends StatelessWidget {
           imageFilter: ui.ImageFilter.blur(sigmaX: 24, sigmaY: 24),
           child: ColorFiltered(
             colorFilter: ColorFilter.mode(
-                Colors.white.withValue(alpha: 0.05), BlendMode.srcATop),
+              Colors.white.withValue(alpha: 0.05),
+              BlendMode.srcATop,
+            ),
             child: _SafeAssetImage(
               path: asset,
               fit: BoxFit.cover,
@@ -980,13 +989,17 @@ class ZenBackdrop extends StatelessWidget {
 
       if (wash > 0)
         IgnorePointer(
-            child: Container(color: Colors.white.withValue(alpha: wash))),
+          child: Container(color: Colors.white.withValue(alpha: wash)),
+        ),
 
       // Gold-Grün Glow
       IgnorePointer(
         child: Container(
-            decoration: ZenOverlays.radialGlow(
-                center: const Offset(.50, -.05), opacity: glow)),
+          decoration: ZenOverlays.radialGlow(
+            center: const Offset(.50, -.05),
+            opacity: glow,
+          ),
+        ),
       ),
 
       // Haze (optional)
@@ -1008,18 +1021,20 @@ class ZenBackdrop extends StatelessWidget {
           ),
         ),
 
-      // Vignette
+      // Vignette (Ring, rand-transparent) — **Fix gegen schwarze Ränder**
       IgnorePointer(
         child: DecoratedBox(
           decoration: BoxDecoration(
             gradient: RadialGradient(
               center: Alignment.center,
               radius: 1.15,
+              tileMode: TileMode.decal,
               colors: [
                 Colors.transparent,
-                Colors.black.withValue(alpha: vignette)
+                Colors.black.withValue(alpha: vignette),
+                Colors.transparent,
               ],
-              stops: const [0.78, 1.0],
+              stops: const [0.78, 0.94, 1.0],
             ),
           ),
         ),
@@ -1052,26 +1067,10 @@ class ZenBackdrop extends StatelessWidget {
     const r = 0.2126, g = 0.7152, b = 0.0722;
     final a = (1 - s);
     return <double>[
-      r * a + s,
-      g * a,
-      b * a,
-      0,
-      0,
-      r * a,
-      g * a + s,
-      b * a,
-      0,
-      0,
-      r * a,
-      g * a,
-      b * a + s,
-      0,
-      0,
-      0,
-      0,
-      0,
-      1,
-      0,
+      r * a + s, g * a, b * a, 0, 0,
+      r * a, g * a + s, b * a, 0, 0,
+      r * a, g * a, b * a + s, 0, 0,
+      0, 0, 0, 1, 0,
     ];
   }
 }
@@ -1230,8 +1229,9 @@ class ZenGlassCard extends StatelessWidget {
               ),
               borderRadius: borderRadius,
               border: Border.all(
-                  color: Colors.white.withValue(alpha: borderOpacity),
-                  width: 1.0),
+                color: Colors.white.withValue(alpha: borderOpacity),
+                width: 1.0,
+              ),
               boxShadow: const [
                 BoxShadow(
                   color: Color(0x14000000),
@@ -1281,7 +1281,9 @@ class ZenGlassInput extends StatelessWidget {
             ),
             borderRadius: borderRadius,
             border: Border.all(
-                color: Colors.white.withValue(alpha: 0.16), width: 1.0),
+              color: Colors.white.withValue(alpha: 0.16),
+              width: 1.0,
+            ),
             boxShadow: const [ZenShadows.glow],
           ),
           child: child,
@@ -1334,13 +1336,17 @@ class ZenBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bg =
-        variant == ZenBadgeVariant.solid ? ZenColors.mist.withValue(alpha: .80) : Colors.transparent;
+    final bg = variant == ZenBadgeVariant.solid
+        ? ZenColors.mist.withValue(alpha: .80)
+        : Colors.transparent;
     final borderColor = ZenColors.jadeMid.withValue(alpha: .36);
     final textColor = variant == ZenBadgeVariant.solid
         ? ZenColors.jade
-        : ZenA11y.textOn(ZenColors.surface,
-            light: ZenColors.jade, dark: ZenColors.inkStrong);
+        : ZenA11y.textOn(
+            ZenColors.surface,
+            light: ZenColors.jade,
+            dark: ZenColors.inkStrong,
+          );
 
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 8),
@@ -1534,16 +1540,17 @@ class ZenSkillCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(title,
-                  style: ZenTextStyles.h3.copyWith(height: 1.22),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis),
+              Text(
+                title,
+                style: ZenTextStyles.h3.copyWith(height: 1.22),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
               if (subtitle != null) ...[
                 const SizedBox(height: 4),
                 Text(
                   subtitle!,
-                  style:
-                      ZenTextStyles.subtitle.copyWith(height: 1.28),
+                  style: ZenTextStyles.subtitle.copyWith(height: 1.28),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -1609,8 +1616,8 @@ class ZenBulletList extends StatelessWidget {
             children: [
               Padding(
                 padding: EdgeInsets.only(top: bulletTopOffset),
-                child: Text('•',
-                    style: st.copyWith(fontWeight: FontWeight.w700)),
+                child:
+                    Text('•', style: st.copyWith(fontWeight: FontWeight.w700)),
               ),
               const SizedBox(width: 8),
               Expanded(child: Text(items[i], style: st)),

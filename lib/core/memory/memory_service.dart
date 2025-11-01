@@ -1,10 +1,13 @@
-// [BASELINE] lib/core/memory/memory_service.dart — v6.4.2 (31.10.2025)
+// [BASELINE] lib/core/memory/memory_service.dart — v6.5.0 (S12.2 • 31.10.2025)
 // ZenYourself — MemoryService (Lokales Kontext-Gedächtnis, Ghost-Mode by default)
 // -----------------------------------------------------------------------------
 // D1: FactType.insight + Serialisierung (MemoryFact) integriert.
 //     buildContextHint(..., activeFacet, topicPin) erweitert.
 //     Public-API: saveInsightFact(...).
 // E1: saveFromWorker(...) upsertet zusätzlich memories_to_save[*] als Facts.
+// S6.3: Name-Load stabil (Sync-Caches + Consent).
+// S12.1: Hook-Integration (memories_to_save robust übernehmen).
+// S12.2: Recency/Timeline-Basis + Orts-Recall (lokal, PII-schonend).
 //
 // Rückwärtskompatibel zu v6.3.8. Bestehende Signaturen bleiben erhalten;
 // neue optionale Named-Parameter sind additive Erweiterungen.
@@ -66,6 +69,65 @@ class MemoryContextHint {
       };
 }
 
+/// Kleiner Geo-Stempel (lokal; PII-schonend, keine automatische Weitergabe).
+class LocationBreadcrumb {
+  final String? label;       // z. B. "Zürich HB" | "Home"
+  final double? lat;         // optional
+  final double? lon;         // optional
+  final double? accuracy;    // Meter (optional)
+  final String? source;      // "device" | "user" | "worker"
+  final DateTime tsUtc;
+
+  const LocationBreadcrumb({
+    this.label,
+    this.lat,
+    this.lon,
+    this.accuracy,
+    this.source,
+    required this.tsUtc,
+  });
+
+  Map<String, dynamic> toMap() => <String, dynamic>{
+        'kind': 'location',
+        if ((label ?? '').trim().isNotEmpty) 'label': label!.trim(),
+        if (lat != null) 'lat': lat,
+        if (lon != null) 'lon': lon,
+        if (accuracy != null) 'accuracy': accuracy,
+        if ((source ?? '').trim().isNotEmpty) 'source': source!.trim(),
+        'ts': tsUtc.toIso8601String(),
+      };
+
+  static LocationBreadcrumb? fromMap(dynamic v) {
+    if (v is! Map) return null;
+    final m = Map<String, dynamic>.from(v);
+    DateTime? _ts(dynamic x) {
+      try {
+        final s = x?.toString().trim();
+        if (s == null || s.isEmpty) return null;
+        return DateTime.parse(s).toUtc();
+      } catch (_) {
+        return null;
+      }
+    }
+
+    double? _num(dynamic x) {
+      if (x is num) return x.toDouble();
+      if (x is String) return double.tryParse(x.trim());
+      return null;
+    }
+
+    final ts = _ts(m['ts']) ?? DateTime.now().toUtc();
+    return LocationBreadcrumb(
+      label: m['label']?.toString(),
+      lat: _num(m['lat']),
+      lon: _num(m['lon']),
+      accuracy: _num(m['accuracy']),
+      source: m['source']?.toString(),
+      tsUtc: ts,
+    );
+  }
+}
+
 class MemoryService {
   MemoryService._internal();
   static final MemoryService instance = MemoryService._internal();
@@ -96,6 +158,16 @@ class MemoryService {
   String? _profileUserNameCache;
   List<String>? _profileNicknamesCache;
 
+  // NEU: Greet-Consent Sync-Cache
+  bool? _greetByNameCache;
+
+  // NEU (S12.2): Letzter Orts-Recall (lokal)
+  String? _lastLocationLabelCache;
+  DateTime? _lastLocationTsCache;
+
+  bool get profileHasNicknamesSync =>
+      (_profileNicknamesCache?.isNotEmpty ?? false);
+
   String? get profileUserNameSync => _profileUserNameCache;
   List<String> get profileNicknamesSync =>
       List.unmodifiable(_profileNicknamesCache ?? const <String>[]);
@@ -113,6 +185,38 @@ class MemoryService {
           ? _profileNicknamesCache!.first
           : null;
 
+  /// NEU: true, wenn Name sofort (sync) geteilt werden darf.
+  bool get canShareNameSync =>
+      _shareEnabled &&
+      (_greetByNameCache == true) &&
+      ((_identityNameCache ?? '').trim().isNotEmpty);
+
+  /// NEU: Sync-Lesehilfe für UI (z. B. Intro-Bubble).
+  ({String? name, bool greetByName}) greetingNameSync(
+      {bool requireConsent = false}) {
+    final name = (_identityNameCache ?? '').trim().isEmpty
+        ? null
+        : _identityNameCache!.trim();
+    final greet = _greetByNameCache == true;
+    final ok = requireConsent ? (greet && _shareEnabled) : greet;
+    return (name: ok ? name : null, greetByName: ok);
+    }
+
+  /// NEU: Lädt Name/Greet in den Sync-Cache, wenn noch nicht vorhanden.
+  Future<({String? name, bool greetByName})> ensureGreetingNameLoaded(
+      {bool requireConsent = false}) async {
+    if ((_identityNameCache ?? '').trim().isEmpty || _greetByNameCache == null) {
+      final r = await loadGreetingName();
+      return requireConsent
+          ? ((r.greetByName && _shareEnabled) ? r : (name: null, greetByName: false))
+          : r;
+    }
+    final r = (name: _identityNameCache, greetByName: _greetByNameCache == true);
+    return requireConsent
+        ? ((r.greetByName && _shareEnabled) ? r : (name: null, greetByName: false))
+        : r;
+  }
+
   // TTLs
   static const _hintTtlDays = 14;
   static const _topicsTtlSec = 30;
@@ -126,6 +230,13 @@ class MemoryService {
   // Profile-Keys
   static const String _kProfileUserName = 'profile.user_name';
   static const String _kProfileNicknames = 'profile.nicknames'; // JSON-Array
+
+  // Geo-Keys (S12.2)
+  static const String _kGeoLastLabel = 'geo.last_label';
+  static const String _kGeoLastTs = 'geo.last_ts';
+  static const String _kGeoLastLat = 'geo.last_lat';
+  static const String _kGeoLastLon = 'geo.last_lon';
+  static const String _kGeoLastAcc = 'geo.last_acc';
 
   // ---------------- Lifecycle / Flags ----------------------------------------
 
@@ -160,6 +271,20 @@ class MemoryService {
                 .map(_cap)
                 .toList(growable: false);
       } catch (_) {/* ignore */}
+
+      // NEU: Greet-Consent vorladen
+      try {
+        final greet = await _getOptBool(_kIdentityGreetByName);
+        _greetByNameCache = greet ?? false;
+      } catch (_) {/* ignore */}
+
+      // NEU (S12.2): Letzten Ort vorladen
+      try {
+        _lastLocationLabelCache = await _getOptString(_kGeoLastLabel);
+        final ts = await _getOptString(_kGeoLastTs);
+        _lastLocationTsCache =
+            (ts == null || ts.trim().isEmpty) ? null : DateTime.tryParse(ts)?.toUtc();
+      } catch (_) {/* ignore */}
     } catch (_) {
       // Defaults beibehalten
     }
@@ -193,6 +318,12 @@ class MemoryService {
     try {
       await _setOptBool(_kShareEnabled, v);
     } catch (_) {/* ignore */}
+    // NEU: Bei aktivierter Freigabe sicherstellen, dass Name/Greet im Cache sind
+    if (v && ((_identityNameCache ?? '').trim().isEmpty || _greetByNameCache == null)) {
+      try {
+        await ensureGreetingNameLoaded();
+      } catch (_) {/* ignore */}
+    }
   }
 
   // ---------------- Identity/Profile (lokal) ---------------------------------
@@ -202,6 +333,7 @@ class MemoryService {
       final n = _cap(name.trim());
       if (n.isEmpty) return;
       _identityNameCache = n; // Sync-Cache
+      _greetByNameCache = greetByName; // NEU: Cache aktualisieren
       await _setOptString(_kIdentityName, n);
       await _setOptBool(_kIdentityGreetByName, greetByName);
 
@@ -241,6 +373,7 @@ class MemoryService {
 
   Future<void> setGreetingConsent(bool greetByName) async {
     try {
+      _greetByNameCache = greetByName; // NEU: Cache aktualisieren
       await _setOptBool(_kIdentityGreetByName, greetByName);
     } catch (_) {/* ignore */}
   }
@@ -248,6 +381,7 @@ class MemoryService {
   Future<void> forgetIdentityName() async {
     try {
       _identityNameCache = null; // Sync-Cache löschen
+      _greetByNameCache = false; // NEU: auch Greet-Cache zurücksetzen
       final dyn = _store as dynamic;
       try {
         final r = dyn.removeOpt?.call(_kIdentityName);
@@ -286,6 +420,7 @@ class MemoryService {
         _identityNameCache = null;
         _profileUserNameCache = null;
         _profileNicknamesCache = null;
+        _greetByNameCache = false; // NEU
         return;
       } catch (_) {/* try next */}
       await forgetIdentityName();
@@ -298,10 +433,11 @@ class MemoryService {
       final name = await _getOptString(_kIdentityName);
       final greet = await _getOptBool(_kIdentityGreetByName) ?? false;
       final trimmed = (name?.trim().isEmpty ?? true) ? null : _cap(name!.trim());
-      _identityNameCache = trimmed; // Cache aktualisieren
+      _identityNameCache = trimmed;      // Cache aktualisieren
+      _greetByNameCache = greet;         // NEU: Cache aktualisieren
       return (name: trimmed, greetByName: greet);
     } catch (_) {
-      return (name: null, greetByName: false);
+      return (name: _identityNameCache, greetByName: _greetByNameCache == true);
     }
   }
 
@@ -376,6 +512,7 @@ class MemoryService {
 
       if (candidate == null) return;
 
+      // Nur das erste "Wort" (vermeidet Anhänge wie "und", "uund.", etc.)
       final firstToken = candidate.split(RegExp(r"\s+")).first;
 
       String clean =
@@ -384,7 +521,7 @@ class MemoryService {
       if (clean.length < 2) return;
       clean = _cap(clean);
 
-      const banned = {'einfach', 'ja', 'okay', 'ok', 'nein', 'anonym'};
+      const banned = {'einfach', 'ja', 'okay', 'ok', 'nein', 'anonym', 'und', 'uund'};
       if (banned.contains(clean.toLowerCase())) return;
 
       await saveIdentityName(clean, greetByName: greetByName);
@@ -440,6 +577,7 @@ class MemoryService {
 
   /// Speichert tolerant aus einer Worker-Response (no-op, wenn disabled).
   /// Verarbeitet zusätzlich memories_to_save[] (Identity/Profile + Insights).
+  /// **Neu (S12.2):** Liest optional Geo-Felder und legt Location-Breadcrumbs an.
   Future<void> saveFromWorker(dynamic workerResponse, {String? source}) async {
     if (!_enabled) return;
     try {
@@ -530,6 +668,9 @@ class MemoryService {
 
       // 3) Bestehende Identity/Profile-Upserts aus memories_to_save (PII)
       await _ingestMemoriesToSave(map);
+
+      // 4) NEU (S12.2): Geo-Felder tolerant übernehmen (falls vorhanden)
+      await _ingestGeoIfPresent(map);
 
       _invalidateSoftCaches();
     } catch (_) {
@@ -639,6 +780,9 @@ class MemoryService {
     _identityNameCache = null;
     _profileUserNameCache = null;
     _profileNicknamesCache = null;
+    _greetByNameCache = null;
+    _lastLocationLabelCache = null;
+    _lastLocationTsCache = null;
     try {
       await _store.clearAll();
     } catch (_) {/* ignore */}
@@ -865,9 +1009,19 @@ class MemoryService {
 
       final out = <String, dynamic>{};
 
-      final id = await loadGreetingName();
-      if (id.greetByName && id.name != null && id.name!.isNotEmpty) {
-        out['identity'] = <String, dynamic>{'name': id.name};
+      // NEU: Short-Circuit über Sync-Cache, erst bei Bedarf await
+      String? nameToUse;
+      bool greet = _greetByNameCache == true;
+      if (greet && (_identityNameCache ?? '').trim().isNotEmpty) {
+        nameToUse = _identityNameCache!.trim();
+      } else {
+        final id = await loadGreetingName();
+        greet = id.greetByName;
+        nameToUse = id.name;
+      }
+
+      if (greet && nameToUse != null && nameToUse.isNotEmpty) {
+        out['identity'] = <String, dynamic>{'name': nameToUse};
       }
 
       if ((_profileUserNameCache ?? '').toString().trim().isNotEmpty ||
@@ -932,6 +1086,248 @@ class MemoryService {
   List<int>? exportByteContext([int maxBytes = 2048]) =>
       tryGetByteContext(maxBytes);
   List<int>? byteContext([int maxBytes = 2048]) => tryGetByteContext(maxBytes);
+
+  // ---------------- Recency/Timeline & Geo (S12.2) --------------------------
+
+  /// Legt einen lokalen Location-Breadcrumb an (PII-schonend; kein Autoshare).
+  Future<void> recordLocation({
+    String? label,
+    double? lat,
+    double? lon,
+    double? accuracy,
+    String? source, // "device" | "user" | "worker"
+    DateTime? tsUtc,
+  }) async {
+    if (!_enabled) return;
+    try {
+      final stamp = LocationBreadcrumb(
+        label: (label ?? '').trim().isEmpty ? null : _cap(label!.trim()),
+        lat: lat,
+        lon: lon,
+        accuracy: accuracy,
+        source: (source ?? '').trim().isEmpty ? null : source!.trim(),
+        tsUtc: (tsUtc ?? DateTime.now().toUtc()),
+      );
+
+      // Store tolerant beschreiben
+      final dyn = _store as dynamic;
+      bool saved = false;
+
+      try {
+        final r = dyn.saveLocation?.call(stamp.toMap());
+        if (r is Future) await r;
+        saved = true;
+      } catch (_) {/* try next */}
+      if (!saved) {
+        try {
+          final r = dyn.saveMap?.call(stamp.toMap());
+          if (r is Future) await r;
+          saved = true;
+        } catch (_) {/* try next */}
+      }
+      if (!saved) {
+        try {
+          final r = dyn.save?.call(stamp.toMap());
+          if (r is Future) await r;
+        } catch (_) {/* ignore */}
+      }
+
+      // Sync-Cache + Opt-Keys aktualisieren
+      if ((stamp.label ?? '').trim().isNotEmpty) {
+        _lastLocationLabelCache = stamp.label!.trim();
+        await _setOptString(_kGeoLastLabel, _lastLocationLabelCache!);
+      }
+      _lastLocationTsCache = stamp.tsUtc;
+      await _setOptString(_kGeoLastTs, stamp.tsUtc.toIso8601String());
+      if (lat != null) await _setOptString(_kGeoLastLat, '$lat');
+      if (lon != null) await _setOptString(_kGeoLastLon, '$lon');
+      if (accuracy != null) await _setOptString(_kGeoLastAcc, '$accuracy');
+    } catch (_) {/* ignore */}
+  }
+
+  /// Liefert das letzte, lokal bekannte Ortslabel (falls nicht zu alt).
+  Future<String?> lastPlaceLabel({int maxAgeHours = 96}) async {
+    try {
+      // 1) Schnellpfad: Cache/Opt-Keys
+      if (_lastLocationLabelCache != null && _lastLocationTsCache != null) {
+        final ageH = DateTime.now().toUtc().difference(_lastLocationTsCache!).inHours;
+        if (ageH <= maxAgeHours) return _lastLocationLabelCache;
+      }
+      final lbl = await _getOptString(_kGeoLastLabel);
+      final ts = await _getOptString(_kGeoLastTs);
+      if (lbl != null && ts != null) {
+        final when = DateTime.tryParse(ts)?.toUtc();
+        if (when != null) {
+          final ageH = DateTime.now().toUtc().difference(when).inHours;
+          if (ageH <= maxAgeHours) {
+            _lastLocationLabelCache = lbl.trim();
+            _lastLocationTsCache = when;
+            return _lastLocationLabelCache;
+          }
+        }
+      }
+
+      // 2) Optional: Store befragen
+      try {
+        final dyn = _store as dynamic;
+        // bevorzugte, spezifische API
+        final r = await dyn.latestLocations?.call(limit: 1);
+        if (r is List && r.isNotEmpty) {
+          final crumb = LocationBreadcrumb.fromMap(r.first);
+          if (crumb != null) {
+            _lastLocationLabelCache = (crumb.label ?? '').trim().isEmpty ? null : crumb.label!.trim();
+            _lastLocationTsCache = crumb.tsUtc;
+            if (_lastLocationLabelCache != null) {
+              await _setOptString(_kGeoLastLabel, _lastLocationLabelCache!);
+              await _setOptString(_kGeoLastTs, _lastLocationTsCache!.toIso8601String());
+            }
+            return _lastLocationLabelCache;
+          }
+        }
+      } catch (_) {/* ignore */}
+
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Baut eine leichte, zeitlich sortierte Timeline zuletzt gespeicherter Items.
+  /// Enthält, sofern verfügbar: lines, facts, ack, location. Rein lokal.
+  Future<List<Map<String, dynamic>>> recentTimeline({
+    int limit = 50,
+    DateTime? sinceUtc,
+  }) async {
+    if (!_enabled) return const <Map<String, dynamic>>[];
+    try {
+      // 1) Falls Store eine native Timeline anbietet, diese nutzen
+      try {
+        final dyn = _store as dynamic;
+        final r = await dyn.timeline?.call(limit: limit, sinceUtc: sinceUtc);
+        if (r is List) {
+          // defensive Kopie und Sortierung (älteste→neueste)
+          final list = r
+              .where((e) => e != null)
+              .map((e) => Map<String, dynamic>.from(e as Map))
+              .toList(growable: false);
+          list.sort((a, b) => _tsOf(a).compareTo(_tsOf(b)));
+          return list.take(limit).toList(growable: false);
+        }
+      } catch (_) {/* try fallback */}
+
+      // 2) Fallback: aus verschiedenen Quellen zusammenbauen
+      final out = <Map<String, dynamic>>[];
+
+      // 2a) Konversations-Lines (sofern verfügbar)
+      try {
+        final dyn = _store as dynamic;
+        final lines = await dyn.latestLines?.call(limit: limit);
+        if (lines is List) {
+          for (final e in lines) {
+            if (e is Map) {
+              final m = Map<String, dynamic>.from(e);
+              m.putIfAbsent('kind', () => 'line');
+              out.add(m);
+            }
+          }
+        }
+      } catch (_) {/* ignore */}
+
+      // 2b) Facts (leichtgewichtig)
+      try {
+        final dyn = _store as dynamic;
+        final facts = await dyn.latestFacts?.call(limit: (limit / 2).ceil());
+        if (facts is List) {
+          for (final e in facts) {
+            if (e is Map) {
+              final m = Map<String, dynamic>.from(e);
+              m.putIfAbsent('kind', () => 'fact');
+              out.add(m);
+            }
+          }
+        }
+      } catch (_) {/* ignore */}
+
+      // 2c) Location Breadcrumbs
+      try {
+        final dyn = _store as dynamic;
+        final locs = await dyn.latestLocations?.call(limit: 8);
+        if (locs is List) {
+          for (final e in locs) {
+            if (e is Map) {
+              final m = Map<String, dynamic>.from(e);
+              m.putIfAbsent('kind', () => 'location');
+              out.add(m);
+            }
+          }
+        }
+      } catch (_) {/* ignore */}
+
+      // 2d) Acks (optional)
+      try {
+        final dyn = _store as dynamic;
+        final acks = await dyn.latestAcks?.call(limit: 12);
+        if (acks is List) {
+          for (final e in acks) {
+            if (e is Map) {
+              final m = Map<String, dynamic>.from(e);
+              m.putIfAbsent('kind', () => 'ack');
+              out.add(m);
+            }
+          }
+        }
+      } catch (_) {/* ignore */}
+
+      // Filter by sinceUtc
+      if (sinceUtc != null) {
+        out.removeWhere((m) => _tsOf(m).isBefore(sinceUtc));
+      }
+
+      // Sortieren und limitieren (älteste→neueste)
+      out.sort((a, b) => _tsOf(a).compareTo(_tsOf(b)));
+      return out.take(limit).toList(growable: false);
+    } catch (_) {
+      return const <Map<String, dynamic>>[];
+    }
+  }
+
+  /// Gruppiert die Timeline nach Tagen (YYYY-MM-DD → Events).
+  Future<Map<String, List<Map<String, dynamic>>>> timelineByDay({
+    int days = 7,
+  }) async {
+    try {
+      final since = DateTime.now().toUtc().subtract(Duration(days: days));
+      final events = await recentTimeline(limit: days * 64, sinceUtc: since);
+      final map = <String, List<Map<String, dynamic>>>{};
+      for (final e in events) {
+        final ts = _tsOf(e);
+        final key = _ymd(ts);
+        (map[key] ??= <Map<String, dynamic>>[]).add(e);
+      }
+      // täglich auf 64 begrenzen, stabil sortiert
+      for (final k in map.keys) {
+        map[k]!.sort((a, b) => _tsOf(a).compareTo(_tsOf(b)));
+        if (map[k]!.length > 64) {
+          map[k] = map[k]!.take(64).toList(growable: false);
+        }
+      }
+      return map;
+    } catch (_) {
+      return <String, List<Map<String, dynamic>>>{};
+    }
+  }
+
+  /// Liefert die letzten n Tages-Keys, an denen etwas passiert ist.
+  Future<List<String>> recentDays({int days = 7}) async {
+    try {
+      final grouped = await timelineByDay(days: days);
+      final keys = grouped.keys.toList(growable: false)
+        ..sort((a, b) => a.compareTo(b));
+      return keys.take(days).toList(growable: false);
+    } catch (_) {
+      return const <String>[];
+    }
+  }
 
   // ---------------- interne Helfer ------------------------------------------
 
@@ -1078,6 +1474,48 @@ class MemoryService {
     } catch (_) {/* ignore */}
   }
 
+  /// Liest optionale Geo-Felder aus einer Worker-Antwort und legt Stempel an.
+  Future<void> _ingestGeoIfPresent(Map<String, dynamic> root) async {
+    try {
+      Map<String, dynamic>? _asMap(dynamic v) =>
+          (v is Map<String, dynamic>) ? v : (v is Map) ? Map<String, dynamic>.from(v) : null;
+
+      double? _num(dynamic x) {
+        if (x is num) return x.toDouble();
+        if (x is String) return double.tryParse(x.trim());
+        return null;
+      }
+
+      // Tolerante Quellen: top-level 'location'|'geo', sowie plan.location
+      final loc = _asMap(root['location']) ??
+          _asMap(root['geo']) ??
+          _asMap(_asMap(root['plan'])?['location']);
+
+      if (loc == null) return;
+
+      final label = (loc['label'] ?? loc['place'] ?? loc['city'] ?? loc['name'])
+          ?.toString();
+      final lat = _num(loc['lat'] ?? loc['latitude']);
+      final lon = _num(loc['lon'] ?? loc['lng'] ?? loc['longitude']);
+      final acc = _num(loc['accuracy'] ?? loc['acc']);
+      final src = (loc['source'] ?? 'worker').toString();
+
+      if ((label == null || label.trim().isEmpty) &&
+          lat == null &&
+          lon == null) {
+        return;
+      }
+
+      await recordLocation(
+        label: label,
+        lat: lat,
+        lon: lon,
+        accuracy: acc,
+        source: src,
+      );
+    } catch (_) {/* ignore */}
+  }
+
   void _invalidateSoftCaches() {
     _latestTopicsCache = null;
     _latestTopicsTs = null;
@@ -1100,6 +1538,8 @@ class MemoryService {
   }
 
   String _cap(String s) => s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
+
+  // -- kleine Key/Value-Utils -------------------------------------------------
 
   Future<void> _setOptString(String key, String value) async {
     try {
@@ -1245,6 +1685,25 @@ class MemoryService {
           .toList(growable: false);
     }
     return const <String>[];
+  }
+
+  // -- Misc Helpers -----------------------------------------------------------
+
+  static DateTime _tsOf(Map<String, dynamic> m) {
+    try {
+      final raw = (m['ts'] ?? m['created_at'] ?? m['createdAt'])?.toString();
+      if (raw != null && raw.trim().isNotEmpty) {
+        return DateTime.parse(raw).toUtc();
+      }
+    } catch (_) {/* ignore */}
+    return DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+  }
+
+  static String _ymd(DateTime dtUtc) {
+    final y = dtUtc.year.toString().padLeft(4, '0');
+    final m = dtUtc.month.toString().padLeft(2, '0');
+    final d = dtUtc.day.toString().padLeft(2, '0');
+    return '$y-$m-$d';
   }
 }
 

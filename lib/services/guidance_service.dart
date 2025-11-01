@@ -1,15 +1,21 @@
 // [BASELINE] lib/services/guidance_service.dart (Stand: 31.10.)
-// ZenYourself — Guidance / Coaching Service (PANDA-REFLECT-12.7 → v6.4.8)
+// ZenYourself — Guidance / Coaching Service (PANDA-REFLECT-12.7 → v6.4.9)
 // -----------------------------------------------------------------------------
-// Änderungen v6.4.8:
-// • Compile-Fix: ApiService erwartet für memoryConsent einen bool. Guidance
-//   erlaubt weiterhin bool?, berechnet aber vor JEDEM Call den effektiven bool
-//   via (memoryConsent ?? MemoryService.shareEnabled) und übergibt diesen.
-// • story(...) gibt StoryResult mit required Feld `id` zurück (stabile ID via
-//   FNV-Hash aus entryIds + title + body); nutzt ApiService.story und ersetzt
-//   die ID stabil.
-// • Story/Journey Signaturen nutzen entryIds (+ optional topics); Normalisierung
-//   bleibt rückwärtskompatibel.
+// Änderungen v6.4.9 (S3.3 Round/Session Guards):
+// • Meta wird *immer* an ApiService weitergereicht (auch im typed Fallback).
+// • intro.round_count wird aus der Session autoritativ gesetzt (Guard).
+// • meta.session_hint enthält thread_id/id/turn_index für Observability.
+// • nextTurnAction(..., {meta}) → optionales meta weiterleitbar.
+// • Normalized-JSON ergänzt: round_count, thread_id (Convenience).
+// -----------------------------------------------------------------------------
+// S4.2 — Smalltalk Pass-through:
+// • smalltalk_reply aus ReflectionTurn wird in _turnToJson() ins Normalized-JSON
+//   übernommen (Key: 'smalltalk_reply'); keine Doppelung mit 'talk'.
+// -----------------------------------------------------------------------------
+// Vorherige v6.4.8 Notes:
+// • memoryConsent-Handling (nullable→bool)
+// • story(...) liefert stabile id via FNV
+// • Journey/Story Signaturen nutzen entryIds
 // -----------------------------------------------------------------------------
 
 library guidance_service;
@@ -88,9 +94,12 @@ class GuidanceService {
     Map<String, dynamic>? clientContext,
     Map<String, dynamic>? meta,
   }) async {
-    // Immer effektiven Bool bestimmen
+    // Effektiven Bool bestimmen
     final bool consent =
         memoryConsent ?? mem.MemoryService.instance.shareEnabled;
+
+    // S3.3: Meta mit Session/Round anreichern (autoritativer round_count)
+    final Map<String, dynamic>? m = _attachIntroAndSessionMeta(meta, session);
 
     final svc = ApiService.instance;
     try {
@@ -106,9 +115,27 @@ class GuidanceService {
         memoryConsent: consent, // <- bool
         userAction: userAction,
         clientContext: clientContext,
-        meta: meta,
+        meta: m,
       );
       if (fut != null) return await fut;
+    } catch (_) {/* ignore */}
+    // Typed Fallback (v6.4.9: meta via dyn-call; bei typed ggf. nicht verfügbar)
+    try {
+      final dyn2 = svc as dynamic;
+      final Future<ReflectionTurn>? fut2 = dyn2.startSessionFull?.call(
+        text: text,
+        session: session,
+        locale: locale,
+        tz: tz,
+        maxTurns: maxTurns,
+        history: history,
+        memories: memories,
+        memoryConsent: consent,
+        userAction: userAction,
+        clientContext: clientContext,
+        meta: m,
+      );
+      if (fut2 != null) return await fut2;
     } catch (_) {/* ignore */}
     return ApiService.instance.startSessionFull(
       text: text,
@@ -139,6 +166,8 @@ class GuidanceService {
     final bool consent =
         memoryConsent ?? mem.MemoryService.instance.shareEnabled;
 
+    final Map<String, dynamic>? m = _attachIntroAndSessionMeta(meta, session);
+
     final svc = ApiService.instance;
     try {
       final dyn = svc as dynamic;
@@ -152,9 +181,25 @@ class GuidanceService {
         memoryConsent: consent, // <- bool
         userAction: userAction,
         clientContext: clientContext,
-        meta: meta,
+        meta: m,
       );
       if (fut != null) return await fut;
+    } catch (_) {/* ignore */}
+    try {
+      final dyn2 = svc as dynamic;
+      final Future<ReflectionTurn>? fut2 = dyn2.reflectFull?.call(
+        text: text,
+        session: session,
+        locale: locale,
+        tz: tz,
+        history: history,
+        memories: memories,
+        memoryConsent: consent,
+        userAction: userAction,
+        clientContext: clientContext,
+        meta: m,
+      );
+      if (fut2 != null) return await fut2;
     } catch (_) {/* ignore */}
     return ApiService.instance.reflectFull(
       text: text,
@@ -184,6 +229,8 @@ class GuidanceService {
     final bool consent =
         memoryConsent ?? mem.MemoryService.instance.shareEnabled;
 
+    final Map<String, dynamic>? m = _attachIntroAndSessionMeta(meta, session);
+
     final svc = ApiService.instance;
     try {
       final dyn = svc as dynamic;
@@ -197,9 +244,25 @@ class GuidanceService {
         memoryConsent: consent, // <- bool
         userAction: userAction,
         clientContext: clientContext,
-        meta: meta,
+        meta: m,
       );
       if (fut != null) return await fut;
+    } catch (_) {/* ignore */}
+    try {
+      final dyn2 = svc as dynamic;
+      final Future<ReflectionTurn>? fut2 = dyn2.nextTurnFull?.call(
+        session: session,
+        text: text,
+        locale: locale,
+        tz: tz,
+        history: history,
+        memories: memories,
+        memoryConsent: consent,
+        userAction: userAction,
+        clientContext: clientContext,
+        meta: m,
+      );
+      if (fut2 != null) return await fut2;
     } catch (_) {/* ignore */}
     return ApiService.instance.nextTurnFull(
       session: session,
@@ -219,7 +282,10 @@ class GuidanceService {
     required UserAction action,
     String locale = 'de',
     String tz = 'Europe/Zurich',
+    Map<String, dynamic>? meta, // S3.3: meta optional
   }) async {
+    final Map<String, dynamic>? m = _attachIntroAndSessionMeta(meta, session);
+
     final svc = ApiService.instance;
     try {
       final dyn = svc as dynamic;
@@ -228,10 +294,22 @@ class GuidanceService {
         action: action,
         locale: locale,
         tz: tz,
+        meta: m,
       );
       if (fut != null) return await fut;
     } catch (_) {/* ignore */}
-    // Fallback: emuliere „leeren“ Next-Turn
+    // Fallback: emuliere „leeren“ Next-Turn (meta via dyn versuchen)
+    try {
+      final dyn2 = svc as dynamic;
+      final Future<ReflectionTurn>? fut2 = dyn2.nextTurnFull?.call(
+        session: session,
+        text: '',
+        locale: locale,
+        tz: tz,
+        meta: m,
+      );
+      if (fut2 != null) return await fut2;
+    } catch (_) {/* ignore */}
     return ApiService.instance.nextTurnFull(
       session: session,
       text: '',
@@ -270,6 +348,9 @@ class GuidanceService {
     String tz = 'Europe/Zurich',
     Map<String, dynamic>? meta,
   }) async {
+    // S3.3: Meta inkl. round_count/session_hint
+    final Map<String, dynamic>? m = _attachIntroAndSessionMeta(meta, session);
+
     try {
       Map<String, dynamic> res;
       try {
@@ -279,7 +360,7 @@ class GuidanceService {
           answer: answer,
           locale: locale,
           tz: tz,
-          meta: meta,
+          meta: m,
         );
         res = fut != null
             ? await fut
@@ -520,12 +601,14 @@ class GuidanceService {
     required UserAction action,
     String locale = 'de',
     String tz = 'Europe/Zurich',
+    Map<String, dynamic>? meta,
   }) async {
     final t = await nextTurnAction(
       session: session,
       action: action,
       locale: locale,
       tz: tz,
+      meta: meta,
     );
     return _turnToJson(t);
   }
@@ -635,6 +718,7 @@ class GuidanceService {
   // ===========================================================================
   // Normalisierung / Helfer
   // ===========================================================================
+
   Map<String, dynamic> _normalizeClosureResponse(Map<String, dynamic> src) {
     Map<String, dynamic> m(dynamic x) => (x is Map<String, dynamic>)
         ? x
@@ -724,8 +808,12 @@ class GuidanceService {
         t.flow ?? const ReflectionFlow(recommendEnd: false, suggestBreak: false);
 
     final flowJson = flow.toJson();
+    final sessMap = t.session.toJson();
+    final threadId = (sessMap['thread_id'] ?? sessMap['id'] ?? '').toString();
+    final int round = _safeRoundFromSession(t.session);
+
     final map = <String, dynamic>{
-      'session': t.session.toJson(),
+      'session': sessMap,
       'flow': {
         ...flowJson,
         'mood_prompt': flow.moodPrompt == true || flow.recommendEnd == true,
@@ -738,6 +826,9 @@ class GuidanceService {
       },
       'risk': (t.riskFlag == 'crisis' || t.riskFlag == 'support'),
       'disclaimer': kFooterDisclaimer,
+      // S3.3: Convenience
+      'round_count': round,
+      'thread_id': threadId,
     };
 
     // Mirror sauber halten (Instruktions-Sätze entfernen, reine Frage ausblenden)
@@ -768,6 +859,10 @@ class GuidanceService {
       map['output_text'] = t.outputText;
     }
     if (t.talk.isNotEmpty) map['talk'] = t.talk;
+    if ((t.smalltalkReply ?? '').trim().isNotEmpty) {
+      // S4.2 — Smalltalk passthrough (separat, ohne talk-Doppelung)
+      map['smalltalk_reply'] = t.smalltalkReply!.trim();
+    }
     if (t.tags.isNotEmpty) map['tags'] = t.tags;
     if (t.context.isNotEmpty) map['context'] = t.context;
 
@@ -780,11 +875,9 @@ class GuidanceService {
     }
 
     // UI-Hinweise für Chips (nur Stil/Platzierung, keine Erzeugung)
-    final sessMap = t.session.toJson();
-    final sid = (sessMap['thread_id'] ?? sessMap['id'] ?? '').toString();
     final sturn = (sessMap['turn_index'] ?? sessMap['turn'] ?? 0).toString();
     final seed = ah.join('|');
-    final chipSetId = '$sid:$sturn:${_fnv1a32(seed).toRadixString(16)}';
+    final chipSetId = '$threadId:$sturn:${_fnv1a32(seed).toRadixString(16)}';
 
     map['ui'] = {
       'chips': {
@@ -849,6 +942,55 @@ class GuidanceService {
       return 'tips';
     }
     return 'reflect';
+  }
+
+  // ===========================================================================
+  // S3.3 — Meta/Session Helpers
+  // ===========================================================================
+  int _safeRoundFromSession(ReflectionSession? s) {
+    if (s == null) return 0;
+    try {
+      final j = s.toJson();
+      final v = j['turn_index'] ?? j['turn'] ?? 0;
+      if (v is int) return v;
+      return int.tryParse(v.toString()) ?? 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  Map<String, dynamic> _sessionHintMap(ReflectionSession? s) {
+    if (s == null) return const {'turn_index': 0};
+    try {
+      final j = s.toJson();
+      return {
+        'thread_id': (j['thread_id'] ?? j['id'] ?? '').toString(),
+        'id': (j['id'] ?? j['thread_id'] ?? '').toString(),
+        'turn_index': j['turn_index'] ?? j['turn'] ?? 0,
+      };
+    } catch (_) {
+      return const {'turn_index': 0};
+    }
+  }
+
+  Map<String, dynamic>? _attachIntroAndSessionMeta(
+      Map<String, dynamic>? meta, ReflectionSession? session) {
+    final round = _safeRoundFromSession(session);
+    final out = <String, dynamic>{};
+    if (meta != null) {
+      // defensive copy
+      out.addAll(Map<String, dynamic>.from(meta));
+    }
+    // intro.round_count (autoritativer Wert)
+    final intro = Map<String, dynamic>.from(
+        (out['intro'] is Map ? out['intro'] as Map : const <String, dynamic>{}));
+    intro['round_count'] = round;
+    out['intro'] = intro;
+
+    // session_hint (thread/id/turn)
+    out['session_hint'] = _sessionHintMap(session);
+
+    return out;
   }
 }
 

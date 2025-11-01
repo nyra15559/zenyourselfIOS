@@ -1,6 +1,6 @@
 // [BASELINE] lib/features/reflection/reflection_logic.dart (Stand: 31.10.)
 // ZenYourself — ReflectionLogic (Controller & Handler)
-// PANDA-REFLECT-12.7 → v6.6.0 (Facet-State + Voice-Router + Recovery)
+// PANDA-REFLECT-12.7 → v6.6.2 (Facet-State + Voice-Router + Recovery + Typing Guard + Intro Guards)
 // -----------------------------------------------------------------------------
 // Merge-Signal / Handshake:
 // • Bei jedem Call wird `meta.flags.client_memory:true` übergeben.
@@ -23,6 +23,9 @@
 // • Niemals Exceptions nach außen werfen (defensiv, timeouts).
 // • Analyzer-clean; keine Abhängigkeit von Screen/Widgets.
 // -----------------------------------------------------------------------------
+// Resume-Marker: P0-S1.1-DONE  (Leer-nach-Senden Fix: Local Echo + Typing + Scroll)
+// Resume-Marker: P0-S2.1-DONE  ("Panda tippt …" bei jedem Turn: setTyping(true) beim Senden, false bei Antwort/Timeout)
+// Resume-Marker: P0-S3.2-DONE  (Intro-Guards: hasSeenIntroThisSession + roundCount → keine Doppel-Intro)
 
 import 'dart:async';
 import 'dart:collection';
@@ -34,6 +37,29 @@ import '../../services/guidance_service.dart';
 import '../../core/memory/memory_service.dart';
 
 const Duration _kNetTimeout = Duration(seconds: 18);
+const Duration _kTypingGuard = Duration(seconds: 12); // Fallback, falls etwas hängen bleibt
+
+// --------------------------- UI Events (für View) -----------------------------
+/// Schlanke UI-Events, damit die View ohne Wartezeit lokale Effekte zeigen kann
+/// (User-Bubble sofort, Typing-Placeholder, sanftes Scrollen).
+
+enum UIEventKind { appendUser, insertTypingPlaceholder, removeTypingPlaceholder, scrollToEnd }
+
+class UIEvent {
+  final UIEventKind kind;
+  final String? text;          // für appendUser
+  final Duration? delay;       // für scrollToEnd
+  const UIEvent._(this.kind, {this.text, this.delay});
+
+  factory UIEvent.appendUser(String text) =>
+      UIEvent._(UIEventKind.appendUser, text: text);
+  factory UIEvent.insertTyping() =>
+      const UIEvent._(UIEventKind.insertTypingPlaceholder);
+  factory UIEvent.removeTyping() =>
+      const UIEvent._(UIEventKind.removeTypingPlaceholder);
+  factory UIEvent.scrollToEnd([Duration delay = const Duration(milliseconds: 200)]) =>
+      UIEvent._(UIEventKind.scrollToEnd, delay: delay);
+}
 
 // --------------------------- Public VM ---------------------------------------
 
@@ -101,6 +127,13 @@ class ReflectionController extends ChangeNotifier {
   dynamic get memories => _memories; // optional: UI liefert Memories
   bool get memoryConsent => _memoryConsent;
 
+  /// Intro-Guards (S3.2)
+  bool get hasSeenIntroThisSession => _hasSeenIntroThisSession;
+  int get roundCount => (_session?.turnIndex ?? 0);
+  /// True, wenn Intro jetzt gezeigt werden darf (nur 1× bei roundCount==0, vor erstem Turn)
+  bool get canShowIntro =>
+      !_hasSeenIntroThisSession && roundCount == 0 && _vm == null;
+
   /// Facetten-Queue (Themen-Unteraspekte, die Panda vorschlägt).
   UnmodifiableListView<String> get facetQueue =>
       UnmodifiableListView(_facetQueue);
@@ -117,6 +150,12 @@ class ReflectionController extends ChangeNotifier {
 
   /// True, falls wir gerade in einem „SkillFlow“ (Essenz/Beispiel) sind.
   bool get inSkillFlow => _inSkillFlow;
+
+  // ---------------- UI Event Sink (optional) ----------------------------------
+
+  /// Von der View gesetzt; wenn vorhanden, senden wir UI-Events für Local-Echo.
+  void attachUiEventSink(void Function(UIEvent e) sink) => _uiEventSink = sink;
+  void detachUiEventSink() => _uiEventSink = null;
 
   // ---------------- Private state --------------------------------------------
 
@@ -136,12 +175,22 @@ class ReflectionController extends ChangeNotifier {
   dynamic _memories;
   bool _memoryConsent = false;
 
+  // Intro-Guard (S3.2)
+  bool _hasSeenIntroThisSession = false;
+
   // Facets / Topics / Actions
   final List<String> _facetQueue = <String>[];
   String? _activeFacet;
   String? _topicPin;
   final List<AvailableAction> _availableActions = <AvailableAction>[];
   bool _inSkillFlow = false; // Router: SkillFlow (Essenz/Beispiel) vs Standard
+
+  // Typing-State + Safety-Guard
+  bool _typingActive = false;
+  Timer? _typingGuardTimer;
+
+  // UI events
+  void Function(UIEvent e)? _uiEventSink;
 
   // ---------------- Init / Bridge --------------------------------------------
 
@@ -166,9 +215,16 @@ class ReflectionController extends ChangeNotifier {
     _memories = memories;
   }
 
+  /// Von der View aufrufen, sobald die Intro-Bubble *tatsächlich* angezeigt wurde.
+  void markIntroSeen() {
+    _hasSeenIntroThisSession = true;
+  }
+
   /// Hartes Zurücksetzen (z. B. beim Screen-Wechsel).
   void reset() {
     _debounceCancel();
+    _stopTypingGuard();
+    _emitTypingOff(); // sicherheitshalber entfernen
     _loading = false;
     _session = null;
     _vm = null;
@@ -180,6 +236,9 @@ class ReflectionController extends ChangeNotifier {
     _topicPin = null;
     _availableActions.clear();
     _inSkillFlow = false;
+
+    // Intro-Flag für neue UI-Session zurücksetzen
+    _hasSeenIntroThisSession = false;
 
     notifyListeners();
   }
@@ -193,6 +252,13 @@ class ReflectionController extends ChangeNotifier {
     if (!_gateSendNow()) return; // min-gap
     text = _sanitizeInput(text);
     if (text.isEmpty) return;
+
+    // --- S1.1: Local Echo & Typing vor dem Netz-Call ---
+    _localEchoBeforeCall(text);
+
+    // Sobald der Nutzer aktiv startet, markieren wir die Intro als „gesehen“,
+    // falls die View es nicht bereits getan hat (Doppel-Intro-Schutz).
+    _hasSeenIntroThisSession = true;
 
     _setLoading(true);
     try {
@@ -232,12 +298,16 @@ class ReflectionController extends ChangeNotifier {
       );
       _recomputeAvailableActions();
     } finally {
+      _emitTypingOff(); // Placeholder sicher entfernen
       _setLoading(false);
     }
   }
 
   /// Setzt Session fort mit [text]. Falls keine Session existiert → start().
   Future<void> send(String text) async {
+    // S2.1: Typing *sofort* einschalten, bevor Debounce greift.
+    _emitTypingOn();
+
     _pendingSend?.cancel();
     _pendingSend = Timer(const Duration(milliseconds: 220), () async {
       await _sendNow(text);
@@ -252,9 +322,13 @@ class ReflectionController extends ChangeNotifier {
     _setLoading(true);
     try {
       if (_session == null) {
+        // start(...) übernimmt Local-Echo bereits (und markiert Intro gesehen)
         await start(text);
         return;
       }
+
+      // --- S1.1: Local Echo & Typing vor dem Netz-Call ---
+      _localEchoBeforeCall(text);
 
       final turn = await GuidanceService.instance
           .nextTurnFull(
@@ -276,6 +350,7 @@ class ReflectionController extends ChangeNotifier {
       _updateFacetsFromTurn(turn);
       _recomputeAvailableActions();
     } catch (_) {/* ignore, keep old vm */} finally {
+      _emitTypingOff(); // Placeholder sicher entfernen
       _setLoading(false);
     }
   }
@@ -287,8 +362,10 @@ class ReflectionController extends ChangeNotifier {
   Future<void> handleAction(UserAction action) async {
     if (_session == null) return;
     if (_actionUsedInThisSession) return; // 1×/Session
-
     if (!_gateSendNow()) return; // sanftes Double-Tap Gate
+
+    // S2.1: Beim Action-Call ebenfalls Typing zeigen.
+    _emitTypingOn();
 
     _setLoading(true);
     try {
@@ -350,6 +427,7 @@ class ReflectionController extends ChangeNotifier {
       _updateFacetsFromTurn(turn);
       _recomputeAvailableActions();
     } catch (_) {/* ignore */} finally {
+      _emitTypingOff();
       _setLoading(false);
     }
   }
@@ -547,6 +625,55 @@ class ReflectionController extends ChangeNotifier {
     notifyListeners();
   }
 
+  // --- S1.1/S2.1: Local Echo & Typing Helpers --------------------------------
+
+  void _localEchoBeforeCall(String text) {
+    _emitAppendUser(text);
+    // Sofortiges notify, falls View darauf hört (z. B. Scroll/State)
+    notifyListeners();
+    _emitScrollToEnd(const Duration(milliseconds: 200));
+    _emitTypingOn();
+  }
+
+  void _emitAppendUser(String text) =>
+      _uiEventSink?.call(UIEvent.appendUser(text));
+
+  void _emitTypingOn() {
+    final wasActive = _typingActive;
+    _typingActive = true;
+    if (!wasActive) {
+      _uiEventSink?.call(UIEvent.insertTyping());
+    }
+    _startTypingGuard(); // Guard *immer* neu starten (Reset bei erneutem Senden)
+  }
+
+  void _emitTypingOff() {
+    if (!_typingActive) {
+      _stopTypingGuard();
+      return;
+    }
+    _typingActive = false;
+    _stopTypingGuard();
+    _uiEventSink?.call(UIEvent.removeTyping());
+  }
+
+  void _startTypingGuard() {
+    _typingGuardTimer?.cancel();
+    _typingGuardTimer = Timer(_kTypingGuard, () {
+      // Fallback: selbst wenn Netz-Call hängt, nie endlos „tippt …“ anzeigen
+      _emitTypingOff();
+      notifyListeners();
+    });
+  }
+
+  void _stopTypingGuard() {
+    _typingGuardTimer?.cancel();
+    _typingGuardTimer = null;
+  }
+
+  void _emitScrollToEnd(Duration delay) =>
+      _uiEventSink?.call(UIEvent.scrollToEnd(delay));
+
   String _sanitizeHelper(String raw) {
     var s = raw.trim();
     if (s.isEmpty) return '';
@@ -589,7 +716,7 @@ class ReflectionController extends ChangeNotifier {
     return {
       'ui': {
         'controller': 'reflection_logic',
-        'version': 'v6.6.0',
+        'version': 'v6.6.2',
       },
       'memory': {
         'bridge': _bridgeText,
@@ -597,6 +724,11 @@ class ReflectionController extends ChangeNotifier {
       'flags': {
         'client_memory': true, // *** Merge-Signal / Handshake ***
         'reopen': reopen,      // *** Closure-Recovery ***
+      },
+      // S3.2: Intro-Infos für Observability/Worker (optional)
+      'intro': {
+        'has_seen_intro_this_session': _hasSeenIntroThisSession,
+        'round_count': roundCount,
       },
       'client': {
         'source': 'reflection_logic',
@@ -826,6 +958,7 @@ class ReflectionController extends ChangeNotifier {
   @override
   void dispose() {
     _debounceCancel();
+    _stopTypingGuard();
     super.dispose();
   }
 }

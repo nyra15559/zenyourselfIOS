@@ -1,15 +1,11 @@
 // [BASELINE] lib/features/pro/pro_screen.dart (Stand: 29.10.)
-// ProScreen — Oxford Journey Board (v4.8.5 · 2025-10-29)
+// P2-S10.1-DONE — Export-Dialog sauber (keine Überläufer) + Back wie Journey
+// ProScreen — Oxford Journey Board (v4.8.6 · 2025-11-01)
 // ------------------------------------------------------------------
-// v4.8.5 (Hotfix 3):
-// • Build-Fix: versehentliches `child: Center,` entfernt; kompletter Inhalt
-//   im Fade/Slide-Container wiederhergestellt.
-// • Stats-Fix: Reflexionen/Aktive Tage/Streak werden als Werte angezeigt
-//   (keine '—' Platzhalter mehr).
-// • Keine Nutzung von MoodEntry.dateUtc (Legacy entfernt).
-//
-// v4.8.4: Entfernung sämtlicher dateUtc-Zugriffe (undefined_getter).
-// v4.8.3: Community-Calls, 410px-Breakpoint, Settings-Sheet, Glas-Karten.
+// v4.8.6 (S10.1):
+// • Export-Dialog: auf kleinen Screens als BottomSheet (scrollbar, SafeArea),
+//   auf größeren als Dialog mit MaxBreite + Scroll → keine Überläufer mehr.
+// • AppBar-Back konsistent via ZenAppBar(showBack:true).
 //
 // Abhängigkeiten: fl_chart, provider, http, eigene Zen-UI.
 
@@ -297,20 +293,88 @@ class _ProScreenState extends State<ProScreen>
     super.dispose();
   }
 
+  // **************************
+  // Export-Dialog (clean)
+  // **************************
+  Future<void> _openExportDialogClean(BuildContext context) async {
+    final w = MediaQuery.of(context).size.width;
+    final isSmall = w < 430;
+
+    if (isSmall) {
+      // BottomSheet: passt sich Höhe an, vertikal scrollbar → keine Überläufer
+      await showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (ctx) {
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+              child: ClipRRect(
+                borderRadius: const BorderRadius.all(zs.ZenRadii.l),
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                  child: zw.ZenGlassCard(
+                    topOpacity: .24,
+                    bottomOpacity: .10,
+                    borderOpacity: .16,
+                    borderRadius: const BorderRadius.all(zs.ZenRadii.l),
+                    padding: const EdgeInsets.all(12),
+                    child: SingleChildScrollView(
+                      child: AnonExportWidget(
+                        moodEntries: widget.moodEntries,
+                        reflectionEntries: widget.reflectionEntries,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      );
+      return;
+    }
+
+    // Dialog mit MaxBreite + Scroll → keine Überläufer
+    await showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) => Dialog(
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(18.0)),
+        child: SafeArea(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 560),
+            child: Padding(
+              padding: const EdgeInsets.all(12.0),
+              child: SingleChildScrollView(
+                child: AnonExportWidget(
+                  moodEntries: widget.moodEntries,
+                  reflectionEntries: widget.reflectionEntries,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final tt = Theme.of(context).textTheme;
     final size = MediaQuery.of(context).size;
     final isMobile = size.width < 470;
-    final isNarrow410 =
-        size.width <= 410; // harter Breakpoint für sehr kleine Geräte
+    final isNarrow410 = size.width <= 410;
     final isPhoneTall = size.height > 720;
 
     // ---- Provider (optional) -------------------------------------------------
     final prov = context.watch<JournalEntriesProvider?>();
     final hasProv = prov != null;
 
-    // Serie & Kennzahlen aus Provider (−2 … +2); Fallbacks auf Legacy.
+    // Serie & Kennzahlen
     final series = hasProv
         ? _seriesFromProvider(prov!, days: _range.days)
         : _fallbackSeriesFromMoodEntries(widget.moodEntries)
@@ -335,15 +399,13 @@ class _ProScreenState extends State<ProScreen>
     final last7MoodLegacy = widget.moodEntries.takeLast(7);
     final last7FromSeries = series.takeLast(7);
 
-    // Graph zeigen, wenn genug Platz/Daten vorhanden (nicht bei ≤410 px)
-    final showMoodGraph = size.width > 0 &&
-        size.height > 0 &&
-        (series.length >= 4) &&
-        !isNarrow410;
+    final showMoodGraph =
+        (series.length >= 4) && !isNarrow410 && size.width > 0 && size.height > 0;
 
     return Scaffold(
       extendBodyBehindAppBar: true,
       backgroundColor: Colors.transparent,
+      // Back-Button wie Journeyscreen
       appBar: const zw.ZenAppBar(title: null, showBack: true),
       body: Stack(
         children: [
@@ -385,11 +447,11 @@ class _ProScreenState extends State<ProScreen>
 
           // 1) Inhalt
           FadeTransition(
-            opacity: _appearCtrl.drive(Tween(begin: 0.0, end: 1.0)
-                .chain(CurveTween(curve: Curves.easeOutCubic))),
+            opacity: _appearCtrl
+                .drive(Tween(begin: 0.0, end: 1.0).chain(CurveTween(curve: Curves.easeOutCubic))),
             child: SlideTransition(
-              position: _appearCtrl.drive(
-                  Tween(begin: const Offset(0, .02), end: Offset.zero)
+              position: _appearCtrl
+                  .drive(Tween(begin: const Offset(0, .02), end: Offset.zero)
                       .chain(CurveTween(curve: Curves.easeOutCubic))),
               child: Center(
                 child: SingleChildScrollView(
@@ -754,24 +816,12 @@ class _ProScreenState extends State<ProScreen>
                                         label: 'PDF',
                                         semanticsLabel:
                                             'Monatsdaten exportieren',
-                                        onTap: () {
+                                        onTap: () async {
                                           try {
-                                            showDialog(
-                                              context: context,
-                                              builder: (ctx) => Dialog(
-                                                shape: RoundedRectangleBorder(
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                            18)),
-                                                child: AnonExportWidget(
-                                                  moodEntries:
-                                                      widget.moodEntries,
-                                                  reflectionEntries:
-                                                      widget.reflectionEntries,
-                                                ),
-                                              ),
-                                            );
+                                            await _openExportDialogClean(
+                                                context);
                                           } catch (_) {
+                                            if (!mounted) return;
                                             ScaffoldMessenger.of(context)
                                                 .showSnackBar(
                                               const SnackBar(
