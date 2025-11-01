@@ -225,7 +225,7 @@ class _JournalDayScreenState extends State<JournalDayScreen>
     return Container(
       alignment: Alignment.centerRight,
       padding: const EdgeInsets.symmetric(horizontal: 20),
-      color: Colors.redAccent.withValue(alpha: .14),
+      color: Colors.redAccent.withValues(alpha: .14),
       child:
           const Icon(Icons.delete_forever, color: Colors.redAccent, size: 28),
     );
@@ -490,7 +490,7 @@ class _StatBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
       decoration: BoxDecoration(
-        color: ZenColors.white.withValue(alpha: .72),
+        color: ZenColors.white.withValues(alpha: .72),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: ZenColors.border),
         boxShadow: ZenShadows.card,
@@ -544,10 +544,10 @@ class _FilterChips extends StatelessWidget {
             onSelected: (_) => onChanged(f),
             materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
             visualDensity: VisualDensity.compact,
-            selectedColor: ZenColors.jade.withValue(alpha: .10),
+            selectedColor: ZenColors.jade.withValues(alpha: .10),
             side: BorderSide(
               color: selected
-                  ? ZenColors.jade.withValue(alpha: .55)
+                  ? ZenColors.jade.withValues(alpha: .55)
                   : ZenColors.outline,
             ),
             shape: const StadiumBorder(),
@@ -677,7 +677,7 @@ class _SparklinePainter extends CustomPainter {
 
     final paintFill = Paint()
       ..shader = LinearGradient(
-        colors: [ZenColors.jadeMid.withValue(alpha: .22), Colors.transparent],
+        colors: [ZenColors.jadeMid.withValues(alpha: .22), Colors.transparent],
         begin: Alignment.topCenter,
         end: Alignment.bottomCenter,
       ).createShader(Rect.fromLTWH(0, 0, w, h));
@@ -783,7 +783,7 @@ class _EntryBottomSheet extends StatelessWidget {
         margin: const EdgeInsets.all(14),
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
         decoration: BoxDecoration(
-          color: Colors.white.withValue(alpha: .96),
+          color: Colors.white.withValues(alpha: .96),
           borderRadius: BorderRadius.circular(18),
           border: Border.all(color: ZenColors.border),
           boxShadow: ZenShadows.card,

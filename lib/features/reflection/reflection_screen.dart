@@ -1,5 +1,6 @@
-// [BASELINE] lib/features/reflection/reflection_screen.dart (Stand: 31.10., cleaned)
+// [BASELINE] lib/features/reflection/reflection_screen.dart (Stand: 01.11., fixed typedef + toIso8601String)
 // P0-S3.1-DONE — Dynamische Intro-Bubble (einmalig) via _maybeShowIntro in initState
+// Update 01.11. — Meta-Handshake: meta.flags.client_memory:true + kleine Robustheitsfixes
 library reflection_screen;
 
 import 'dart:async';
@@ -68,10 +69,11 @@ const Duration _netTimeout = Duration(seconds: 18);
 const double _inputReserve = 104;
 
 // ---------------- Optionaler Hook + Navigation --------------------------------
+// Wichtig: In Funktions-Typen keine Default-Werte erlaubt → isReflection ohne Default/nullable
 typedef AddToGedankenbuch = void Function(
   String text,
   String mood, {
-  bool isReflection,
+  bool? isReflection,
   String? aiQuestion,
 });
 
@@ -216,11 +218,12 @@ class _ReflectionScreenState extends State<ReflectionScreen>
   }) {
     return {
       'flags': {
+        'client_memory': true, // Merge-Signal / Handshake
         if (reopen) 'reopen': true, // Closure-Recovery (Reserve)
       },
       'ui': {
         'screen': 'reflection',
-        'version': '3.26.0',
+        'version': '3.26.1',
         'platform': kIsWeb ? 'web' : 'flutter',
         'is_desktop': _isDesktop,
         'chip_mode': _chipMode.name,
@@ -289,7 +292,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     // Identity warm-up (best effort)
     unawaited(() async {
       try {
-        await (MemoryService.instance as dynamic).loadIdentityName?.call();
+        await (MemoryService.instance as dynamic).loadGreetingName?.call();
       } catch (_) {}
     }());
 

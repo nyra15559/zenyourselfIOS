@@ -1,4 +1,4 @@
-// [BASELINE] lib/core/privacy/privacy_orchestrator.dart (v1.1, 2025-10-30)
+// [BASELINE] lib/core/privacy/privacy_orchestrator.dart (v1.2, 2025-11-01)
 // ZenYourself — Privacy Orchestrator (Glue UI ↔ MemoryService)
 // -----------------------------------------------------------------------------
 // Aufgabe:
@@ -33,7 +33,9 @@ class _PrivacyOrchestratorState extends State<PrivacyOrchestrator> {
   // Quellen der Wahrheit (aus MemoryService):
   bool _memoryConsent = false;
   bool _greetByName = false; // true == Name darf aktiv verwendet werden
-  String? _currentName;      // nur gesetzt, wenn greetByName == true
+  String? _currentName; // nur gesetzt, wenn greetByName == true
+
+  mem.MemoryService get _svc => mem.MemoryService.instance;
 
   @override
   void initState() {
@@ -42,21 +44,38 @@ class _PrivacyOrchestratorState extends State<PrivacyOrchestrator> {
   }
 
   Future<void> _load() async {
-    // Consent direkt lesen
-    _memoryConsent = mem.MemoryService.shareEnabled;
+    // 1) Consent lesen (Instanz, kein statischer Zugriff)
+    _memoryConsent = _svc.shareEnabled;
 
-    // Name nur dann laden, wenn die App ihn verwenden darf (Design-Regel)
-    // loadGreetingName() soll in diesem Fall null liefern, wenn greet==false.
-    final name = await mem.MemoryService.loadGreetingName();
-    _greetByName = name != null;
-    _currentName = name;
+    // 2) Name/Gruß laden – robust für beide Varianten:
+    //    a) neuer Rückgabetyp: ({bool greetByName, String? name})
+    //    b) legacy: String? (nur Name; greetByName implizit via null/non-null)
+    try {
+      final result = await _svc.loadGreetingName();
 
-    if (mounted) setState(() => _loading = false);
+      if (result is ({bool greetByName, String? name})) {
+        _greetByName = result.greetByName;
+        _currentName = (result.name ?? '').trim().isEmpty ? null : result.name!.trim();
+      } else if (result is String? /* legacy */) {
+        _currentName = (result ?? '').trim().isEmpty ? null : result!.trim();
+        _greetByName = _currentName != null;
+      } else {
+        // Falls künftig anders: defensiv auf "aus"
+        _greetByName = false;
+        _currentName = null;
+      }
+    } catch (_) {
+      _greetByName = false;
+      _currentName = null;
+    }
+
+    if (!mounted) return;
+    setState(() => _loading = false);
   }
 
   Future<void> _applySave(PrivacySettings s) async {
     // 1) Consent setzen — ApiService setzt daraus Merge-Flags & context.memories.
-    mem.MemoryService.shareEnabled = s.memoryConsent;
+    await _svc.setShareEnabled(s.memoryConsent);
 
     // 2) Gruß/Name
     if (s.greetByName) {
@@ -64,37 +83,37 @@ class _PrivacyOrchestratorState extends State<PrivacyOrchestrator> {
       if (_currentName == null || _currentName!.trim().isEmpty) {
         final newName = await _askForName(context);
         if (newName != null && newName.trim().isNotEmpty) {
-          await mem.MemoryService.saveIdentityName(newName.trim(), greetByName: true);
+          await _svc.saveIdentityName(newName.trim(), greetByName: true);
           _currentName = newName.trim();
           _greetByName = true;
         } else {
           // kein Name -> Gruß wieder deaktivieren
-          await mem.MemoryService.saveIdentityName('', greetByName: false);
+          await _svc.saveIdentityName('', greetByName: false);
           _currentName = null;
           _greetByName = false;
         }
       } else {
         // Name existiert bereits -> nur Greet-Flag sicherstellen
-        await mem.MemoryService.saveIdentityName(_currentName!, greetByName: true);
+        await _svc.saveIdentityName(_currentName!, greetByName: true);
         _greetByName = true;
       }
     } else {
       // Begrüßung deaktivieren (Name bleibt lokal gespeichert; kein proaktiver Recall)
-      await mem.MemoryService.saveIdentityName(_currentName ?? '', greetByName: false);
+      await _svc.saveIdentityName(_currentName ?? '', greetByName: false);
       _greetByName = false;
     }
 
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    setState(() {});
   }
 
   Future<void> _forgetName() async {
-    await mem.MemoryService.saveIdentityName('', greetByName: false);
-    if (mounted) {
-      setState(() {
-        _currentName = null;
-        _greetByName = false;
-      });
-    }
+    await _svc.saveIdentityName('', greetByName: false);
+    if (!mounted) return;
+    setState(() {
+      _currentName = null;
+      _greetByName = false;
+    });
   }
 
   Future<String?> _askForName(BuildContext ctx) async {
@@ -154,13 +173,12 @@ class _PrivacyOrchestratorState extends State<PrivacyOrchestrator> {
         onEditName: () async {
           final n = await _askForName(context);
           if (n != null && n.trim().isNotEmpty) {
-            await mem.MemoryService.saveIdentityName(n.trim(), greetByName: true);
-            if (mounted) {
-              setState(() {
-                _currentName = n.trim();
-                _greetByName = true;
-              });
-            }
+            await _svc.saveIdentityName(n.trim(), greetByName: true);
+            if (!mounted) return;
+            setState(() {
+              _currentName = n.trim();
+              _greetByName = true;
+            });
           }
         },
         onForgetName: _forgetName,
