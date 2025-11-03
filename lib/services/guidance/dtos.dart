@@ -7,6 +7,8 @@
 // • V7 A1/E1/E2: Neue Typen (SpeechMeta, SkillCard, SkillBlock, Facets),
 //   Enums (ToneType, Stage), Aliasse & Aufräumen
 // • Rückwärtskompatibel zu v6.x: vorhandene Felder bleiben les-/serialisierbar
+// • S4.1: smalltalk_reply als eigenes Feld (lesen/schreiben)
+// • P3-S11.1-DONE: Persona-Sanitizer – Panda-Welt ohne See (nur Bambus/Licht/Laternen/Tee in Persona-Texten)
 
 // ────────────────────────────────────────────────────────────────────────────
 // Enums – Tone & Stage
@@ -421,6 +423,9 @@ class ReflectionTurn {
   final String? topicPin;                  // UI-Pin / Thema
   final List<String> availableActions;     // Worker-Aktionen (snake_case)
 
+  // ── S4.1: Smalltalk separat
+  final String? smalltalkReply;
+
   const ReflectionTurn({
     required this.outputText,
     required this.mirror,
@@ -448,6 +453,8 @@ class ReflectionTurn {
     this.facets,
     this.topicPin,
     this.availableActions = const <String>[],
+    // S4.1
+    this.smalltalkReply,
   });
 
   static const String kErrorHintFallback =
@@ -495,6 +502,8 @@ class ReflectionTurn {
       if (facets != null) 'facets': facets!.toJson(),
       if ((topicPin ?? '').trim().isNotEmpty) 'topic_pin': topicPin!.trim(),
       if (availableActions.isNotEmpty) 'available_actions': availableActions,
+      // S4.1
+      if ((smalltalkReply ?? '').trim().isNotEmpty) 'smalltalk_reply': smalltalkReply!.trim(),
     };
     if ((understandingTopicShift ?? '').trim().isNotEmpty) {
       map['understanding'] = {'topic_shift': understandingTopicShift!.trim()};
@@ -523,7 +532,24 @@ class ReflectionTurn {
     final cmem = _ensureListDyn(contextObj?['memories']);
 
     final followups = _strings([m['followups']]);
-    final talk = _strings([m['talk'], primary?['talk'], flowMap?['talk'], m['smalltalk_reply']]);
+
+    // S4.1: smalltalk_reply separat parsen (inkl. Aliasse & verschachtelt)
+    String? parseSmalltalk() {
+      String? pick(Map<String, dynamic>? mm) =>
+          _pickString(mm, const ['smalltalk_reply', 'smalltalk', 'smalltalkReply']);
+      final s = (m['smalltalk_reply'] ?? m['smalltalk'] ?? m['smalltalkReply']
+                ?? pick(primary) ?? pick(flowMap))?.toString().trim();
+      return (s == null || s.isEmpty) ? null : s;
+    }
+    final smalltalk = parseSmalltalk();
+    // P3-S11.1: Persona-Sanitizer nur für Panda-Persona (kein Mirror/User-Quote)
+    final smalltalkSan = (smalltalk == null) ? null : _sanitizePersona(smalltalk);
+
+    // talk ohne Doppelung aus smalltalk_reply
+    final talk = _sanitizePersonaList(_strings([
+      m['talk'], primary?['talk'], flowMap?['talk'],
+    ]).where((t) => t.trim().isNotEmpty).toList());
+
     final tags = _strings([m['tags'], primary?['tags'], flowMap?['tags']]);
 
     final helpersRaw = _strings([
@@ -635,6 +661,8 @@ class ReflectionTurn {
       facets: facets,
       topicPin: (topicPin == null || topicPin.isEmpty) ? null : topicPin,
       availableActions: availableActions,
+      // S4.1
+      smalltalkReply: smalltalkSan,
     );
   }
 }
@@ -933,3 +961,41 @@ bool? _parseBoolOrNull(dynamic v) {
   if (s == 'false' || s == '0' || s == 'no' || s == 'n') return false;
   return null;
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// P3-S11.1 — Persona-Sanitizer: Panda-Welt ohne See (nur Bambus/Licht/Laternen/Tee)
+// Greift ausschließlich bei Panda-Persona-Texten (smalltalk_reply, talk).
+// Nutzertexte/Mirror bleiben unverändert.
+// ────────────────────────────────────────────────────────────────────────────
+String _sanitizePersona(String s) {
+  if (s.isEmpty) return s;
+  var out = s;
+
+  // Ziel: „See“-Welt → Bambus/Licht/Laternen/Tee
+  final repl = <RegExp, String>{
+    RegExp(r'\ban (dem|einem)\s+see\b', caseSensitive: false): 'im Bambushain',
+    RegExp(r'\bam\s+see\b', caseSensitive: false): 'im Bambushain',
+    RegExp(r'\bseeufer\b', caseSensitive: false): 'Bambushain',
+    RegExp(r'\bsee[-\s]*weg\b', caseSensitive: false): 'Laternenpfad',
+    RegExp(r'\bseeluft\b', caseSensitive: false): 'ruhige Luft zwischen Bambus',
+    RegExp(r'\bsee\b', caseSensitive: false): 'Bambus',
+    RegExp(r'\bufer\b', caseSensitive: false): 'Bambushain',
+  };
+
+  // Ersetzen (Achtung: \bsee\b vermeidet „Seele“)
+  repl.forEach((rx, val) => out = out.replaceAll(rx, val));
+
+  // Optional: subtile Persona-Bilder verstärken (ohne Stilbruch)
+  // – wenn Bambus erwähnt, ist ein leiser Licht-/Laternen-Hinweis okay
+  if (RegExp(r'\bbambus', caseSensitive: false).hasMatch(out)) {
+    // keine harten Zusätze, nur leichte Phrasen-Glättung
+    out = out.replaceAll(RegExp(r'\bim Bambushain\b', caseSensitive: false), 'im Bambushain');
+  }
+
+  // sanfte Aufräumung (Doppelspaces, Komma-Abstände)
+  out = out.replaceAll(RegExp(r'\s{2,}'), ' ').replaceAll(' ,', ',').trim();
+  return out;
+}
+
+List<String> _sanitizePersonaList(List<String> v) =>
+    v.map(_sanitizePersona).where((e) => e.trim().isNotEmpty).toList();

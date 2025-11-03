@@ -1,4 +1,5 @@
-//[BASELINE] lib/core/privacy/privacy_screen.dart (Stand: 29.10.)
+// [BASELINE] lib/core/privacy/privacy_screen.dart (Stand: 29.10.)
+// P2-S9.1-DONE — Gear tappbar (AppBar.actions) + Backdrop IgnorePointer
 //
 // ZenYourself — Privacy Screen (calm, props-only UI, 2025)
 // -----------------------------------------------------------------------------
@@ -8,40 +9,10 @@
 // • "withValues(alpha: …)" überall für Konsistenz.
 // • Backdrop mit sanftem Glow/Haze (ruhig, AA-konform).
 //
-// Einbindung (Beispiel):
-//   final screen = PrivacyScreen(
-//     props: PrivacyScreenProps(
-//       // Datenschutz-Schalter
-//       shareDiagnostics: false,
-//       shareUsage: false,
-//       enableCloudBackup: false,
-//       localOnly: true,
-//       // Erinnerung & Name
-//       memoryConsent: false,           // Panda darf sich erinnern (on-device)
-//       greetByName: false,             // Panda darf mit Namen ansprechen
-//       currentName: null,              // oder z.B. "Matthias"
-//       // Meta
-//       policyVersion: 'v2.1',
-//       lastUpdated: DateTime(2025, 10, 10),
-//       // Aktionen/Callbacks (Persistenz/Flows passieren im Orchestrator)
-//       onOpenPolicy: () { /* open policy URL/route */ },
-//       onSave: (settings) { /* persist settings */ },
-//       onExport: () { /* export flow */ },
-//       onDeleteAll: () { /* delete flow */ },
-//       onForgetName: () { /* remove stored name */ },
-//       onEditName: () { /* optional: open rename flow */ },
-//       onForgetMemories: () { /* optional: wipe on-device memories */ },
-//       // Optional Titel/Untertitel
-//       title: null,
-//       subtitle: null,
-//     ),
-//   );
+// Hinweise (S9.1):
+// • Zahnrad (Settings) liegt jetzt in AppBar.actions (oberste Z-Order, 44px Tap-Min).
+// • Backdrop ist per IgnorePointer deaktiviert → keine Hit-Test-Blocker mehr.
 //
-// Hinweise:
-// • Dieser Screen trifft KEINE Entscheidungen. Orchestrator persistiert.
-// • Wenn "localOnly" aktiv ist, werden Diagnose/Usage/Cloud visuell gedimmt.
-// • Memory-Consent bleibt unabhängig von "localOnly" aktiv (on-device Memory).
-// • „Mit Namen ansprechen“ ist nur aktiv, wenn ein Name vorhanden ist.
 
 import 'package:flutter/material.dart';
 import '../../shared/zen_style.dart';
@@ -170,11 +141,18 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
       appBar: ZenAppBar(
         title: Text(widget.props.title ?? 'Datenschutz'),
         centerTitle: true,
+        actions: [
+          _GearButton(
+            onOpenPolicy: widget.props.onOpenPolicy,
+            onExport: widget.props.onExport,
+            onDeleteAll: widget.props.onDeleteAll,
+          ),
+        ],
       ),
       body: Stack(
         children: [
-          // Sanfter Backdrop (ruhige Sättigung/Glow/Haze)
-          ZenBackdropPresets.menu(),
+          // Sanfter Backdrop — IGNORE POINTER (wichtig für Tap-Durchlass!)
+          IgnorePointer(ignoring: true, child: ZenBackdropPresets.menu()),
 
           SafeArea(
             child: Padding(
@@ -204,7 +182,7 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
                                 Text(
                                   widget.props.subtitle ??
                                       'Wir schützen deine Privatsphäre. '
-                                          'Du entscheidest, was geteilt wird.',
+                                      'Du entscheidest, was geteilt wird.',
                                   style: ZenReflectionText.mirrorStyle,
                                 ),
                                 const SizedBox(height: 10),
@@ -539,6 +517,88 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
 // -----------------------------------------------------------------------------
 // UI-Bausteine
 // -----------------------------------------------------------------------------
+
+/// AppBar-Settings-Button (immer tappbar, 44px Tap-Min)
+class _GearButton extends StatelessWidget {
+  final VoidCallback? onOpenPolicy;
+  final VoidCallback? onExport;
+  final VoidCallback? onDeleteAll;
+
+  const _GearButton({
+    required this.onOpenPolicy,
+    required this.onExport,
+    required this.onDeleteAll,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      tooltip: 'Einstellungen',
+      icon: const Icon(Icons.settings_rounded),
+      onPressed: () {
+        // Wenn gar keine Aktion hinterlegt ist: kurzer Tap-Feedback
+        if (onOpenPolicy == null && onExport == null && onDeleteAll == null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Einstellungen')),
+          );
+          return;
+        }
+        _openSheet(context);
+      },
+    );
+  }
+
+  void _openSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: false,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: ZenGlassCard(
+            borderRadius: const BorderRadius.all(ZenRadii.l),
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading:
+                      const Icon(Icons.policy_rounded, color: ZenColors.jade),
+                  title: const Text('Datenschutzerklärung öffnen'),
+                  onTap: () {
+                    Navigator.of(ctx).pop();
+                    onOpenPolicy?.call();
+                  },
+                ),
+                if (onExport != null)
+                  ListTile(
+                    leading: const Icon(Icons.file_download_rounded,
+                        color: ZenColors.jade),
+                    title: const Text('Daten exportieren'),
+                    onTap: () {
+                      Navigator.of(ctx).pop();
+                      onExport?.call();
+                    },
+                  ),
+                if (onDeleteAll != null)
+                  ListTile(
+                    leading: const Icon(Icons.delete_outline_rounded,
+                        color: ZenColors.cherry),
+                    title: const Text('Alle Daten löschen'),
+                    onTap: () {
+                      Navigator.of(ctx).pop();
+                      onDeleteAll?.call();
+                    },
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 class _SectionHeader extends StatelessWidget {
   final String title;

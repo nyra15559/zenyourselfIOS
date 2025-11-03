@@ -23,6 +23,7 @@
 //   - relativeTimeShort(DateTime, {reference})
 //       z. B. „gerade eben“, „vor 5 Min“, „vor 2 Std“, „gestern“,
 //       „vor 3 Tg“, „vor 2 Wo“, „vor 3 Mon“, „vor 1 J“ / Future: „in …“
+//   - (S7.1) timeBucketOf(DateTime)    → Zeit-Bucket (Nacht/Morgen/...)
 // -----------------------------------------------------------------------------
 
 /// „Do., 04.09., 22:41“ (lokal, deutsch-ähnlich ohne intl)
@@ -157,6 +158,68 @@ String relativeTimeShort(DateTime when, {DateTime? reference}) {
   final years = (abs.inDays / 365).round();
   return fmt('J', years == 0 ? 1 : years);
 }
+
+// ─────────────────────────── S7.1: Zeit-Buckets ───────────────────────────
+/// Spezifikation:
+/// Nacht(22–05), Morgen(05–11), Mittag(11–14), Nachmittag(14–18), Abend(18–22).
+/// Grenzen sind inkl./exkl. wie folgt:
+///   • Nacht:        h >= 22  ODER h < 5
+///   • Morgen:       5  ≤ h < 11
+///   • Mittag:       11 ≤ h < 14
+///   • Nachmittag:   14 ≤ h < 18
+///   • Abend:        18 ≤ h < 22
+enum DaytimeBucket { night, morning, midday, afternoon, evening }
+
+/// Ermittelt den Zeit-Bucket für [dt]. Standard: lokales System-Timezone-Mapping.
+DaytimeBucket timeBucketOf(DateTime dt, {bool useLocal = true}) {
+  final d = useLocal ? dt.toLocal() : dt;
+  final h = d.hour; // 0..23
+  if (h >= 22 || h < 5) return DaytimeBucket.night;
+  if (h < 11) return DaytimeBucket.morning;
+  if (h < 14) return DaytimeBucket.midday;
+  if (h < 18) return DaytimeBucket.afternoon;
+  return DaytimeBucket.evening; // 18–21
+}
+
+/// Deutsches Kurzlabel für den Bucket.
+String timeBucketLabelDe(DaytimeBucket b) {
+  switch (b) {
+    case DaytimeBucket.night:
+      return 'Nacht';
+    case DaytimeBucket.morning:
+      return 'Morgen';
+    case DaytimeBucket.midday:
+      return 'Mittag';
+    case DaytimeBucket.afternoon:
+      return 'Nachmittag';
+    case DaytimeBucket.evening:
+      return 'Abend';
+  }
+}
+
+/// Stabiler Key (z. B. für Telemetrie/Worker-Payload).
+String timeBucketKey(DaytimeBucket b) {
+  switch (b) {
+    case DaytimeBucket.night:
+      return 'night';
+    case DaytimeBucket.morning:
+      return 'morning';
+    case DaytimeBucket.midday:
+      return 'midday';
+    case DaytimeBucket.afternoon:
+      return 'afternoon';
+    case DaytimeBucket.evening:
+      return 'evening';
+  }
+}
+
+/// Direktes Label für gegebenes Datum.
+String formatTimeBucketShort(DateTime dt, {bool useLocal = true}) =>
+    timeBucketLabelDe(timeBucketOf(dt, useLocal: useLocal));
+
+/// Prüft, ob zwei Zeitpunkte im selben Bucket liegen.
+bool isSameTimeBucket(DateTime a, DateTime b, {bool useLocal = true}) =>
+    timeBucketOf(a, useLocal: useLocal) == timeBucketOf(b, useLocal: useLocal);
 
 // ─────────────────────────── intern ───────────────────────────
 

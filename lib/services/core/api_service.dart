@@ -47,6 +47,15 @@ import '../../data/reflection_entry.dart' as re hide Analysis;
 import '../../models/question.dart';
 import '../../core/memory/memory_service.dart';
 
+// 2–28 Zeichen, startet groß, keine offensichtlichen Statuswörter
+bool _looksLikeName(String s) {
+  final base = RegExp(r"^[A-ZÄÖÜ][A-Za-zÄÖÜäöüß\-']{1,27}$");
+  const bad = {
+    'Müde','Traurig','Gestresst','Erschöpft','Okay','Ok','Nein','Ja','Einfach','Uund'
+  };
+  return base.hasMatch(s) && !bad.contains(s);
+}
+
 typedef HttpInvoker = Future<Map<String, dynamic>> Function(
   String path,
   Map<String, dynamic> body,
@@ -105,68 +114,50 @@ class ApiService {
     } catch (_) {/* swallow */}
   }
 
+  // --- REPLACED: nur starke Formulierungen, KEIN "ich bin", strenge Großschreibung ---
   void _maybeLearnName(String text) {
     try {
       final raw = text.trim();
       if (raw.isEmpty) return;
 
-      final lc = raw.toLowerCase();
-      final re = RegExp(
-        r"\b(ich heiße|ich heisse|mein name ist|ich bin)\s+([a-zäöüß\-' ]+)",
+      // Nur starke Name-Formulierungen (KEIN "ich bin …")
+      final r = RegExp(
+        r"\b(ich heiße|ich heisse|mein name ist|nenn mich|man nennt mich)\s+([A-ZÄÖÜ][A-Za-zÄÖÜäöüß\-\' ]+)",
         caseSensitive: false,
       );
-      final m = re.firstMatch(lc);
+      final m = r.firstMatch(raw);
       if (m == null) return;
 
       var seg = (m.group(2) ?? '').trim();
       seg = seg.split(RegExp(r'[.,;:!?]')).first.trim();
       if (seg.isEmpty) return;
 
-      final parts =
-          seg.split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
-      if (parts.isEmpty) return;
-      var first = parts.first;
-      if (['der', 'die', 'das'].contains(first)) {
-        if (parts.length < 2) return;
-        first = parts[1];
-      }
-      if (first.length < 2 || first.length > 28) return;
+      final first = seg.split(RegExp(r'\s+')).first;
+      if (!_looksLikeName(first)) return;
 
-      String cap(String s) =>
-          s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
-      final name = cap(first);
-
-      final mem = MemoryService.instance;
-      _invokeSaveIdentityName(mem, name);
+      _invokeSaveIdentityName(MemoryService.instance, first);
     } catch (_) {/* never block */}
   }
 
-  // *** NEU: schneller Name-Extractor für dieselbe Nachricht (Race vermeiden) ***
+  // *** NEU (REPLACED): schneller Name-Extractor — erlaubt "ich bin", prüft Großschreibung ***
   String? _extractNameFromTextQuick(String text) {
     try {
-      final t = text.trim();
-      if (t.isEmpty) return null;
-      final lc = t.toLowerCase();
-      final rx = RegExp(
-        r"\b(ich heiße|ich heisse|mein name ist|ich bin|nenn mich|man nennt mich)\s+([a-zäöüß\-' ]+)",
+      final raw = text.trim();
+      if (raw.isEmpty) return null;
+
+      // Erlaubt zusätzlich "ich bin <Name>", aber nur wenn <Name> groß beginnt.
+      final r = RegExp(
+        r"\b(ich heiße|ich heisse|mein name ist|nenn mich|man nennt mich|ich bin)\s+([A-ZÄÖÜ][A-Za-zÄÖÜäöüß\-\' ]+)",
         caseSensitive: false,
       );
-      final m = rx.firstMatch(lc);
+      final m = r.firstMatch(raw);
       if (m == null) return null;
 
       var seg = (m.group(2) ?? '').trim();
       seg = seg.split(RegExp(r'[.,;:!?]')).first.trim();
-      if (seg.isEmpty) return null;
+      final first = seg.split(RegExp(r'\s+')).first;
 
-      var first = seg.split(RegExp(r'\s+')).first;
-      first = first.replaceAll(RegExp(r"[^a-zA-ZäöüÄÖÜß\-']"), '');
-
-      // Mini-Tweak: Füllwörter, die manchmal „ankleben“, ignorieren
-      const banned = {'einfach', 'ja', 'okay', 'ok', 'nein', 'und', 'uund'};
-      if (first.length < 2 || first.length > 28) return null;
-      if (banned.contains(first.toLowerCase())) return null;
-
-      return first[0].toUpperCase() + first.substring(1);
+      return _looksLikeName(first) ? first : null;
     } catch (_) {
       return null;
     }

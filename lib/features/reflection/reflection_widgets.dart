@@ -1,24 +1,25 @@
-// [BASELINE] lib/features/reflection/reflection_widgets.dart (Stand: 29.10., v6.3.2)
+// [BASELINE] lib/features/reflection/reflection_widgets.dart (Stand: 01.11., v6.3.4)
 // lib/features/reflection/reflection_widgets.dart
 // Part: UI-Widgets (library: reflection_screen)
 // -----------------------------------------------------------------------------
 // Oxford–Zen v6.11 — Reflection UI (calm type & fixes, 2025-appear)
-// - Intro-Text angepasst (Hallo – wie geht es dir? … Schreib’s mir in 1–2 Sätzen …)
-// - Typing-Row: Punkte NACH dem Text, kein führendes „…“
-// - Leitfrage: gleicher ruhiger Stil wie Mirror (keine Bold-Überschrift)
-// - Memory/RecentTopics vorhanden (Kompat.), Screen zeigt sie aber nicht an
-// - Hope Slot integriert (kurzer, hoffnungsvoller Satz unter der Frage)
-// - v6.10.1: Hope-Compat (s.hopeText → s.hopeTextCompat()) + withValues-Fixes
-// - v6.11: Kleiner Dev-Indikator (nur Debug) – dezenter Punkt mit Tooltip
+// ...
 // - v6.3.2 (29.10.): A11y/Copy-Tooltips verlässlich, leichte Const/Spacing-Polish
+// - v6.3.3 (01.11.): Flutter 3.24-Fix — AnimatedSize hat kein `vsync` mehr;
+//                    _MessageItemState ohne SingleTickerProviderStateMixin.
+// - v6.3.4 (01.11.): Flutter 3.22+ API — Color.withValue → Color.withValues
+//                    (alle Vorkommen ersetzt).
 // -----------------------------------------------------------------------------
 //
 // + v6.12 (neu):
 //   • PandaBubbleFooter(actions): Footer-Aktionen (max. 2 + Overflow „Mehr“)
 //   • SkillCardList(cards): horizontale Skill-/Info-Karten (Glas), mit Demo-Fallback
-//   • ContextPinBar(...): „sticky“ nutzbar (durch Parent), Outline-Pills mit klarer
-//     Abgrenzung zu Antwort-Chips; A11y-Labels, Fokus-Reihenfolge & Ellipsis.
+//   • ContextPinBar(...): „sticky“ nutzbar (durch Parent), Outline-Pills ...
 //
+// + v6.12.1 (S1.3 — Local-Insert robust):
+//   • NEU: _MessageItem (AnimatedSize + RepaintBoundary + stabile Keys)
+//   • User-Bubble, Panda-Step und Typing-Placeholder nutzen _MessageItem
+//     → keine Layoutsprünge bei schnellen Local-Inserts.
 // -----------------------------------------------------------------------------
 
 part of 'reflection_screen.dart';
@@ -46,6 +47,32 @@ bool get _isDesktop {
       return true;
     default:
       return false;
+  }
+}
+
+/// ---------------------------------------------------------------------------
+/// NEU (S1.3): MessageItem – stabilisiert Höhenänderungen (Local-Insert)
+/// ---------------------------------------------------------------------------
+class _MessageItem extends StatefulWidget {
+  final Widget child;
+  const _MessageItem({super.key, required this.child});
+
+  @override
+  State<_MessageItem> createState() => _MessageItemState();
+}
+
+class _MessageItemState extends State<_MessageItem> {
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
+      alignment: Alignment.topCenter,
+      clipBehavior: Clip.hardEdge,
+      child: RepaintBoundary(
+        child: widget.child,
+      ),
+    );
   }
 }
 
@@ -138,7 +165,6 @@ class _ReflectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _ZenAppear(
-      // explizit setzen ⇒ vermeidet "optional parameter ... isn't ever given"
       slide: const Offset(0, 0.02),
       beginScale: 0.98,
       child: PandaHeader(
@@ -174,7 +200,7 @@ class _IntroBubble extends StatelessWidget {
               textAlign: TextAlign.center,
               style: TextStyle(
                 height: 1.42,
-                color: Color(0xDE000000), // ruhiges Ink @.87
+                color: Color(0xDE000000),
                 fontWeight: FontWeight.w500,
               ),
             ),
@@ -241,7 +267,6 @@ class _RoundThread extends StatelessWidget {
       child: ConstrainedBox(
         constraints: BoxConstraints(maxWidth: maxWidth),
         child: _ZenAppear(
-          // User-Bubble leicht schneller
           delay: const Duration(milliseconds: 60),
           child: Tooltip(
             message: tooltip,
@@ -255,7 +280,7 @@ class _RoundThread extends StatelessWidget {
                     color: Colors.white,
                     borderRadius: _kRadius18,
                     border: Border.all(
-                      color: Colors.black.withValue(alpha: .06),
+                      color: Colors.black.withValues(alpha: .06),
                       width: 1,
                     ),
                     boxShadow: const [
@@ -273,7 +298,7 @@ class _RoundThread extends StatelessWidget {
                       Text(
                         title,
                         style: tt.labelSmall?.copyWith(
-                          color: _kInk.withValue(alpha: .75),
+                          color: _kInk.withValues(alpha: .75),
                           fontWeight: FontWeight.w700,
                         ),
                       ),
@@ -301,13 +326,12 @@ class _RoundThread extends StatelessWidget {
   Widget _buildPandaStepCard(
     BuildContext context,
     _PandaStep s, {
-    required bool showTyping, // ✅ wird bewusst als Trigger behalten
+    required bool showTyping, // Trigger bleibt bewusst vorhanden
     bool suppressQuestion = false,
     Duration appearDelay = Duration.zero,
   }) {
-    // bewusstes no-op, damit Analyzer keinen unused_element_parameter meldet
     if (showTyping) {
-      // Typing-Indicator wird an anderer Stelle gehandhabt.
+      // Typing-Indicator wird an anderer Stelle gehandhabt (no-op).
     }
 
     final tooltip =
@@ -325,7 +349,6 @@ class _RoundThread extends StatelessWidget {
     if (!suppressQuestion && (s.helperSuggestion ?? '').trim().isNotEmpty) {
       buffer.writeln((s.helperSuggestion ?? '').trim());
     }
-    // Hope nicht in die Kopie erzwingen – bleibt kurz/optional in der UI.
     final copyAll = buffer.toString();
 
     return Center(
@@ -359,7 +382,7 @@ class _RoundThread extends StatelessWidget {
   Widget build(BuildContext context) {
     final children = <Widget>[];
 
-    // Abschluss-Phase aktiv? -> suppressQuestion für die letzte Panda-Karte setzen
+    // Abschluss aktiv? → letzte Frage unterdrücken
     final bool closureActive = round.answered &&
         round.allowClosure &&
         !round.hasPendingQuestion &&
@@ -368,7 +391,12 @@ class _RoundThread extends StatelessWidget {
     // Benutzer-Gedanke
     final userText = round.userInput.trim();
     if (userText.isNotEmpty) {
-      children.add(_buildUserBubble(context, 'Gedanke', userText));
+      children.add(
+        _MessageItem(
+          key: ValueKey('msg_${round.id}_user'),
+          child: _buildUserBubble(context, 'Gedanke', userText),
+        ),
+      );
       children.add(const SizedBox(height: 10));
     }
 
@@ -379,16 +407,19 @@ class _RoundThread extends StatelessWidget {
       final stagger = Duration(milliseconds: 60 * (i.clamp(0, 3)));
 
       children.add(
-        _PandaStepScope(
-          step: s,
-          suppressQuestion: closureActive && isLastStep,
-          timeStamp: _fmtDayTime(round.ts),
-          child: _buildPandaStepCard(
-            context,
-            s,
-            showTyping: isLast && isTyping && isLastStep,
+        _MessageItem(
+          key: ValueKey('msg_${round.id}_step_$i'),
+          child: _PandaStepScope(
+            step: s,
             suppressQuestion: closureActive && isLastStep,
-            appearDelay: stagger,
+            timeStamp: _fmtDayTime(round.ts),
+            child: _buildPandaStepCard(
+              context,
+              s,
+              showTyping: isLast && isTyping && isLastStep,
+              suppressQuestion: closureActive && isLastStep,
+              appearDelay: stagger,
+            ),
           ),
         ),
       );
@@ -396,27 +427,35 @@ class _RoundThread extends StatelessWidget {
       if (s.hasAnswer) {
         children
           ..add(const SizedBox(height: 8))
-          ..add(_buildUserBubble(context, 'Antwort', s.answer!.trim()));
+          ..add(
+            _MessageItem(
+              key: ValueKey('msg_${round.id}_answer_$i'),
+              child: _buildUserBubble(context, 'Antwort', s.answer!.trim()),
+            ),
+          );
       }
 
       children.add(const SizedBox(height: 10));
     }
 
-    // Placeholder beim ersten Turn
+    // Typing-Placeholder beim ersten Turn
     if (round.steps.isEmpty && isTyping) {
       children
         ..add(
-          Center(
-            child: ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: maxWidth),
-              child: const RepaintBoundary(
-                child: ZenGlassCard(
-                  padding: EdgeInsets.fromLTRB(16, 12, 16, 12),
-                  topOpacity: _kGlassTop,
-                  bottomOpacity: _kGlassBottom,
-                  borderOpacity: _kGlassBorder,
-                  borderRadius: _kRadius18,
-                  child: _TypingRow(),
+          _MessageItem(
+            key: ValueKey('msg_${round.id}_typing'),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: maxWidth),
+                child: const RepaintBoundary(
+                  child: ZenGlassCard(
+                    padding: EdgeInsets.fromLTRB(16, 12, 16, 12),
+                    topOpacity: _kGlassTop,
+                    bottomOpacity: _kGlassBottom,
+                    borderOpacity: _kGlassBorder,
+                    borderRadius: _kRadius18,
+                    child: _TypingRow(),
+                  ),
                 ),
               ),
             ),
@@ -427,14 +466,16 @@ class _RoundThread extends StatelessWidget {
 
     // Abschluss → Stimmung (gated)
     if (closureActive) {
-      // Optional: mood_intro-Blase vor dem Abschluss
       final intro = (round.moodIntro ?? '').trim();
       if (intro.isNotEmpty) {
         children
           ..add(
-            _ZenAppear(
-              delay: const Duration(milliseconds: 60),
-              child: _MoodIntroBubble(text: intro, maxWidth: maxWidth),
+            _MessageItem(
+              key: ValueKey('msg_${round.id}_mood_intro'),
+              child: _ZenAppear(
+                delay: const Duration(milliseconds: 60),
+                child: _MoodIntroBubble(text: intro, maxWidth: maxWidth),
+              ),
             ),
           )
           ..add(const SizedBox(height: 10));
@@ -442,18 +483,24 @@ class _RoundThread extends StatelessWidget {
 
       children
         ..add(
-          _ZenAppear(
-            delay: const Duration(milliseconds: 100),
-            child: _CompletionCard(maxWidth: maxWidth),
+          _MessageItem(
+            key: ValueKey('msg_${round.id}_completion'),
+            child: _ZenAppear(
+              delay: const Duration(milliseconds: 100),
+              child: _CompletionCard(maxWidth: maxWidth),
+            ),
           ),
         )
         ..add(const SizedBox(height: 10))
         ..add(
-          _ZenAppear(
-            delay: const Duration(milliseconds: 140),
-            child: _MoodChooserInline(
-              onSelected: onSelectMood,
-              maxWidth: maxWidth,
+          _MessageItem(
+            key: ValueKey('msg_${round.id}_mood_picker'),
+            child: _ZenAppear(
+              delay: const Duration(milliseconds: 140),
+              child: _MoodChooserInline(
+                onSelected: onSelectMood,
+                maxWidth: maxWidth,
+              ),
             ),
           ),
         )
@@ -463,30 +510,33 @@ class _RoundThread extends StatelessWidget {
     // Actions nach Mood
     if (round.answered && round.hasMood) {
       children.add(
-        _ZenAppear(
-          delay: const Duration(milliseconds: 80),
-          child: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 180),
-            child: Wrap(
-              key: ValueKey('actions_${round.id}'),
-              spacing: 10,
-              runSpacing: 8,
-              alignment: WrapAlignment.center,
-              children: [
-                if (onSave != null)
-                  ZenPrimaryButton(
-                    label: 'Ins Gedankenbuch speichern',
-                    icon: Icons.bookmark_added_rounded,
-                    onPressed: onSave!,
-                  ),
-                if (onDelete != null)
-                  ZenOutlineButton(
-                    label: 'Löschen',
-                    icon: Icons.delete_outline_rounded,
-                    onPressed: onDelete!,
-                    color: _kInkStrong,
-                  ),
-              ],
+        _MessageItem(
+          key: ValueKey('msg_${round.id}_post_actions'),
+          child: _ZenAppear(
+            delay: const Duration(milliseconds: 80),
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 180),
+              child: Wrap(
+                key: ValueKey('actions_${round.id}'),
+                spacing: 10,
+                runSpacing: 8,
+                alignment: WrapAlignment.center,
+                children: [
+                  if (onSave != null)
+                    ZenPrimaryButton(
+                      label: 'Ins Gedankenbuch speichern',
+                      icon: Icons.bookmark_added_rounded,
+                      onPressed: onSave!,
+                    ),
+                  if (onDelete != null)
+                    ZenOutlineButton(
+                      label: 'Löschen',
+                      icon: Icons.delete_outline_rounded,
+                      onPressed: onDelete!,
+                      color: _kInkStrong,
+                    ),
+                ],
+              ),
             ),
           ),
         ),
@@ -498,9 +548,12 @@ class _RoundThread extends StatelessWidget {
       children
         ..add(const SizedBox(height: 10))
         ..add(
-          _ZenAppear(
-            delay: const Duration(milliseconds: 60),
-            child: _SafetyNote(text: safetyText!, maxWidth: maxWidth),
+          _MessageItem(
+            key: ValueKey('msg_${round.id}_safety'),
+            child: _ZenAppear(
+              delay: const Duration(milliseconds: 60),
+              child: _SafetyNote(text: safetyText!, maxWidth: maxWidth),
+            ),
           ),
         );
     }
@@ -529,7 +582,7 @@ class _DividerThin extends StatelessWidget {
     return Container(
       height: 1,
       decoration: BoxDecoration(
-        color: Colors.black.withValue(alpha: .10),
+        color: Colors.black.withValues(alpha: .10),
         borderRadius: BorderRadius.circular(1),
       ),
     );
@@ -707,7 +760,7 @@ class _InputBar extends StatelessWidget {
               offset: Offset(0, 4),
             ),
             BoxShadow(
-              color: _kJade.withValue(alpha: 0.30),
+              color: _kJade.withValues(alpha: 0.30),
               blurRadius: 22,
               spreadRadius: 1.2,
             ),
@@ -762,7 +815,7 @@ class _InputBar extends StatelessWidget {
                     decoration: InputDecoration(
                       hintText: hint,
                       hintStyle: tt.bodyMedium!
-                          .copyWith(color: _kInk.withValue(alpha: .55)),
+                          .copyWith(color: _kInk.withValues(alpha: .55)),
                       border: InputBorder.none,
                       isCollapsed: true,
                       suffixIconConstraints:
@@ -777,8 +830,8 @@ class _InputBar extends StatelessWidget {
                               style: tt.bodySmall!.copyWith(
                                 fontSize: 12,
                                 color: overSoft
-                                    ? Colors.redAccent.withValue(alpha: .85)
-                                    : _kInk.withValue(alpha: .65),
+                                    ? Colors.redAccent.withValues(alpha: .85)
+                                    : _kInk.withValues(alpha: .65),
                                 fontWeight: FontWeight.w600,
                               ),
                               child: Text(
@@ -808,7 +861,7 @@ class _InputBar extends StatelessWidget {
                               Icons.send_rounded,
                               color: (hasText && canSend && onSend != null)
                                   ? _kJade
-                                  : _kJade.withValue(alpha: 0.45),
+                                  : _kJade.withValues(alpha: 0.45),
                             ),
                           ),
                         ],
@@ -865,7 +918,7 @@ class _TypingDotsState extends State<_TypingDots>
                 height: 4 + 3 * n(0),
                 margin: const EdgeInsets.only(right: 3),
                 decoration: BoxDecoration(
-                  color: Colors.black.withValue(alpha: op0),
+                  color: Colors.black.withValues(alpha: op0),
                   shape: BoxShape.circle,
                 ),
               ),
@@ -874,7 +927,7 @@ class _TypingDotsState extends State<_TypingDots>
                 height: 4 + 3 * n(1),
                 margin: const EdgeInsets.only(right: 3),
                 decoration: BoxDecoration(
-                  color: Colors.black.withValue(alpha: op1),
+                  color: Colors.black.withValues(alpha: op1),
                   shape: BoxShape.circle,
                 ),
               ),
@@ -882,7 +935,7 @@ class _TypingDotsState extends State<_TypingDots>
                 width: 4,
                 height: 4 + 3 * n(2),
                 decoration: BoxDecoration(
-                  color: Colors.black.withValue(alpha: op2),
+                  color: Colors.black.withValues(alpha: op2),
                   shape: BoxShape.circle,
                 ),
               ),
@@ -898,7 +951,7 @@ class _TypingRow extends StatelessWidget {
   const _TypingRow();
   @override
   Widget build(BuildContext context) {
-    // Fix: Punkte gehören ans ENDE – Text ohne Ellipsis, Dots folgen danach.
+    // Punkte am ENDE – Text ohne Ellipsis, Dots folgen danach.
     return const Row(
       children: [
         Text('Panda tippt', style: TextStyle(color: Colors.black54)),
@@ -992,7 +1045,7 @@ class PandaBridgeBubble extends StatelessWidget {
                           child: SelectableText(
                             display,
                             style: tt.bodyMedium?.copyWith(
-                              color: _kInk.withValue(alpha: .87),
+                              color: _kInk.withValues(alpha: .87),
                               height: 1.33,
                               fontWeight: FontWeight.w500,
                             ),
@@ -1031,7 +1084,7 @@ class _PandaCardInner extends StatelessWidget {
         SelectableText(
           s.mirror.trim(),
           style: tt.bodyMedium?.copyWith(
-            color: _kInk.withValue(alpha: .87),
+            color: _kInk.withValues(alpha: .87),
             height: 1.35,
             fontWeight: FontWeight.w500,
           ),
@@ -1047,7 +1100,7 @@ class _PandaCardInner extends StatelessWidget {
         SelectableText(
           t,
           style: tt.bodyMedium?.copyWith(
-            color: _kInk.withValue(alpha: .87),
+            color: _kInk.withValues(alpha: .87),
             height: 1.34,
             fontWeight: FontWeight.w400,
           ),
@@ -1059,7 +1112,6 @@ class _PandaCardInner extends StatelessWidget {
     if (!suppressQuestion && s.question.trim().isNotEmpty) {
       children.add(const _DividerThin());
       children.add(const SizedBox(height: 8));
-      // Calm question — gleicher Stil wie Mirror (keine Bold-Überschrift)
       children.add(
         SelectableText(
           s.question.trim(),
@@ -1072,7 +1124,6 @@ class _PandaCardInner extends StatelessWidget {
       );
     }
 
-    // HelperSuggestion: nur zeigen, wenn Frage sichtbar (gleiche Achse, sanfter Satz)
     if (!suppressQuestion && (s.helperSuggestion ?? '').trim().isNotEmpty) {
       children.add(const SizedBox(height: 8));
       children.add(
@@ -1088,7 +1139,7 @@ class _PandaCardInner extends StatelessWidget {
               child: SelectableText(
                 (s.helperSuggestion ?? '').trim(),
                 style: tt.bodySmall?.copyWith(
-                  color: _kInk.withValue(alpha: .87),
+                  color: _kInk.withValues(alpha: .87),
                   height: 1.30,
                   fontWeight: FontWeight.w500,
                 ),
@@ -1099,8 +1150,7 @@ class _PandaCardInner extends StatelessWidget {
       );
     }
 
-    // ---------------------- Hope Slot (optional) ----------------------
-    // Kurzer, hoffnungsvoller Satz unterhalb der Frage/HelperSuggestion.
+    // Hope (kompatibel)
     final hope = s.hopeTextCompat();
     if (!suppressQuestion && (hope ?? '').trim().isNotEmpty) {
       children.add(const SizedBox(height: 8));
@@ -1116,7 +1166,7 @@ class _PandaCardInner extends StatelessWidget {
               child: SelectableText(
                 (hope ?? '').trim(),
                 style: tt.bodySmall?.copyWith(
-                  color: _kInk.withValue(alpha: .87),
+                  color: _kInk.withValues(alpha: .87),
                   height: 1.30,
                   fontWeight: FontWeight.w600,
                 ),
@@ -1132,7 +1182,7 @@ class _PandaCardInner extends StatelessWidget {
     children.add(
       const Row(
         children: [
-          _DevIndicator(), // zeigt in Release NICHTS
+          _DevIndicator(),
           Spacer(),
           ExcludeSemantics(
             child: Opacity(
@@ -1183,10 +1233,9 @@ class _DevIndicator extends StatelessWidget {
     final talk = s.talkLines.length;
     final mirrorLen = s.mirror.trim().length;
 
-    // Farb-Codierung: Risk > Helpers > Neutral
     final Color dotColor = risk
         ? Colors.orange
-        : (helpers > 0 ? _kJade : Colors.black.withValue(alpha: .45));
+        : (helpers > 0 ? _kJade : Colors.black.withValues(alpha: .45));
 
     final tooltip =
         'm:$mirrorLen  q:${hasQ ? 1 : 0}  h:$helpers  talk:$talk  hope:${hope ? 1 : 0}';
@@ -1202,7 +1251,7 @@ class _DevIndicator extends StatelessWidget {
             color: dotColor,
             shape: BoxShape.circle,
             border: Border.all(
-              color: Colors.black.withValue(alpha: .10),
+              color: Colors.black.withValues(alpha: .10),
               width: 1,
             ),
           ),
@@ -1229,7 +1278,7 @@ class _MoodIntroRow extends StatelessWidget {
           child: SelectableText(
             scope?.text ?? '',
             style: tt.bodyMedium?.copyWith(
-              color: _kInk.withValue(alpha: .87),
+              color: _kInk.withValues(alpha: .87),
               height: 1.35,
               fontWeight: FontWeight.w500,
             ),
@@ -1279,7 +1328,6 @@ class _CompletionRow extends StatelessWidget {
           child: Text(
             'Gut gemacht 🐼✨ — du hast das Wichtigste festgehalten.',
             style: TextStyle(
-              // Calm tone; Farbe kommt vom DefaultTextStyle außen
               fontWeight: FontWeight.w600,
               height: 1.25,
             ),
@@ -1312,9 +1360,9 @@ class _GhostChip extends StatelessWidget {
     final child = Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: BoxDecoration(
-        color: Colors.white.withValue(alpha: .66),
+        color: Colors.white.withValues(alpha: .66),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: _kJade.withValue(alpha: .65), width: 1.2),
+        border: Border.all(color: _kJade.withValues(alpha: .65), width: 1.2),
         boxShadow: const [
           BoxShadow(
             color: Color(0x0F000000),
@@ -1385,7 +1433,7 @@ class _RecentTopicsChips extends StatelessWidget {
               Text(
                 'Zuletzt bewegt:',
                 style: tt.labelSmall?.copyWith(
-                  color: _kInk.withValue(alpha: .75),
+                  color: _kInk.withValues(alpha: .75),
                   fontWeight: FontWeight.w700,
                 ),
               ),
@@ -1519,23 +1567,19 @@ class _SafetyScope extends InheritedWidget {
 
 // -----------------------------------------------------------------------------
 // Kompatibilitäts-Extension für Hope-Text (_PandaStep.hopeTextCompat())
-// Liest robust aus alten/neuen Feldern oder aus speech_sequence (type == "hope").
 // -----------------------------------------------------------------------------
 extension _PandaStepCompatExt on _PandaStep {
   String? hopeTextCompat() {
-    // 1) Legacy: direkter Getter/Feld "hopeText"
     try {
       final v = (this as dynamic).hopeText;
       if (v is String && v.trim().isNotEmpty) return v.trim();
     } catch (_) {}
 
-    // 2) Neues Feld "hope"
     try {
       final v = (this as dynamic).hope;
       if (v is String && v.trim().isNotEmpty) return v.trim();
     } catch (_) {}
 
-    // 3) Sequenz durchsuchen
     try {
       final seq = (this as dynamic).speechSequence;
       if (seq is List) {
@@ -1561,10 +1605,9 @@ extension _PandaStepCompatExt on _PandaStep {
 }
 
 // ============================================================================
-// v6.12 — NEU: Footer-Aktionen (max. 2 + Overflow), SkillCardList, ContextPinBar
+// v6.12 — NEU: Footer-Aktionen, SkillCardList, ContextPinBar
 // ============================================================================
 
-/// Datenobjekt für Footer-Aktionen (klar getrennt von Antwort-Chips).
 class PandaFooterAction {
   final String label;
   final IconData icon;
@@ -1581,7 +1624,6 @@ class PandaFooterAction {
   });
 }
 
-/// Outline-Pill (klarer Outline-Look; unterscheidet sich bewusst von Ghost-Chips).
 class _OutlinePillButton extends StatelessWidget {
   final String label;
   final IconData icon;
@@ -1632,7 +1674,6 @@ class _OutlinePillButton extends StatelessWidget {
   }
 }
 
-/// Footer unter einer Panda-Karte. Zeigt max. 2 Primär-Aktionen; Rest im Overflow.
 class PandaBubbleFooter extends StatelessWidget {
   final List<PandaFooterAction> actions;
   final double maxWidth;
@@ -1650,7 +1691,8 @@ class PandaBubbleFooter extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final visible = actions.take(2).toList(growable: false);
-    final overflow = actions.length > 2 ? actions.sublist(2) : const <PandaFooterAction>[];
+    final overflow =
+        actions.length > 2 ? actions.sublist(2) : const <PandaFooterAction>[];
 
     return Center(
       child: ConstrainedBox(
@@ -1751,13 +1793,12 @@ class _OverflowPillMenu extends StatelessWidget {
           onSelected: (i) {
             if (i >= 0 && i < items.length) items[i].onPressed();
           },
-          // Wichtig: Kein "deaktivierter" Button als Child, damit es visuell nicht disabled wirkt.
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: ShapeDecoration(
               shape: StadiumBorder(
                 side: BorderSide(color: ZenColors.outline),
-                ),
+              ),
               color: Colors.transparent,
               shadows: const [],
             ),
@@ -1785,7 +1826,6 @@ class _OverflowPillMenu extends StatelessWidget {
   }
 }
 
-/// Datenmodell für eine Skill-/Info-Karte.
 class SkillCardData {
   final IconData icon;
   final String title;
@@ -1802,7 +1842,6 @@ class SkillCardData {
   });
 }
 
-/// Horizontale Liste kleiner Glas-Karten (klar getrennt von Antwort-Chips).
 class SkillCardList extends StatelessWidget {
   final List<SkillCardData> cards;
   final double maxWidth;
@@ -1817,7 +1856,6 @@ class SkillCardList extends StatelessWidget {
     this.dense = true,
   });
 
-  /// Bequemer Demo-Ctor mit Platzhalterdaten.
   factory SkillCardList.demo({double maxWidth = 680}) {
     return SkillCardList(
       maxWidth: maxWidth,
@@ -1930,7 +1968,7 @@ class _SkillCard extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: tt.bodySmall?.copyWith(
                       fontWeight: FontWeight.w500,
-                      color: _kInk.withValue(alpha: .85),
+                      color: _kInk.withValues(alpha: .85),
                       height: 1.22,
                     ),
                   ),
@@ -1961,8 +1999,6 @@ class _SkillCard extends StatelessWidget {
   }
 }
 
-/// Kontext-Leiste mit Outline-Pills (z. B. Name/Consent/Modus). „Sticky“ über
-/// Parent (z. B. SliverPersistentHeader) nutzbar; hier nur der visuelle Block.
 class ContextPinBar extends StatelessWidget {
   final List<Widget> pills;
   final double maxWidth;
@@ -1979,7 +2015,6 @@ class ContextPinBar extends StatelessWidget {
     this.semanticsLabel,
   });
 
-  /// Bequeme Fabrik mit einfachen Text-Pills (Outline-Stil).
   factory ContextPinBar.simple({
     required List<String> labels,
     double maxWidth = 680,
@@ -2018,7 +2053,7 @@ class ContextPinBar extends StatelessWidget {
             child: RepaintBoundary(
               child: Container(
                 decoration: BoxDecoration(
-                  color: ZenColors.surface.withValue(alpha: .88),
+                  color: ZenColors.surface.withValues(alpha: .88),
                   borderRadius: _kRadius16,
                   border: Border.all(color: ZenColors.outline),
                   boxShadow: shadow,
@@ -2065,7 +2100,7 @@ class _OutlineTextPill extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
-          color: ZenColors.surfaceAlt.withValue(alpha: .66),
+          color: ZenColors.surfaceAlt.withValues(alpha: .66),
           border: Border.all(color: ZenColors.outline),
           borderRadius: BorderRadius.circular(999),
         ),

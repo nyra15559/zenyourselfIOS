@@ -9,7 +9,7 @@
 //   • sanfter Scroll bei Keyboard-Änderung (bottomInset-Änderung)
 // ---------------------------------------------------------------------
 // Rendert:
-// • Header, Intro/Pitch-Bubble, Bridge-Bubble
+// • Header, Intro/Pitch-Bubble, **Smalltalk-Bubble (neu),** Bridge-Bubble
 // • Frage + helperSuggestion, Talk-Zeilen
 // • Verlauf (Thread), **Answer-Chips (insert-only)**   ← nur Worker-Helpers
 // • Abschluss-/Mood-CTA (allowClosure/moodPrompt), Risk/Hotline-Banner
@@ -19,8 +19,26 @@
 // Hinweis: Ehemalige Tool-/Topic-Chips („Thema wechseln“, „Essenz“, „Beispiel“)
 // wurden entfernt. `topicChips` bleibt in den Props als no-op bestehen,
 // wird hier aber NICHT gerendert (API-stabil, kein UI-Effekt).
+//
+// v6.4.1 (S2.2 Typing Inline):
+//   • Neuer Prop `isTyping` → rendert **Typing-Indicator direkt unter der letzten User-Bubble**.
+//   • Kein Overlay: Indicator als normaler Listeneintrag innerhalb des Threads.
+//   • AutoScroll-Signatur erweitert (reagiert auf Typing-Änderung).
+//
+// S4.3 (Smalltalk anzeigen):
+//   • Neues Prop `smalltalkText` → kurze Panda-Antwort als eigene Bubble unter Intro.
+//   • Intro bleibt sichtbar; Smalltalk ersetzt Intro NICHT.
+//
+// S5.1 (Handy n Linux Layout):
+//   • Plattform-adaptive Scroll-Physik (Desktop=Clamping, Mobile=Bouncing), Overscroll-Glow aus.
+//   • Desktop: sichtbare Scrollbar.
+//   • Keyboard-Inset: gedrosselte Reaktion + Klammerung (0..320) → weniger Springen.
+//   • Card-MaxBreite robust geklammert → kein Leerbildschirm bei extrem schmalem Fenster.
+//   • Solider Farb-Fallback hinter dem Backdrop.
 
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform, kIsWeb;
 
 // Zen-UI Widgets (wie im Projekt genutzt)
 import '../../shared/ui/zen_widgets.dart'
@@ -33,8 +51,9 @@ class ReflectionViewProps {
   final String pandaAsset;
 
   // Bubbles oben
-  final String? introText; // Pitch/Intro (oben, pinned-ähnlich)
-  final String? bridgeText; // Bridge/Recall (optional, unter Intro)
+  final String? introText;     // Pitch/Intro (oben, pinned-ähnlich)
+  final String? smalltalkText; // **NEU**: kurzer Smalltalk des Panda (unter Intro)
+  final String? bridgeText;    // Bridge/Recall (optional, unter Smalltalk)
 
   // Leitfrage-Block
   final String? question; // Leitfrage (mit Fragezeichen)
@@ -43,6 +62,9 @@ class ReflectionViewProps {
 
   // Verlauf (bereits vorgerendert vom Orchestrator)
   final List<Widget> thread;
+
+  // **NEU**: Typing-Indicator State (wird unter dem letzten User-Item gerendert)
+  final bool isTyping;
 
   // Chips
   final List<String> chips; // Answer-Chips (insert-only)
@@ -85,11 +107,13 @@ class ReflectionViewProps {
     this.headerSubtitle,
     this.pandaAsset = 'assets/star_pa.png',
     this.introText,
+    this.smalltalkText, // **NEU**
     this.bridgeText,
     this.question,
     this.helperSuggestion,
     this.talkLines = const <String>[],
     required this.thread,
+    this.isTyping = false, // **NEU**
     required this.chips,
     this.topicChips = const <String>[], // no-op
     this.onChipTap,
@@ -129,12 +153,30 @@ class _ReflectionViewState extends State<ReflectionView> {
   int _lastSignature = 0;       // Content-Signatur für didUpdateWidget
   double _lastBottomInset = 0;  // Keyboard-Änderungen erkennen
 
+  // ——— Plattform-Helfer ———
+  bool get _isDesktop {
+    final p = defaultTargetPlatform;
+    if (kIsWeb) return true; // Web wie Desktop behandeln
+    return p == TargetPlatform.linux ||
+           p == TargetPlatform.macOS ||
+           p == TargetPlatform.windows ||
+           p == TargetPlatform.fuchsia;
+  }
+
+  ScrollPhysics get _platformPhysics =>
+      _isDesktop ? const ClampingScrollPhysics() : const BouncingScrollPhysics();
+
+  double _effectiveBottomInset(double raw) {
+    // Auf Desktop/Web kein Keyboard-Inset → 0; auf Mobile sanft klammern
+    if (_isDesktop) return 0;
+    // harte Klammer verhindert wilde Sprünge bei Keyboard-Animation
+    return raw.clamp(0.0, 320.0);
+  }
+
   @override
   void initState() {
     super.initState();
-    // initiale Signatur setzen
     _lastSignature = _calcSignature(widget.props);
-    // nach erster Layout-Phase ans Ende scrollen (Startkomfort)
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _scheduleAutoScroll(force: true);
     });
@@ -145,7 +187,6 @@ class _ReflectionViewState extends State<ReflectionView> {
     super.didUpdateWidget(oldWidget);
     final nextSig = _calcSignature(widget.props);
     if (nextSig != _lastSignature) {
-      // Neuer Inhalt → scrollen je nach Heuristik
       _scheduleAutoScroll();
       _lastSignature = nextSig;
     }
@@ -166,9 +207,8 @@ class _ReflectionViewState extends State<ReflectionView> {
     final stick = _scroll.position.extentAfter < 80;
     if (stick != _stickToBottom) {
       setState(() => _stickToBottom = stick);
-      if (stick) {
-        // wenn wieder unten: Hinweis entfernen
-        if (_hasPendingNew) setState(() => _hasPendingNew = false);
+      if (stick && _hasPendingNew) {
+        setState(() => _hasPendingNew = false);
       }
     }
   }
@@ -176,6 +216,7 @@ class _ReflectionViewState extends State<ReflectionView> {
   void _jumpToEnd({bool animated = true}) {
     if (!_scroll.hasClients) return;
     final to = _scroll.position.maxScrollExtent;
+    if (to <= 0) return; // Nichts zu scrollen → kein unnötiges Animieren
     if (animated) {
       _scroll.animateTo(
         to,
@@ -196,7 +237,6 @@ class _ReflectionViewState extends State<ReflectionView> {
           setState(() => _hasPendingNew = false);
         }
       } else {
-        // Nutzer liest weiter oben → nicht ziehen; nur Hinweis setzen
         if (!_hasPendingNew) setState(() => _hasPendingNew = true);
       }
     });
@@ -206,10 +246,12 @@ class _ReflectionViewState extends State<ReflectionView> {
   int _calcSignature(ReflectionViewProps p) {
     int sig = 17;
     sig = 31 * sig + p.thread.length;
+    sig = 31 * sig + (p.isTyping ? 1 : 0); // Typing-State beachten
     sig = 31 * sig + p.chips.length;
     sig = 31 * sig + (p.question ?? '').length;
     sig = 31 * sig + (p.helperSuggestion ?? '').length;
     sig = 31 * sig + p.talkLines.length;
+    sig = 31 * sig + (p.smalltalkText ?? '').length;
     sig = 31 * sig + (p.bridgeText ?? '').length;
     sig = 31 * sig + (p.hopeText ?? '').length;
     sig = 31 * sig + (p.moodPrompt ? 1 : 0);
@@ -228,20 +270,23 @@ class _ReflectionViewState extends State<ReflectionView> {
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
+    final mq = MediaQuery.of(context);
+    final size = mq.size;
     final w = size.width;
-    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
-    final cardMaxW = _cardMaxWidthFor(w, widget.props.maxCardWidth);
+    final rawBottomInset = mq.viewInsets.bottom;
 
-    // bei Keyboard-Änderungen sanft nach unten schieben
-    if (bottomInset != _lastBottomInset) {
-      _lastBottomInset = bottomInset;
-      _scheduleAutoScroll();
+    // Debounce für Keyboard-Inset → weniger „Springen“ auf Android
+    if ((_lastBottomInset - rawBottomInset).abs() > 6.0) {
+      _lastBottomInset = rawBottomInset;
+      _scheduleAutoScroll(); // sanft nachregeln
     }
+    final bottomInset = _effectiveBottomInset(_lastBottomInset);
 
+    final cardMaxW = _cardMaxWidthFor(w, widget.props.maxCardWidth);
     final props = widget.props;
 
     final bool _showIntro = (props.introText ?? '').trim().isNotEmpty;
+    final bool _showSmalltalk = (props.smalltalkText ?? '').trim().isNotEmpty;
     final bool _showBridge = (props.bridgeText ?? '').trim().isNotEmpty;
     final bool _showQuestion = (props.question ?? '').trim().isNotEmpty;
     final bool _showChips = props.chips.isNotEmpty;
@@ -250,9 +295,14 @@ class _ReflectionViewState extends State<ReflectionView> {
     final bool _showClosureCta = props.allowClosure || props.moodPrompt;
 
     return Scaffold(
+      // Transparenz bleibt für Backdrop, aber mit sicherem Farb-Fallback darunter
       backgroundColor: Colors.transparent,
       body: Stack(
         children: [
+          // Solider Farb-Fallback (verhindert „Leerbildschirm“, falls Backdrop/Asset hakt)
+          Positioned.fill(
+            child: ColoredBox(color: Theme.of(context).colorScheme.surface),
+          ),
           // Sanfter Hintergrund
           Positioned.fill(
             child: ZenBackdrop(
@@ -287,186 +337,16 @@ class _ReflectionViewState extends State<ReflectionView> {
                   Expanded(
                     child: Stack(
                       children: [
-                        ListView(
-                          controller: _scroll,
-                          physics: const BouncingScrollPhysics(),
-                          keyboardDismissBehavior:
-                              ScrollViewKeyboardDismissBehavior.onDrag,
-                          padding: EdgeInsets.fromLTRB(
-                            0,
-                            0,
-                            0,
-                            12 + _kInputReserve + bottomInset,
-                          ),
-                          children: [
-                            // Header
-                            _Header(
-                              title: props.headerTitle,
-                              subtitle: props.headerSubtitle,
-                              pandaAsset: props.pandaAsset,
-                              pandaSize: w < 470 ? 100 : 126,
-                              maxWidth: cardMaxW,
-                            ),
-                            const SizedBox(height: 10),
-
-                            // Intro / Pitch Bubble (pinned-ähnlich)
-                            if (_showIntro)
-                              _BubbleCard(
-                                maxWidth: cardMaxW,
-                                child: Text(
-                                  props.introText!.trim(),
-                                  style: const TextStyle(height: 1.35),
-                                ),
-                              ),
-
-                            // Bridge Bubble (Memory/Recall)
-                            if (_showBridge)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 6),
-                                child: _BubbleCard(
-                                  emoji: '🪄',
-                                  maxWidth: cardMaxW,
-                                  child: _Markdownish(props.bridgeText!.trim()),
-                                ),
-                              ),
-
-                            // Frage + helperSuggestion + Talk-Zeilen
-                            if (_showQuestion)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 8),
-                                child: Center(
-                                  child: ConstrainedBox(
-                                    constraints:
-                                        BoxConstraints(maxWidth: cardMaxW),
-                                    child: _QuestionCard(
-                                      question: props.question!.trim(),
-                                      helperSuggestion:
-                                          (props.helperSuggestion ?? '')
-                                                  .trim()
-                                                  .isNotEmpty
-                                              ? props.helperSuggestion!.trim()
-                                              : null,
-                                      talkLines:
-                                          props.talkLines.take(2).toList(),
-                                    ),
-                                  ),
-                                ),
-                              ),
-
-                            // Verlauf / Thread (bereits vorgerendert vom Orchestrator)
-                            ...props.thread.map((w) => Padding(
-                                  padding: const EdgeInsets.only(top: 8),
-                                  child: Center(
-                                    child: ConstrainedBox(
-                                      constraints:
-                                          BoxConstraints(maxWidth: cardMaxW),
-                                      child: w,
-                                    ),
-                                  ),
-                                )),
-
-                            // Antwort-Chips (nur Worker-Helpers)
-                            if (_showChips)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 8),
-                                child: Center(
-                                  child: ConstrainedBox(
-                                    constraints:
-                                        BoxConstraints(maxWidth: cardMaxW),
-                                    child: Wrap(
-                                      spacing: 8,
-                                      runSpacing: 8,
-                                      children: [
-                                        for (final s in props.chips)
-                                          ZenChipGhost(
-                                            label: _normalizeChip(s),
-                                            onPressed: () =>
-                                                _onTapChip(context, s),
-                                          ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-
-                            // Hope Slot (kleiner, warmer Mutmacher)
-                            if (_showHope)
-                              Padding(
-                                padding:
-                                    const EdgeInsets.fromLTRB(0, 10, 0, 0),
-                                child: Center(
-                                  child: ConstrainedBox(
-                                    constraints:
-                                        BoxConstraints(maxWidth: cardMaxW),
-                                    child: props.hopeWidget ??
-                                        _HopeBubble(
-                                            text: props.hopeText!.trim()),
-                                  ),
-                                ),
-                              ),
-
-                            // Abschluss-/Mood-CTA
-                            if (_showClosureCta)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 10),
-                                child: Center(
-                                  child: ConstrainedBox(
-                                    constraints:
-                                        BoxConstraints(maxWidth: cardMaxW),
-                                    child: SizedBox(
-                                      width: double.infinity,
-                                      child: ElevatedButton.icon(
-                                        onPressed: props.onClosureTap,
-                                        icon: const Icon(
-                                            Icons.emoji_emotions_rounded),
-                                        label: Text(
-                                          props.moodPrompt
-                                              ? 'Stimmung teilen'
-                                              : 'Abschluss & Stimmung',
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-
-                            // Risk/Hotline-Banner (leichtgewichtig, lokal)
-                            if (props.risk)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 10),
-                                child: Center(
-                                  child: ConstrainedBox(
-                                    constraints:
-                                        BoxConstraints(maxWidth: cardMaxW),
-                                    child: const _SafetyHotlineCard(),
-                                  ),
-                                ),
-                              ),
-
-                            // Permanenter Footer-Disclaimer
-                            Padding(
-                              padding:
-                                  const EdgeInsets.fromLTRB(0, 12, 0, 2),
-                              child: Center(
-                                child: ConstrainedBox(
-                                  constraints:
-                                      BoxConstraints(maxWidth: cardMaxW),
-                                  child: Text(
-                                    props.footerDisclaimer,
-                                    textAlign: TextAlign.center,
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .bodySmall
-                                        ?.copyWith(
-                                          height: 1.25,
-                                          color: Colors.black
-                                              .withValues(alpha: .72),
-                                        ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
+                        // Desktop: Scrollbar sichtbar; Mobile: kein Thumb
+                        ScrollConfiguration(
+                          behavior: const _NoGlowScrollBehavior(),
+                          child: _isDesktop
+                              ? Scrollbar(
+                                  controller: _scroll,
+                                  thumbVisibility: true,
+                                  child: _buildListView(cardMaxW, bottomInset, w, props),
+                                )
+                              : _buildListView(cardMaxW, bottomInset, w, props),
                         ),
 
                         // „Nach unten“-FAB (nur zeigen, wenn neue Items da sind und User nicht unten ist)
@@ -516,12 +396,197 @@ class _ReflectionViewState extends State<ReflectionView> {
     );
   }
 
+  Widget _buildListView(double cardMaxW, double bottomInset, double w, ReflectionViewProps props) {
+    return ListView(
+      controller: _scroll,
+      physics: _platformPhysics,
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      cacheExtent: 512,
+      padding: EdgeInsets.fromLTRB(
+        0,
+        0,
+        0,
+        12 + _kInputReserve + bottomInset,
+      ),
+      children: [
+        // Header
+        _Header(
+          title: props.headerTitle,
+          subtitle: props.headerSubtitle,
+          pandaAsset: props.pandaAsset,
+          pandaSize: w < 470 ? 100 : 126,
+          maxWidth: cardMaxW,
+        ),
+        const SizedBox(height: 10),
+
+        // Intro / Pitch Bubble (pinned-ähnlich)
+        if ((props.introText ?? '').trim().isNotEmpty)
+          _BubbleCard(
+            maxWidth: cardMaxW,
+            child: Text(
+              props.introText!.trim(),
+              style: const TextStyle(height: 1.35),
+            ),
+          ),
+
+        // Smalltalk-Bubble (kurz, neutral-warm)
+        if ((props.smalltalkText ?? '').trim().isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: _BubbleCard(
+              emoji: '💬',
+              maxWidth: cardMaxW,
+              child: Text(
+                props.smalltalkText!.trim(),
+                style: const TextStyle(height: 1.35),
+              ),
+            ),
+          ),
+
+        // Bridge Bubble (Memory/Recall)
+        if ((props.bridgeText ?? '').trim().isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: _BubbleCard(
+              emoji: '🪄',
+              maxWidth: cardMaxW,
+              child: _Markdownish(props.bridgeText!.trim()),
+            ),
+          ),
+
+        // Frage + helperSuggestion + Talk-Zeilen
+        if ((props.question ?? '').trim().isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: cardMaxW),
+                child: _QuestionCard(
+                  question: props.question!.trim(),
+                  helperSuggestion:
+                      (props.helperSuggestion ?? '').trim().isNotEmpty
+                          ? props.helperSuggestion!.trim()
+                          : null,
+                  talkLines: props.talkLines.take(2).toList(),
+                ),
+              ),
+            ),
+          ),
+
+        // Verlauf / Thread (bereits vorgerendert vom Orchestrator)
+        ...props.thread.map((w) => Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: cardMaxW),
+                  child: w,
+                ),
+              ),
+            )),
+
+        // Typing-Indicator direkt unter der letzten User-Bubble
+        if (props.isTyping)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: cardMaxW),
+                child: const _TypingBubble(),
+              ),
+            ),
+          ),
+
+        // Antwort-Chips (nur Worker-Helpers)
+        if (props.chips.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: cardMaxW),
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final s in props.chips)
+                      ZenChipGhost(
+                        label: _normalizeChip(s),
+                        onPressed: () => _onTapChip(context, s),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+        // Hope Slot (kleiner, warmer Mutmacher)
+        if ((props.hopeText ?? '').trim().isNotEmpty || props.hopeWidget != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(0, 10, 0, 0),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: cardMaxW),
+                child: props.hopeWidget ?? _HopeBubble(text: props.hopeText!.trim()),
+              ),
+            ),
+          ),
+
+        // Abschluss-/Mood-CTA
+        if (props.allowClosure || props.moodPrompt)
+          Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: cardMaxW),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: props.onClosureTap,
+                    icon: const Icon(Icons.emoji_emotions_rounded),
+                    label: Text(props.moodPrompt ? 'Stimmung teilen' : 'Abschluss & Stimmung'),
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+        // Risk/Hotline-Banner (leichtgewichtig, lokal)
+        if (props.risk)
+          Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: cardMaxW),
+                child: const _SafetyHotlineCard(),
+              ),
+            ),
+          ),
+
+        // Permanenter Footer-Disclaimer
+        Padding(
+          padding: const EdgeInsets.fromLTRB(0, 12, 0, 2),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: cardMaxW),
+              child: Text(
+                props.footerDisclaimer,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      height: 1.25,
+                      color: Colors.black.withValues(alpha: .72),
+                    ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   void _onTapChip(BuildContext context, String raw) {
     final normalized = _normalizeChip(raw);
     // Externer Handler? → bevorzugen
     if (widget.props.onChipTap != null) {
       widget.props.onChipTap!(normalized);
-      // Nach Chip-Einfügen in den Composer sanft nach unten
       _scheduleAutoScroll();
       return;
     }
@@ -532,8 +597,7 @@ class _ReflectionViewState extends State<ReflectionView> {
     final next = (needsSpace ? '$cur ' : cur) + withEllipsis;
     widget.props.controller
       ..text = next
-      ..selection =
-          TextSelection.fromPosition(TextPosition(offset: next.length));
+      ..selection = TextSelection.fromPosition(TextPosition(offset: next.length));
     if (widget.props.focusNode != null) {
       FocusScope.of(context).requestFocus(widget.props.focusNode);
     }
@@ -555,9 +619,9 @@ class _ReflectionViewState extends State<ReflectionView> {
   }
 
   double _cardMaxWidthFor(double w, double max) {
-    if (w < 420) return w - 24;
-    if (w < 720) return w - 24 > max ? max : w - 24;
-    return max;
+    // robust: immer sinnvolle positive Max-Breite liefern
+    final inner = (w - 24).clamp(180.0, max); // nie <180, nie >max
+    return inner is double ? inner : (inner as num).toDouble();
   }
 }
 
@@ -765,6 +829,94 @@ class _HopeBubble extends StatelessWidget {
   }
 }
 
+// --------------------------- Typing Bubble -----------------------------------
+
+class _TypingBubble extends StatelessWidget {
+  const _TypingBubble();
+
+  @override
+  Widget build(BuildContext context) {
+    return ZenGlassCard(
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+      child: Row(
+        children: const [
+          Text('Panda tippt', style: TextStyle(color: Colors.black54)),
+          SizedBox(width: 6),
+          _TypingDots(),
+        ],
+      ),
+    );
+  }
+}
+
+class _TypingDots extends StatefulWidget {
+  const _TypingDots();
+  @override
+  State<_TypingDots> createState() => _TypingDotsState();
+}
+
+class _TypingDotsState extends State<_TypingDots>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 18,
+      height: 16,
+      child: AnimatedBuilder(
+        animation: _c,
+        builder: (_, __) {
+          double n(int i) => (math.sin((_c.value * 2 * math.pi) + (i * .8)) + 1) / 2;
+          final op0 = ((.35 + n(0) * .65) * .6).clamp(0.0, 1.0);
+          final op1 = ((.35 + n(1) * .65) * .6).clamp(0.0, 1.0);
+          final op2 = ((.35 + n(2) * .65) * .6).clamp(0.0, 1.0);
+          return Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 4,
+                height: 4 + 3 * n(0),
+                margin: const EdgeInsets.only(right: 3),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: op0),
+                  shape: BoxShape.circle,
+                ),
+              ),
+              Container(
+                width: 4,
+                height: 4 + 3 * n(1),
+                margin: const EdgeInsets.only(right: 3),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: op1),
+                  shape: BoxShape.circle,
+                ),
+              ),
+              Container(
+                width: 4,
+                height: 4 + 3 * n(2),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: op2),
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
 // --------------------------- Composer ----------------------------------------
 
 class _ComposerBar extends StatelessWidget {
@@ -938,6 +1090,16 @@ class _DevMemBadge extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+// --------------------------- ScrollBehavior (kein Glow) -----------------------
+
+class _NoGlowScrollBehavior extends ScrollBehavior {
+  const _NoGlowScrollBehavior();
+  @override
+  Widget buildOverscrollIndicator(BuildContext context, Widget child, ScrollableDetails details) {
+    return child;
   }
 }
 

@@ -1,23 +1,6 @@
-// [BASELINE] lib/features/reflection/reflection_screen.dart (Stand: 31.10., cleaned)
-// lib/features/reflection/reflection_screen.dart
-//
-// ReflectionScreen — Panda v3.26.0 (bereinigt: keine Action-Footer / keine Topic-/Skill-Actions)
-// Oxford level; CH risk actions; no auto-nav; ContextPin entfernt
-// -----------------------------------------------------------------------------
-// Handshake / Merge-Signal (Plan v6.4.4):
-// • Der Screen setzt KEINE eigenen Memories und KEIN meta.flags.client_memory.
-// • Die ApiService injiziert – bei aktivem Consent – automatisch context.memories
-//   und setzt meta.flags.client_memory:true selbst (Single Source of Truth).
-// -----------------------------------------------------------------------------
-// In diesem Build:
-// • Meta-Ebene: Alle Worker-Calls (start/next/closure) bekommen ein `meta`-Objekt.
-// • Phase-9 Hooks (on-device, unsichtbar):
-//   – Vor Worker-Call:  unawaited(MemoryService.saveUserTurn(...))
-//   – Nach Worker-Turn: unawaited(MemoryService.savePandaTurn(...));
-//                        unawaited(MemoryService.saveFromWorker(turn))
-// • Mini-Einbau Name-Lernen (lokal, on-device):
-//   – Beim Start der Runde:     unawaited(MemoryService.instance.learnNameFromText(userText));
-//   – Beim Fortsetzen/Antwort:  unawaited(MemoryService.instance.learnNameFromText(userAnswer));
+// [BASELINE] lib/features/reflection/reflection_screen.dart (Stand: 01.11., fixed typedef + toIso8601String)
+// P0-S3.1-DONE — Dynamische Intro-Bubble (einmalig) via _maybeShowIntro in initState
+// Update 01.11. — Meta-Handshake: meta.flags.client_memory:true + kleine Robustheitsfixes
 library reflection_screen;
 
 import 'dart:async';
@@ -86,10 +69,11 @@ const Duration _netTimeout = Duration(seconds: 18);
 const double _inputReserve = 104;
 
 // ---------------- Optionaler Hook + Navigation --------------------------------
+// Wichtig: In Funktions-Typen keine Default-Werte erlaubt → isReflection ohne Default/nullable
 typedef AddToGedankenbuch = void Function(
   String text,
   String mood, {
-  bool isReflection,
+  bool? isReflection,
   String? aiQuestion,
 });
 
@@ -166,6 +150,12 @@ class _ReflectionScreenState extends State<ReflectionScreen>
   // ---------------- Memory Recall / Bridge (visuell unsichtbar) --------------
   String? _bridgeText; // (nicht angezeigt; nur für Worker-Kontext)
 
+  // ---------------- Intro (dynamisch, einmalig) ------------------------------
+  bool _hasShownIntro = false; // Guards: nur 1× pro Sitzung
+  bool _showIntro = false;
+  String _introText =
+      'Schön, dass du da bist. Schreib mir in 1–2 Sätzen, wie es dir heute geht.';
+
   // Prefetch Recall (best effort)
   Future<void> _prefetchRecall() async {
     try {
@@ -228,11 +218,12 @@ class _ReflectionScreenState extends State<ReflectionScreen>
   }) {
     return {
       'flags': {
+        'client_memory': true, // Merge-Signal / Handshake
         if (reopen) 'reopen': true, // Closure-Recovery (Reserve)
       },
       'ui': {
         'screen': 'reflection',
-        'version': '3.26.0',
+        'version': '3.26.1',
         'platform': kIsWeb ? 'web' : 'flutter',
         'is_desktop': _isDesktop,
         'chip_mode': _chipMode.name,
@@ -301,7 +292,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     // Identity warm-up (best effort)
     unawaited(() async {
       try {
-        await (MemoryService.instance as dynamic).loadIdentityName?.call();
+        await (MemoryService.instance as dynamic).loadGreetingName?.call();
       } catch (_) {}
     }());
 
@@ -330,6 +321,9 @@ class _ReflectionScreenState extends State<ReflectionScreen>
 
     _controller.addListener(_maybeHideStarterChipsOnTyping);
 
+    // S3.1: Intro *einmalig* nach erstem Frame prüfen
+    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeShowIntro());
+
     final seed = (widget.initialUserText ?? '').trim();
     if (seed.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -337,6 +331,42 @@ class _ReflectionScreenState extends State<ReflectionScreen>
         await _startNewReflection(userText: seed, mode: 'text');
       });
     }
+  }
+
+  /// S3.1 — entscheidet, ob die Intro-Bubble lokal einmalig gezeigt wird
+  Future<void> _maybeShowIntro() async {
+    if (!mounted) return;
+    if (_hasShownIntro) return; // nur 1× pro Sitzung
+    if (_rounds.isNotEmpty) return; // sobald Runde existiert → kein Intro
+    if ((widget.initialUserText ?? '').trim().isNotEmpty) return; // Seed → direkt Start
+
+    String? name;
+    bool consent = false;
+    try {
+      final dyn = MemoryService.instance as dynamic;
+      // bevorzugt: freundlicher Anzeigename, nur wenn Nutzer zugestimmt hat
+      name = await (dyn.loadGreetingName?.call());
+      consent = (dyn.shareEnabled == true);
+    } catch (_) {
+      // still
+    }
+
+    String text;
+    if (consent && (name != null) && name.toString().trim().isNotEmpty) {
+      text =
+          'Hey, ${name.toString().trim()}, schön, dass du wieder da bist. Schreib mir in 1–2 Sätzen, wie es dir heute geht.';
+    } else {
+      // neutraler Comeback-Intro (auch passend für erste Sitzung)
+      text =
+          'Schön, dass du wieder da bist. Schreib mir in 1–2 Sätzen, wie es dir heute geht.';
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _introText = text;
+      _showIntro = true;
+      _hasShownIntro = true;
+    });
   }
 
   void _maybeHideStarterChipsOnTyping() {
@@ -524,6 +554,8 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       _chipMode = _ChipMode.none;
       _didPromptMood = false;
       _isMoodOpen = false;
+      // Intro verschwindet, sobald wir starten
+      _showIntro = false;
     });
 
     // Name lokal lernen (best-effort)
@@ -1414,6 +1446,9 @@ class _ReflectionScreenState extends State<ReflectionScreen>
         r != null && r.answered && (r.entryId == null);
     final bool showSaveHint = canPermanentSave && _rounds.length >= 2;
 
+    // S3.1: Intro nur zeigen, wenn explizit gesetzt UND noch keine Runde existiert
+    final bool showIntroNow = _showIntro && _rounds.isEmpty;
+
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: overlay,
       child: KeyboardListener(
@@ -1473,17 +1508,25 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                               ),
                               const SizedBox(height: 10),
 
-                              // Intro
-                              Padding(
-                                padding: const EdgeInsets.only(bottom: 6),
-                                child: Center(
-                                  child: ConstrainedBox(
-                                    constraints:
-                                        BoxConstraints(maxWidth: cardMaxW),
-                                    child: const _IntroBubble(),
+                              // Intro (dynamisch, lokal, einmalig)
+                              if (showIntroNow)
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 6),
+                                  child: Center(
+                                    child: ConstrainedBox(
+                                      constraints:
+                                          BoxConstraints(maxWidth: cardMaxW),
+                                      child: ZenGlassCard(
+                                        padding: const EdgeInsets.fromLTRB(
+                                            14, 12, 14, 12),
+                                        child: Text(
+                                          _introText,
+                                          style: const TextStyle(height: 1.35),
+                                        ),
+                                      ),
+                                    ),
                                   ),
                                 ),
-                              ),
 
                               // Verlauf (mit CH-Risk-Actions unter der Runde)
                               for (int index = 0;

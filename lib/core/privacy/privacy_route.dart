@@ -1,9 +1,11 @@
-// [BASELINE] lib/core/privacy/privacy_route.dart (Stand: 29.10.)
+// [BASELINE] lib/core/privacy/privacy_route.dart (v1.3, 2025-11-01)
 // Datenschutz / Privacy – Opt-in für Erinnerungen & Name
 //
 // Fixes in dieser Version:
 // • Kein statischer Zugriff mehr auf Instance-Member von MemoryService
-// • Korrektes Handling des Rückgabetyps von loadGreetingName() = ({bool greetByName, String? name})
+// • share/enabled als Felder (keine ()-Aufrufe) → vermeidet invocation_of_non_function_expression
+// • Korrektes Handling des Rückgabetyps von loadGreetingName():
+//   unterstützt sowohl ({bool greetByName, String? name}) als auch legacy String?
 // • Konsistente Consent-Kette: UI-Toggle → MemoryService.setEnabled + setShareEnabled
 // • Ruhiges Fehlerverhalten (keine Crashes bei fehlender Implementierung)
 
@@ -27,11 +29,12 @@ class _PrivacyRouteState extends State<PrivacyRoute> {
   bool _enableCloudBackup = false;
 
   // Memory & Name
-  bool _memEnabled = false; // on-device Erinnerungen
-  bool _shareEnabled =
-      false; // Kontext an Panda senden (ApiService → memory_consent)
+  bool _memEnabled = false;   // on-device Erinnerungen
+  bool _shareEnabled = false; // Kontext an Panda senden (ApiService → memory_consent)
   bool _greetByName = false;
   String? _name;
+
+  MemoryService get _svc => MemoryService.instance;
 
   @override
   void initState() {
@@ -41,77 +44,77 @@ class _PrivacyRouteState extends State<PrivacyRoute> {
 
   Future<void> _init() async {
     try {
-      // Instance-Aufrufe (kein statischer Zugriff)
-      await MemoryService.instance.warmup();
+      await _svc.warmup();
 
-      // enabled/shareEnabled können je nach Implementierung Future<bool> liefern
+      // enabled/shareEnabled als Felder (keine Funktionsaufrufe!)
       try {
-        final bool e = await (MemoryService.instance.enabled());
-        _memEnabled = e;
+        _memEnabled = _svc.enabled;
       } catch (_) {
-        // Fallback: falls als Feld/Getter implementiert wurde
-        try {
-          final dyn = MemoryService.instance as dynamic;
-          final e = await (dyn.enabled as Future<bool>);
-          _memEnabled = e;
-        } catch (_) {}
+        _memEnabled = false;
+      }
+      try {
+        _shareEnabled = _svc.shareEnabled;
+      } catch (_) {
+        _shareEnabled = false;
       }
 
+      // Name/Gruß laden – unterstützt Record ({greetByName, name}) und legacy String?
       try {
-        final bool s = await (MemoryService.instance.shareEnabled());
-        _shareEnabled = s;
-      } catch (_) {
-        try {
-          final dyn = MemoryService.instance as dynamic;
-          final s = await (dyn.shareEnabled as Future<bool>);
-          _shareEnabled = s;
-        } catch (_) {}
-      }
+        final res = await _svc.loadGreetingName();
 
-      // loadGreetingName liefert ein Record ({greetByName, name})
-      try {
-        final res = await MemoryService.instance.loadGreetingName();
-        // res erwartet: ({bool greetByName, String? name})
-        final bool greetFlag = res.greetByName;
-        final String? nm = res.name;
-        _name = (nm?.trim().isNotEmpty ?? false) ? nm!.trim() : null;
-        _greetByName = greetFlag && (_name?.isNotEmpty ?? false);
+        if (res is ({bool greetByName, String? name})) {
+          final nm = (res.name ?? '').trim();
+          _name = nm.isEmpty ? null : nm;
+          _greetByName = res.greetByName && (_name?.isNotEmpty ?? false);
+        } else if (res is String? /* legacy */) {
+          final nm = (res ?? '').trim();
+          _name = nm.isEmpty ? null : nm;
+          _greetByName = _name != null;
+        } else {
+          _name = null;
+          _greetByName = false;
+        }
       } catch (_) {
-        // defensiv: nichts gesetzt
+        // defensiv: nichts setzen
+        _name = null;
+        _greetByName = false;
       }
     } catch (_) {
       // ruhig bleiben – UI nicht blockieren
     }
-    if (mounted) setState(() => _loading = false);
+
+    if (!mounted) return;
+    setState(() => _loading = false);
   }
 
   Future<void> _applySave(PrivacySettings s) async {
-    // Mapping:
     // Ein Schalter („Erinnerungen erlauben“) steuert aktuell BEIDES:
     //  on-device speichern  +  memory_consent fürs Senden an den Worker.
-    // (Wenn du trennen willst, zweiten Toggle ergänzen.)
     try {
-      await MemoryService.instance.setEnabled(s.memoryConsent);
+      await _svc.setEnabled(s.memoryConsent);
     } catch (_) {}
     try {
-      await MemoryService.instance.setShareEnabled(s.memoryConsent);
+      await _svc.setShareEnabled(s.memoryConsent);
     } catch (_) {}
 
     // Name/Gruß
     if (s.greetByName) {
-      // Falls kein Name gesetzt ist, belassen – „Name ändern“ kümmert sich darum
-      final String nm = (_name ?? '').trim();
+      final nm = (_name ?? '').trim();
       if (nm.isNotEmpty) {
         try {
-          await MemoryService.instance.saveIdentityName(nm, greetByName: true);
+          await _svc.saveIdentityName(nm, greetByName: true);
         } catch (_) {}
+        _greetByName = true;
+      } else {
+        // kein Name gesetzt → bleibt aus, bis Nutzer explizit Namen vergibt
+        _greetByName = false;
       }
     } else {
-      // Gruß deaktivieren (Name bleibt lokal vorhanden, aber ohne Nutzung)
-      final String nm = (_name ?? '').trim();
+      final nm = (_name ?? '').trim();
       try {
-        await MemoryService.instance.saveIdentityName(nm, greetByName: false);
+        await _svc.saveIdentityName(nm, greetByName: false);
       } catch (_) {}
+      _greetByName = false;
     }
 
     // Dummy-Persistenzen für Basics (ersetzen, wenn du echte AppSettings hast)
@@ -120,7 +123,8 @@ class _PrivacyRouteState extends State<PrivacyRoute> {
     _shareUsage = s.shareUsage;
     _enableCloudBackup = s.enableCloudBackup;
 
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    setState(() {});
   }
 
   Future<void> _editName() async {
@@ -150,27 +154,27 @@ class _PrivacyRouteState extends State<PrivacyRoute> {
 
     _name = v.isEmpty ? null : v;
     try {
-      await MemoryService.instance
-          .saveIdentityName(_name ?? '', greetByName: (_name ?? '').isNotEmpty);
+      await _svc.saveIdentityName(_name ?? '', greetByName: (_name ?? '').isNotEmpty);
     } catch (_) {}
 
     _greetByName = (_name ?? '').isNotEmpty;
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    setState(() {});
   }
 
   Future<void> _forgetName() async {
     _name = null;
     try {
-      await MemoryService.instance.saveIdentityName('', greetByName: false);
+      await _svc.saveIdentityName('', greetByName: false);
     } catch (_) {}
     _greetByName = false;
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    setState(() {});
   }
 
   Future<void> _forgetMemories() async {
-    // Sanfter Wipe (PII raus); passe an, falls separater Clear-Call existiert
     try {
-      await MemoryService.instance.forgetAllPII();
+      await _svc.forgetAllPII();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Erinnerungen gelöscht')),
@@ -200,8 +204,7 @@ class _PrivacyRouteState extends State<PrivacyRoute> {
         localOnly: _localOnly,
 
         // Memory & Name
-        memoryConsent:
-            _memEnabled && _shareEnabled, // bis zur Trennung als ein Schalter
+        memoryConsent: _memEnabled && _shareEnabled, // bis zur Trennung als ein Schalter
         greetByName: _greetByName,
         currentName: _name,
 
