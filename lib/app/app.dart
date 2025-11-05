@@ -1,6 +1,6 @@
 // lib/app/app.dart
 //
-// ZenYourself — Routing Constants (v2.0 · 2025-09-14)
+// ZenYourself — Routing Constants (v2.1 · 2025-11-04)
 // -----------------------------------------------------------------------------
 // Single-Source-of-Truth für benannte Routen.
 // WICHTIG: Die tatsächliche MaterialApp ist in lib/main.dart definiert.

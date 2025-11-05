@@ -1,4 +1,4 @@
-// [V7] lib/services/guidance/dtos.dart (Stand: 31.10.)
+// [V7.1] lib/services/guidance/dtos.dart (Stand: 2025-11-04)
 // DTOs & Value-Types für Guidance-Service (standalone, ohne Api-Abhängigkeit)
 // ────────────────────────────────────────────────────────────────────────────
 // • Keine externen Abhängigkeiten
@@ -8,7 +8,12 @@
 //   Enums (ToneType, Stage), Aliasse & Aufräumen
 // • Rückwärtskompatibel zu v6.x: vorhandene Felder bleiben les-/serialisierbar
 // • S4.1: smalltalk_reply als eigenes Feld (lesen/schreiben)
-// • P3-S11.1-DONE: Persona-Sanitizer – Panda-Welt ohne See (nur Bambus/Licht/Laternen/Tee in Persona-Texten)
+// • P3-S11.1-DONE: Persona-Sanitizer – Panda-Welt ohne See (nur Bambus/Licht/Laternen/Tee)
+// • NEU (2025-11-04):
+//   – HistoryTurn {role, text}
+//   – NextTurnFullRequest {sessionId, history[], userText, context.memories?, meta.flags.client_memory?}
+//   – Response-Felder verifiziert: answer_helpers, flow.mood_prompt, risk_level, closure{...}, talk[]
+// ────────────────────────────────────────────────────────────────────────────
 
 // ────────────────────────────────────────────────────────────────────────────
 // Enums – Tone & Stage
@@ -73,6 +78,92 @@ extension StageWire on Stage {
       case 'topic_shift': return Stage.redirect;
       default: return Stage.unknown;
     }
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+/* V7.1: HistoryTurn — typisierte Chat-Historie ohne Heuristik */
+// ────────────────────────────────────────────────────────────────────────────
+class HistoryTurn {
+  final String role; // 'user' | 'assistant' | 'system' (optional)
+  final String text;
+
+  const HistoryTurn({required this.role, required this.text});
+
+  Map<String, String> toMessageJson() => {
+        'role': role.trim(),
+        'content': text,
+      };
+
+  Map<String, dynamic> toJson() => {
+        'role': role,
+        'text': text,
+      };
+
+  static HistoryTurn? fromMaybe(dynamic v) {
+    if (v is Map) {
+      final m = Map<String, dynamic>.from(v);
+      final role = (m['role'] ?? '').toString();
+      final text = (m['text'] ?? m['content'] ?? '').toString();
+      if (role.trim().isEmpty && text.trim().isEmpty) return null;
+      return HistoryTurn(role: role, text: text);
+    }
+    return null;
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+/* V7.1: NextTurnFullRequest — Request-Envelope für /next_turn_full */
+// ────────────────────────────────────────────────────────────────────────────
+class NextTurnFullRequest {
+  final String sessionId;                 // = ReflectionSession.threadId
+  final String userText;                  // aktueller User-Text (kann leer sein bei Actions)
+  final List<HistoryTurn> history;        // verlustfrei, ohne Heuristik
+  final List<dynamic>? contextMemories;   // context.memories (kuratiert, klein)
+  final bool? metaClientMemory;           // meta.flags.client_memory
+
+  const NextTurnFullRequest({
+    required this.sessionId,
+    required this.userText,
+    this.history = const <HistoryTurn>[],
+    this.contextMemories,
+    this.metaClientMemory,
+  });
+
+  Map<String, dynamic> toJson() {
+    final hist = history.map((h) => h.toMessageJson()).toList();
+    final map = <String, dynamic>{
+      'session': {'id': sessionId, 'thread_id': sessionId},
+      'user_text': userText,
+      if (hist.isNotEmpty) 'history': hist,
+    };
+    if (contextMemories != null && contextMemories!.isNotEmpty) {
+      map['context'] = {'memories': List<dynamic>.from(contextMemories!)};
+    }
+    if (metaClientMemory != null) {
+      map['meta'] = {
+        'flags': {'client_memory': metaClientMemory}
+      };
+    }
+    return map;
+  }
+
+  static NextTurnFullRequest fromParts({
+    required String sessionId,
+    required String userText,
+    List<HistoryTurn>? history,
+    List<dynamic>? contextMemories,
+    bool? metaClientMemory,
+  }) {
+    return NextTurnFullRequest(
+      sessionId: sessionId,
+      userText: userText,
+      history: history ?? const <HistoryTurn>[],
+      contextMemories: (contextMemories == null || contextMemories.isEmpty)
+          ? null
+          : List<dynamic>.from(contextMemories),
+      metaClientMemory: metaClientMemory,
+    );
   }
 }
 
@@ -151,10 +242,10 @@ class Facets {
 // V7 A1: SkillCard & SkillBlock – Kartenbasierte Skills mit Stage
 // ────────────────────────────────────────────────────────────────────────────
 class SkillCard {
-  final String id;           // stabile ID (kann hashing-basiert sein)
-  final String title;        // Überschrift der Karte
-  final String body;         // kurzer Text / Anleitung
-  final Stage stage;         // Phase (clarify/bridge/closure ...)
+  final String id;            // stabile ID
+  final String title;         // Überschrift der Karte
+  final String body;          // kurzer Text / Anleitung
+  final Stage stage;          // Phase (clarify/bridge/closure ...)
   final List<String> helpers; // Satzstarter / Chips (max 3 empfohlen)
 
   const SkillCard({
@@ -182,11 +273,13 @@ class SkillCard {
     final stage = StageWire.parse(m['stage']);
     final helpers = _orderedDedup(_strings([m['helpers'], m['chips'], m['answers']])).take(3).toList();
     if (id.isEmpty && title.isEmpty && body.isEmpty) return null;
-    return SkillCard(id: id.ifEmpty(() => 'card_${title.hashCode}_${body.hashCode}'),
-        title: title.ifEmpty(() => '—'),
-        body: body.ifEmpty(() => ''),
-        stage: stage,
-        helpers: helpers);
+    return SkillCard(
+      id: id.ifEmpty(() => 'card_${title.hashCode}_${body.hashCode}'),
+      title: title.ifEmpty(() => '—'),
+      body: body.ifEmpty(() => ''),
+      stage: stage,
+      helpers: helpers,
+    );
   }
 }
 
@@ -302,7 +395,7 @@ class UserAction {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// TurnAnalysis & ClosureData (unverändert, leicht gesäubert)
+// TurnAnalysis & ClosureData
 // ────────────────────────────────────────────────────────────────────────────
 class TurnAnalysis {
   final String? summary;
@@ -542,7 +635,6 @@ class ReflectionTurn {
       return (s == null || s.isEmpty) ? null : s;
     }
     final smalltalk = parseSmalltalk();
-    // P3-S11.1: Persona-Sanitizer nur für Panda-Persona (kein Mirror/User-Quote)
     final smalltalkSan = (smalltalk == null) ? null : _sanitizePersona(smalltalk);
 
     // talk ohne Doppelung aus smalltalk_reply
@@ -668,7 +760,7 @@ class ReflectionTurn {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// ReflectionFlow / Session (unverändert, mit kleinen Helpers)
+// ReflectionFlow / Session
 // ────────────────────────────────────────────────────────────────────────────
 class ReflectionFlow {
   final bool recommendEnd;
@@ -982,17 +1074,7 @@ String _sanitizePersona(String s) {
     RegExp(r'\bufer\b', caseSensitive: false): 'Bambushain',
   };
 
-  // Ersetzen (Achtung: \bsee\b vermeidet „Seele“)
   repl.forEach((rx, val) => out = out.replaceAll(rx, val));
-
-  // Optional: subtile Persona-Bilder verstärken (ohne Stilbruch)
-  // – wenn Bambus erwähnt, ist ein leiser Licht-/Laternen-Hinweis okay
-  if (RegExp(r'\bbambus', caseSensitive: false).hasMatch(out)) {
-    // keine harten Zusätze, nur leichte Phrasen-Glättung
-    out = out.replaceAll(RegExp(r'\bim Bambushain\b', caseSensitive: false), 'im Bambushain');
-  }
-
-  // sanfte Aufräumung (Doppelspaces, Komma-Abstände)
   out = out.replaceAll(RegExp(r'\s{2,}'), ' ').replaceAll(' ,', ',').trim();
   return out;
 }

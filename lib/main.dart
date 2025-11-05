@@ -1,20 +1,19 @@
-// [BASELINE] lib/main.dart (Stand: 29.10.)
+// [BASELINE] lib/main.dart (Stand: 04.11.2025 · v1.7.0)
 // ZenYourself — App Bootstrap (Oxford-Zen, Pro-Level, Material 3)
-// v1.6.2 · 2025-10-29
 // -----------------------------------------------------------------------------
 // • EINZIGE MaterialApp im Projekt (verhindert Routing-Konflikte).
 // • Alle benannten Routen (/, /reflection, /journey, …) hier registriert.
 // • Robustes Bootstrapping (runZonedGuarded, PlatformDispatcher.onError).
 // • Provider-Setup inkl. Journal-Persistenz (kanonisch).
 // • A11y, i18n, Themes (Material 3), sanftes Scroll-Verhalten.
-// • MemoryService.init() beim Start (Kontext-Gedächtnis).
-// • Community-Bootstrap (Stats + Signed POST) via --dart-define.
-// • NEU v1.6.2: Dev-Opt-in für Memory → setzt shareEnabled + greetingConsent
-//   im DEBUG-Build, damit der Name sofort im selben Turn verfügbar ist
-//   (privacy-safe: Release bleibt Ghost-Mode).
+// • MemoryService.init()/warmup()/ensureGreetingNameLoaded() beim Start,
+//   damit Consent/Active/Name vor dem ersten Turn verfügbar sind.
+// • NEU v1.7.0: ReflectionSession-Provider mit frischer Session-ID
+//   beim Öffnen von /reflection (ohne externe uuid-Abhängigkeit).
 // -----------------------------------------------------------------------------
 
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -88,6 +87,34 @@ const String _kCommHmacSecret =
 const String _kCommRespHmac =
     String.fromEnvironment('ZEN_COMMUNITY_RESP_HMAC', defaultValue: '');
 
+// -----------------------------------------------------------------------------
+// ReflectionSession — stellt eine frische Session-ID pro Reflexionsstart bereit
+// -----------------------------------------------------------------------------
+class ReflectionSession {
+  final String id;
+  final DateTime startedAtUtc;
+
+  ReflectionSession._(this.id, this.startedAtUtc);
+
+  /// Robuste v4-ähnliche ID (ohne externe Abhängigkeit).
+  static String newId() {
+    final rnd = Random.secure();
+    final bytes = List<int>.generate(16, (_) => rnd.nextInt(256));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40; // Version 4
+    bytes[8] = (bytes[8] & 0x3f) | 0x80; // Variant
+    String _hx(int b) => b.toRadixString(16).padLeft(2, '0');
+    final b = bytes.map(_hx).toList(growable: false);
+    return '${b[0]}${b[1]}${b[2]}${b[3]}-'
+           '${b[4]}${b[5]}-'
+           '${b[6]}${b[7]}-'
+           '${b[8]}${b[9]}-'
+           '${b[10]}${b[11]}${b[12]}${b[13]}${b[14]}${b[15]}';
+  }
+
+  static ReflectionSession fresh() =>
+      ReflectionSession._(newId(), DateTime.now().toUtc());
+}
+
 Future<void> main() async {
   runZonedGuarded(() async {
     WidgetsFlutterBinding.ensureInitialized();
@@ -99,37 +126,27 @@ Future<void> main() async {
       debugPrint('[Init] LocalStorage error: $e\n$st');
     }
 
-    // MemoryService (Kontext-Gedächtnis) initialisieren
+    // MemoryService (Kontext-Gedächtnis) initialisieren – vor App-Start.
     try {
       await MemoryService.instance.init();
-      debugPrint('✅ MemoryService initialized (context memory ready).');
+      // Warmup (Topics/Facets laden), Name/Greet Sync-Cache füllen
+      // ignore: discarded_futures
+      MemoryService.instance.warmup();
+      await MemoryService.instance.ensureGreetingNameLoaded();
+      debugPrint('✅ MemoryService ready (consent/active/name preloaded).');
 
-      // --- NEU: Dev-Opt-in (nur im Debug-Build) -----------------------------
+      // --- Dev-Opt-in (nur Debug): Consent + Greet aktivieren ----------------
       if (kDebugMode) {
         try {
           final dyn = MemoryService.instance as dynamic;
-          // ignore: avoid_dynamic_calls
           await (dyn.setShareEnabled?.call(true));
-          // ignore: avoid_dynamic_calls
           await (dyn.setGreetingConsent?.call(true));
-
-          bool share = false, greet = false;
-          try {
-            // ignore: avoid_dynamic_calls
-            share = dyn.shareEnabled == true;
-            // ignore: avoid_dynamic_calls
-            greet = dyn.greetingConsent == true;
-          } catch (_) {}
-          debugPrint(
-              '✅ Memory (debug): consent share=$share, greet=$greet — Name direkt nutzbar.');
-        } catch (e, st) {
-          debugPrint('⚠️  Memory debug-consent setup failed: $e\n$st');
-        }
+          debugPrint('✅ Memory (debug): consent+greet enabled for local testing.');
+        } catch (_) {/* ignore */}
       }
       // ----------------------------------------------------------------------
     } catch (e, st) {
-      debugPrint(
-          '⚠️  MemoryService init failed (continuing without memory): $e\n$st');
+      debugPrint('⚠️  MemoryService init failed (continuing without memory): $e\n$st');
     }
 
     // Fehlerabfang (Flutter/UI)
@@ -148,7 +165,6 @@ Future<void> main() async {
     // Community (GET-Stats + signed POST) initialisieren — sanft & optional
     _setupCommunityApis();
 
-    // In Debug-Builds: klare Hinweise drucken, damit CLI 1:1 konfiguriert werden kann
     if (kDebugMode) {
       _printRuntimeSummaryAndCliHints();
     }
@@ -168,7 +184,7 @@ void _setupZenApi() {
   final String url =
       definesUsed && _kApiUrl.isNotEmpty ? _kApiUrl : ZenEnv.apiUrl;
   final String token =
-    definesUsed && _kApiToken.isNotEmpty ? _kApiToken : ZenEnv.appToken;
+      definesUsed && _kApiToken.isNotEmpty ? _kApiToken : ZenEnv.appToken;
 
   if (enabled && url.isNotEmpty) {
     try {
@@ -185,8 +201,7 @@ void _setupZenApi() {
 
       debugPrint('✅ GuidanceService HTTP enabled → $url');
       if (token.isEmpty) {
-        debugPrint(
-            '⚠️  Guidance: Kein APP_TOKEN gesetzt – dein Worker könnte 401/403 liefern.');
+        debugPrint('⚠️  Guidance: Kein APP_TOKEN gesetzt – dein Worker könnte 401/403 liefern.');
       } else {
         debugPrint('ℹ️ Guidance: Auth=Bearer (Token vorhanden).');
       }
@@ -202,8 +217,6 @@ void _setupZenApi() {
 }
 
 /// Community-Bootstrap: GET-Stats (ohne Signatur) + POST (signiert, optional).
-/// – Ohne URL bleibt alles ruhig deaktiviert.
-/// – Mit URL aber ohne Secrets: nur GET-Stats aktiv, POST scheitert kontrolliert.
 void _setupCommunityApis() {
   if (!_kCommEnabled) {
     debugPrint('ℹ️ Community APIs disabled (ZEN_COMMUNITY_ENABLED=false).');
@@ -218,9 +231,6 @@ void _setupCommunityApis() {
     // 1) GET-Stats (kein Secret nötig)
     cstats.CommunityStatsApi.instance.configure(
       baseUrl: _kCommUrl,
-      // Optional: TTL/Timeouts hier anpassbar
-      // ttl: const Duration(minutes: 2),
-      // timeout: const Duration(seconds: 8),
     );
 
     // 2) Signierter POST (nur wenn Key+Secret vorhanden)
@@ -232,8 +242,7 @@ void _setupCommunityApis() {
     );
 
     if (_kCommApiKey.isEmpty || _kCommHmacSecret.isEmpty) {
-      debugPrint(
-          '⚠️ CommunityApi: API_KEY/HMAC fehlen – POST-Acks werden scheitern (UI fängt es ab).');
+      debugPrint('⚠️ CommunityApi: API_KEY/HMAC fehlen – POST-Acks werden scheitern (UI fängt es ab).');
     }
 
     debugPrint('✅ Community APIs enabled → ${_kCommUrl}');
@@ -271,9 +280,8 @@ void _printRuntimeSummaryAndCliHints() {
 
     debugPrint('— — — CLI HINTS (copy/paste) — — —');
     debugPrint('export ZEN_GUIDANCE="$gUrl"');
-    if (gHasToken) {
-      debugPrint(
-          '# Bearer (App-Token, maskiert): ${maskedToken.isEmpty ? "<none>" : maskedToken}');
+    if ((_kApiToken.isNotEmpty || ZenEnv.appToken.isNotEmpty)) {
+      debugPrint('# Bearer (App-Token, maskiert): ${maskedToken.isEmpty ? "<none>" : maskedToken}');
       debugPrint('export ZEN_APP_TOKEN="<DEIN_BEARER_TOKEN_HIER>"');
     } else {
       debugPrint('# Kein Bearer-Token in der App-Konfiguration gefunden.');
@@ -361,14 +369,10 @@ class _ZenYourselfMaterialApp extends StatelessWidget {
         child: MaterialApp(
           restorationScopeId: 'zenyourself-app',
           debugShowCheckedModeBanner: false,
-          // Material 3 explizit aktivieren, falls AppTheme es nicht bereits setzt
+          // Material 3 explizit aktivieren
           themeMode: isDark ? ThemeMode.dark : ThemeMode.light,
-          theme: AppTheme.light.copyWith(
-            useMaterial3: true,
-          ),
-          darkTheme: AppTheme.dark.copyWith(
-            useMaterial3: true,
-          ),
+          theme: AppTheme.light.copyWith(useMaterial3: true),
+          darkTheme: AppTheme.dark.copyWith(useMaterial3: true),
           themeAnimationDuration: const Duration(milliseconds: 240),
           themeAnimationCurve: Curves.easeInOutCubicEmphasized,
           useInheritedMediaQuery: true,
@@ -408,10 +412,11 @@ class _ZenYourselfMaterialApp extends StatelessWidget {
 
           // === EINZIGE Routing-Quelle ===
           initialRoute: AppRoutes.start,
+
+          // Statische Routen (ohne /reflection – dafür onGenerateRoute)
           routes: {
             AppRoutes.start: (_) => const StartScreen(),
             AppRoutes.journal: (_) => const JournalScreen(),
-            AppRoutes.reflection: (_) => const ReflectionScreen(),
             AppRoutes.impulse: (_) => const ImpulseScreen(),
             AppRoutes.story: (_) => const StoryScreen(),
             AppRoutes.pro: (_) => const ProScreen(
@@ -426,9 +431,29 @@ class _ZenYourselfMaterialApp extends StatelessWidget {
                   moodEntries: [],
                   reflections: [],
                 ),
-            // Optional: historischer Alias
-            '/gedankenbuch': (_) => const StoryScreen(),
+            '/gedankenbuch': (_) => const StoryScreen(), // historischer Alias
           },
+
+          // Dynamische Route für /reflection → frische Session-ID + Provider
+          onGenerateRoute: (settings) {
+            if (settings.name == AppRoutes.reflection) {
+              final session = ReflectionSession.fresh();
+              return MaterialPageRoute(
+                settings: settings,
+                builder: (_) => Provider<ReflectionSession>.value(
+                  value: session,
+                  // ReflectionScreen bleibt unverändert.
+                  // reflection_logic kann die Session-ID bei Bedarf
+                  // via Provider (dynamic) lesen; kein Import auf main.dart nötig:
+                  //   final s = Provider.of<dynamic>(context, listen:false);
+                  //   final sessionId = (s?.id as String?) ?? '<fallback>';
+                  child: const ReflectionScreen(),
+                ),
+              );
+            }
+            return null; // Unknown → fallback unten
+          },
+
           onUnknownRoute: (_) =>
               MaterialPageRoute(builder: (_) => const StartScreen()),
         ),

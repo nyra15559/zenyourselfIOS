@@ -1,6 +1,4 @@
-// [BASELINE] lib/features/reflection/reflection_view.dart (Stand: 30.10., cleaned)
-// lib/features/reflection/reflection_view.dart
-//
+// [BASELINE] lib/features/reflection/reflection_view.dart (Stand: 2025-11-04, v6.7)
 // ReflectionView — reine Layout-Schicht (Plan v6.2.2 + v6.3.x VM-Wiring)
 // + v6.4 AutoScroll v1 (2025-10-31):
 //   • Stateful (ScrollController, extentAfter-Heuristik, Jump-to-Bottom FAB)
@@ -9,32 +7,25 @@
 //   • sanfter Scroll bei Keyboard-Änderung (bottomInset-Änderung)
 // ---------------------------------------------------------------------
 // Rendert:
-// • Header, Intro/Pitch-Bubble, **Smalltalk-Bubble (neu),** Bridge-Bubble
+// • Header, Intro/Pitch-Bubble, Smalltalk-Bubble, Bridge-Bubble
 // • Frage + helperSuggestion, Talk-Zeilen
 // • Verlauf (Thread), **Answer-Chips (insert-only)**   ← nur Worker-Helpers
-// • Abschluss-/Mood-CTA (allowClosure/moodPrompt), Risk/Hotline-Banner
+// • **Mood-CTA ausschließlich, wenn flow.mood_prompt==true**
+// • Risk/Hotline-Banner
 // • Composer (unten) + Footer-Disclaimer
-// • Optional: kleines Dev-Badge oben rechts → „Mem ON (n)“ / „Mem OFF“
+// • Optional: Dev-Mem-Badge („Mem ON (n)“ / „Mem OFF“)
 //
 // Hinweis: Ehemalige Tool-/Topic-Chips („Thema wechseln“, „Essenz“, „Beispiel“)
-// wurden entfernt. `topicChips` bleibt in den Props als no-op bestehen,
-// wird hier aber NICHT gerendert (API-stabil, kein UI-Effekt).
+// sind entfernt. topicChips bleibt als Prop für API-Stabilität (no-op).
 //
 // v6.4.1 (S2.2 Typing Inline):
-//   • Neuer Prop `isTyping` → rendert **Typing-Indicator direkt unter der letzten User-Bubble**.
+//   • Neues Prop `isTyping` → Typing-Indicator direkt unter der letzten User-Bubble.
 //   • Kein Overlay: Indicator als normaler Listeneintrag innerhalb des Threads.
-//   • AutoScroll-Signatur erweitert (reagiert auf Typing-Änderung).
 //
-// S4.3 (Smalltalk anzeigen):
-//   • Neues Prop `smalltalkText` → kurze Panda-Antwort als eigene Bubble unter Intro.
-//   • Intro bleibt sichtbar; Smalltalk ersetzt Intro NICHT.
+// v6.7 Patch (2025-11-04):
+//   • Mood-Gate strikt an `moodPrompt` gebunden (kein CTA bei allowClosure-only).
+//   • Kleinere Robustheits-Fixes (Width-Clamp, Null-Guards), Analyzer-clean.
 //
-// S5.1 (Handy n Linux Layout):
-//   • Plattform-adaptive Scroll-Physik (Desktop=Clamping, Mobile=Bouncing), Overscroll-Glow aus.
-//   • Desktop: sichtbare Scrollbar.
-//   • Keyboard-Inset: gedrosselte Reaktion + Klammerung (0..320) → weniger Springen.
-//   • Card-MaxBreite robust geklammert → kein Leerbildschirm bei extrem schmalem Fenster.
-//   • Solider Farb-Fallback hinter dem Backdrop.
 
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
@@ -52,7 +43,7 @@ class ReflectionViewProps {
 
   // Bubbles oben
   final String? introText;     // Pitch/Intro (oben, pinned-ähnlich)
-  final String? smalltalkText; // **NEU**: kurzer Smalltalk des Panda (unter Intro)
+  final String? smalltalkText; // kurzer Smalltalk des Panda (unter Intro)
   final String? bridgeText;    // Bridge/Recall (optional, unter Smalltalk)
 
   // Leitfrage-Block
@@ -63,11 +54,11 @@ class ReflectionViewProps {
   // Verlauf (bereits vorgerendert vom Orchestrator)
   final List<Widget> thread;
 
-  // **NEU**: Typing-Indicator State (wird unter dem letzten User-Item gerendert)
+  // Typing-Indicator State (wird unter dem letzten User-Item gerendert)
   final bool isTyping;
 
   // Chips
-  final List<String> chips; // Answer-Chips (insert-only)
+  final List<String> chips; // Answer-Chips (insert-only; nur Worker-Helpers)
   final List<String> topicChips; // (deprecated/no-op) – wird nicht mehr gezeigt
   final ValueChanged<String>? onChipTap; // optional: externer Chip-Tap-Handler
 
@@ -80,15 +71,15 @@ class ReflectionViewProps {
   final bool isRecording;
 
   // Abschluss/Mood-CTA
-  final bool allowClosure;
-  final bool moodPrompt;
+  final bool allowClosure; // kompatibel belassen, aber UI gate nur über moodPrompt!
+  final bool moodPrompt;   // **allein maßgeblich** für CTA-Sichtbarkeit
   final VoidCallback? onClosureTap;
 
   // Risk/Hotline
   final bool risk;
 
   // Hope-Slot (kleiner, warmer Hinweis unter den Chips)
-  final String? hopeText; // einfacher Text
+  final String? hopeText;  // einfacher Text
   final Widget? hopeWidget; // alternativ: kompletter Widget-Slot
 
   // Footer-Disclaimer
@@ -107,13 +98,13 @@ class ReflectionViewProps {
     this.headerSubtitle,
     this.pandaAsset = 'assets/star_pa.png',
     this.introText,
-    this.smalltalkText, // **NEU**
+    this.smalltalkText,
     this.bridgeText,
     this.question,
     this.helperSuggestion,
     this.talkLines = const <String>[],
     required this.thread,
-    this.isTyping = false, // **NEU**
+    this.isTyping = false,
     required this.chips,
     this.topicChips = const <String>[], // no-op
     this.onChipTap,
@@ -216,7 +207,7 @@ class _ReflectionViewState extends State<ReflectionView> {
   void _jumpToEnd({bool animated = true}) {
     if (!_scroll.hasClients) return;
     final to = _scroll.position.maxScrollExtent;
-    if (to <= 0) return; // Nichts zu scrollen → kein unnötiges Animieren
+    if (to <= 0) return; // Nichts zu scrollen
     if (animated) {
       _scroll.animateTo(
         to,
@@ -255,7 +246,7 @@ class _ReflectionViewState extends State<ReflectionView> {
     sig = 31 * sig + (p.bridgeText ?? '').length;
     sig = 31 * sig + (p.hopeText ?? '').length;
     sig = 31 * sig + (p.moodPrompt ? 1 : 0);
-    sig = 31 * sig + (p.allowClosure ? 1 : 0);
+    // allowClosure wird nicht mehr für die CTA-Sichtbarkeit verwendet
     return sig & 0x7fffffff;
   }
 
@@ -292,10 +283,10 @@ class _ReflectionViewState extends State<ReflectionView> {
     final bool _showChips = props.chips.isNotEmpty;
     final bool _showHope =
         (props.hopeText ?? '').trim().isNotEmpty || props.hopeWidget != null;
-    final bool _showClosureCta = props.allowClosure || props.moodPrompt;
+    // Mood-CTA **nur** wenn moodPrompt==true
+    final bool _showMoodCta = props.moodPrompt;
 
     return Scaffold(
-      // Transparenz bleibt für Backdrop, aber mit sicherem Farb-Fallback darunter
       backgroundColor: Colors.transparent,
       body: Stack(
         children: [
@@ -344,9 +335,23 @@ class _ReflectionViewState extends State<ReflectionView> {
                               ? Scrollbar(
                                   controller: _scroll,
                                   thumbVisibility: true,
-                                  child: _buildListView(cardMaxW, bottomInset, w, props),
+                                  child: _buildListView(cardMaxW, bottomInset, w, props,
+                                      showIntro: _showIntro,
+                                      showSmalltalk: _showSmalltalk,
+                                      showBridge: _showBridge,
+                                      showQuestion: _showQuestion,
+                                      showChips: _showChips,
+                                      showHope: _showHope,
+                                      showMoodCta: _showMoodCta),
                                 )
-                              : _buildListView(cardMaxW, bottomInset, w, props),
+                              : _buildListView(cardMaxW, bottomInset, w, props,
+                                  showIntro: _showIntro,
+                                  showSmalltalk: _showSmalltalk,
+                                  showBridge: _showBridge,
+                                  showQuestion: _showQuestion,
+                                  showChips: _showChips,
+                                  showHope: _showHope,
+                                  showMoodCta: _showMoodCta),
                         ),
 
                         // „Nach unten“-FAB (nur zeigen, wenn neue Items da sind und User nicht unten ist)
@@ -396,7 +401,19 @@ class _ReflectionViewState extends State<ReflectionView> {
     );
   }
 
-  Widget _buildListView(double cardMaxW, double bottomInset, double w, ReflectionViewProps props) {
+  Widget _buildListView(
+    double cardMaxW,
+    double bottomInset,
+    double w,
+    ReflectionViewProps props, {
+    required bool showIntro,
+    required bool showSmalltalk,
+    required bool showBridge,
+    required bool showQuestion,
+    required bool showChips,
+    required bool showHope,
+    required bool showMoodCta,
+  }) {
     return ListView(
       controller: _scroll,
       physics: _platformPhysics,
@@ -419,50 +436,50 @@ class _ReflectionViewState extends State<ReflectionView> {
         ),
         const SizedBox(height: 10),
 
-        // Intro / Pitch Bubble (pinned-ähnlich)
-        if ((props.introText ?? '').trim().isNotEmpty)
+        // Intro / Pitch Bubble
+        if (showIntro)
           _BubbleCard(
             maxWidth: cardMaxW,
             child: Text(
-              props.introText!.trim(),
+              (props.introText ?? '').trim(),
               style: const TextStyle(height: 1.35),
             ),
           ),
 
         // Smalltalk-Bubble (kurz, neutral-warm)
-        if ((props.smalltalkText ?? '').trim().isNotEmpty)
+        if (showSmalltalk)
           Padding(
             padding: const EdgeInsets.only(top: 6),
             child: _BubbleCard(
               emoji: '💬',
               maxWidth: cardMaxW,
               child: Text(
-                props.smalltalkText!.trim(),
+                (props.smalltalkText ?? '').trim(),
                 style: const TextStyle(height: 1.35),
               ),
             ),
           ),
 
         // Bridge Bubble (Memory/Recall)
-        if ((props.bridgeText ?? '').trim().isNotEmpty)
+        if (showBridge)
           Padding(
             padding: const EdgeInsets.only(top: 6),
             child: _BubbleCard(
               emoji: '🪄',
               maxWidth: cardMaxW,
-              child: _Markdownish(props.bridgeText!.trim()),
+              child: _Markdownish((props.bridgeText ?? '').trim()),
             ),
           ),
 
         // Frage + helperSuggestion + Talk-Zeilen
-        if ((props.question ?? '').trim().isNotEmpty)
+        if (showQuestion)
           Padding(
             padding: const EdgeInsets.only(top: 8),
             child: Center(
               child: ConstrainedBox(
                 constraints: BoxConstraints(maxWidth: cardMaxW),
                 child: _QuestionCard(
-                  question: props.question!.trim(),
+                  question: (props.question ?? '').trim(),
                   helperSuggestion:
                       (props.helperSuggestion ?? '').trim().isNotEmpty
                           ? props.helperSuggestion!.trim()
@@ -496,8 +513,8 @@ class _ReflectionViewState extends State<ReflectionView> {
             ),
           ),
 
-        // Antwort-Chips (nur Worker-Helpers)
-        if (props.chips.isNotEmpty)
+        // Antwort-Chips (nur Worker-Helpers; Insert-only)
+        if (showChips)
           Padding(
             padding: const EdgeInsets.only(top: 8),
             child: Center(
@@ -519,19 +536,20 @@ class _ReflectionViewState extends State<ReflectionView> {
           ),
 
         // Hope Slot (kleiner, warmer Mutmacher)
-        if ((props.hopeText ?? '').trim().isNotEmpty || props.hopeWidget != null)
+        if (showHope)
           Padding(
             padding: const EdgeInsets.fromLTRB(0, 10, 0, 0),
             child: Center(
               child: ConstrainedBox(
                 constraints: BoxConstraints(maxWidth: cardMaxW),
-                child: props.hopeWidget ?? _HopeBubble(text: props.hopeText!.trim()),
+                child: props.hopeWidget ??
+                    _HopeBubble(text: (props.hopeText ?? '').trim()),
               ),
             ),
           ),
 
-        // Abschluss-/Mood-CTA
-        if (props.allowClosure || props.moodPrompt)
+        // Mood-CTA (nur wenn moodPrompt==true)
+        if (showMoodCta)
           Padding(
             padding: const EdgeInsets.only(top: 10),
             child: Center(
@@ -542,7 +560,7 @@ class _ReflectionViewState extends State<ReflectionView> {
                   child: ElevatedButton.icon(
                     onPressed: props.onClosureTap,
                     icon: const Icon(Icons.emoji_emotions_rounded),
-                    label: Text(props.moodPrompt ? 'Stimmung teilen' : 'Abschluss & Stimmung'),
+                    label: const Text('Stimmung teilen'),
                   ),
                 ),
               ),
@@ -584,7 +602,7 @@ class _ReflectionViewState extends State<ReflectionView> {
 
   void _onTapChip(BuildContext context, String raw) {
     final normalized = _normalizeChip(raw);
-    // Externer Handler? → bevorzugen
+    // Externer Handler? → bevorzugen (z. B. direktes Senden)
     if (widget.props.onChipTap != null) {
       widget.props.onChipTap!(normalized);
       _scheduleAutoScroll();
