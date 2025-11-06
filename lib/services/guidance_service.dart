@@ -1,7 +1,27 @@
-// [BASELINE] lib/services/guidance_service.dart (Stand: 31.10.)
-// ZenYourself — Guidance / Coaching Service (PANDA-REFLECT-12.7 → v6.4.9)
+// [BASELINE] lib/services/guidance_service.dart (Stand: 2025-11-04, v6.4.12)
+// ZenYourself — Guidance / Coaching Service
 // -----------------------------------------------------------------------------
-// Änderungen v6.4.9 (S3.3 Round/Session Guards):
+// Änderungen v6.4.12 (Async-Fix for Client-Memory Bridge):
+// • _prepareMemories(...) auf async umgestellt → Future<Map<String,dynamic>?>
+// • Alle Aufrufer (startSessionFull/reflectFull/nextTurnFull) verwenden 'await'.
+// -----------------------------------------------------------------------------
+// v6.4.11 (Client-Memory Bridge / Name-Injection):
+// • Consent-Automat: memoryConsent → bool (Default: MemoryService.shareEnabled)
+// • Bei Consent: meta.flags.client_memory = true wird in JEDEM Call gesetzt.
+// • Name-Injection: erkennt im User-Text „ich heiße/ich heisse/mein Name ist/ich bin …“
+//   und ergänzt on-the-fly context.memories.identity.name (nur bei Consent).
+// • Kleine Memories: Wenn keine Memories übergeben wurden, werden bei Consent
+//   kompakte Client-Memories via MemoryService.buildContextMemories(consent:true)
+//   gemerged (Hardcap liegt im ApiService).
+// -----------------------------------------------------------------------------
+// v6.4.10 (Context-Carryover / Next-Turn-Fassade):
+// • Neue Fassade nextTurnFull(...): ruft ApiService.sendNextTurnFull(...) auf
+//   (Fallback → ApiService.nextTurnFull), um die /next_turn_full-Route zu nutzen.
+// • History-Durchreichung: Signatur akzeptiert List<HistoryTurn>; 1:1-Mapping
+//   nach {role, content} (keine Heuristik).
+// • Deprecation: jegliche interne Nutzung von reflect_full entfernt/markiert.
+// -----------------------------------------------------------------------------
+// v6.4.9 (S3.3 Round/Session Guards):
 // • Meta wird *immer* an ApiService weitergereicht (auch im typed Fallback).
 // • intro.round_count wird aus der Session autoritativ gesetzt (Guard).
 // • meta.session_hint enthält thread_id/id/turn_index für Observability.
@@ -12,10 +32,8 @@
 // • smalltalk_reply aus ReflectionTurn wird in _turnToJson() ins Normalized-JSON
 //   übernommen (Key: 'smalltalk_reply'); keine Doppelung mit 'talk'.
 // -----------------------------------------------------------------------------
-// Vorherige v6.4.8 Notes:
-// • memoryConsent-Handling (nullable→bool)
-// • story(...) liefert stabile id via FNV
-// • Journey/Story Signaturen nutzen entryIds
+// Vorherige Notes:
+// • memoryConsent-Handling (nullable→bool); Journey/Story stabile IDs via FNV.
 // -----------------------------------------------------------------------------
 
 library guidance_service;
@@ -94,12 +112,20 @@ class GuidanceService {
     Map<String, dynamic>? clientContext,
     Map<String, dynamic>? meta,
   }) async {
-    // Effektiven Bool bestimmen
+    // 1) Consent bestimmen
     final bool consent =
         memoryConsent ?? mem.MemoryService.instance.shareEnabled;
 
-    // S3.3: Meta mit Session/Round anreichern (autoritativer round_count)
-    final Map<String, dynamic>? m = _attachIntroAndSessionMeta(meta, session);
+    // 2) Meta anreichern + client_memory-Flag setzen (bei Consent)
+    Map<String, dynamic>? m = _attachIntroAndSessionMeta(meta, session);
+    m = _withClientMemoryFlag(m, consent);
+
+    // 3) Memories vorbereiten (Name-Injection + kleine Memories)
+    final mems = await _prepareMemories(
+      incoming: memories,
+      consent: consent,
+      userText: text,
+    );
 
     final svc = ApiService.instance;
     try {
@@ -111,7 +137,7 @@ class GuidanceService {
         tz: tz,
         maxTurns: maxTurns,
         history: history,
-        memories: memories,
+        memories: mems,
         memoryConsent: consent, // <- bool
         userAction: userAction,
         clientContext: clientContext,
@@ -119,7 +145,7 @@ class GuidanceService {
       );
       if (fut != null) return await fut;
     } catch (_) {/* ignore */}
-    // Typed Fallback (v6.4.9: meta via dyn-call; bei typed ggf. nicht verfügbar)
+    // Typed Fallback
     try {
       final dyn2 = svc as dynamic;
       final Future<ReflectionTurn>? fut2 = dyn2.startSessionFull?.call(
@@ -129,7 +155,7 @@ class GuidanceService {
         tz: tz,
         maxTurns: maxTurns,
         history: history,
-        memories: memories,
+        memories: mems,
         memoryConsent: consent,
         userAction: userAction,
         clientContext: clientContext,
@@ -144,13 +170,14 @@ class GuidanceService {
       tz: tz,
       maxTurns: maxTurns,
       history: history,
-      memories: memories,
+      memories: mems,
       memoryConsent: consent, // <- bool
       userAction: userAction,
       clientContext: clientContext,
     );
   }
 
+  /// @deprecated: Bitte `startSessionFull` / `nextTurnFull` verwenden.
   Future<ReflectionTurn> reflectFull({
     required ReflectionSession session,
     required String text,
@@ -166,7 +193,14 @@ class GuidanceService {
     final bool consent =
         memoryConsent ?? mem.MemoryService.instance.shareEnabled;
 
-    final Map<String, dynamic>? m = _attachIntroAndSessionMeta(meta, session);
+    Map<String, dynamic>? m = _attachIntroAndSessionMeta(meta, session);
+    m = _withClientMemoryFlag(m, consent);
+
+    final mems = await _prepareMemories(
+      incoming: memories,
+      consent: consent,
+      userText: text,
+    );
 
     final svc = ApiService.instance;
     try {
@@ -177,7 +211,7 @@ class GuidanceService {
         locale: locale,
         tz: tz,
         history: history,
-        memories: memories,
+        memories: mems,
         memoryConsent: consent, // <- bool
         userAction: userAction,
         clientContext: clientContext,
@@ -193,7 +227,7 @@ class GuidanceService {
         locale: locale,
         tz: tz,
         history: history,
-        memories: memories,
+        memories: mems,
         memoryConsent: consent,
         userAction: userAction,
         clientContext: clientContext,
@@ -207,19 +241,21 @@ class GuidanceService {
       locale: locale,
       tz: tz,
       history: history,
-      memories: memories,
+      memories: mems,
       memoryConsent: consent, // <- bool
       userAction: userAction,
       clientContext: clientContext,
     );
   }
 
+  /// Neue Fassade für den Full-Turn über /next_turn_full.
+  /// History-Durchreichung: erwartet `List<HistoryTurn>` und mappt 1:1.
   Future<ReflectionTurn> nextTurnFull({
     required ReflectionSession session,
     required String text,
     String locale = 'de',
     String tz = 'Europe/Zurich',
-    List<Map<String, String>>? history,
+    List<HistoryTurn>? history, // <-- NEU: typed History
     dynamic memories,
     bool? memoryConsent, // Guidance: nullable
     UserAction? userAction,
@@ -229,25 +265,39 @@ class GuidanceService {
     final bool consent =
         memoryConsent ?? mem.MemoryService.instance.shareEnabled;
 
-    final Map<String, dynamic>? m = _attachIntroAndSessionMeta(meta, session);
+    Map<String, dynamic>? m = _attachIntroAndSessionMeta(meta, session);
+    m = _withClientMemoryFlag(m, consent);
+
+    final List<Map<String, String>>? messages =
+        _historyToMessages(history); // verlustfrei, keine Heuristik
+
+    final mems = await _prepareMemories(
+      incoming: memories,
+      consent: consent,
+      userText: text,
+    );
 
     final svc = ApiService.instance;
+
+    // Primär: neue öffentliche API sendNextTurnFull(...)
     try {
       final dyn = svc as dynamic;
-      final Future<ReflectionTurn>? fut = dyn.nextTurnFull?.call(
+      final Future<ReflectionTurn>? fut = dyn.sendNextTurnFull?.call(
         session: session,
         text: text,
         locale: locale,
         tz: tz,
-        history: history,
-        memories: memories,
-        memoryConsent: consent, // <- bool
+        history: messages,
+        memories: mems,
+        memoryConsent: consent,
         userAction: userAction,
         clientContext: clientContext,
         meta: m,
       );
       if (fut != null) return await fut;
     } catch (_) {/* ignore */}
+
+    // Fallback: ältere API nextTurnFull(...)
     try {
       final dyn2 = svc as dynamic;
       final Future<ReflectionTurn>? fut2 = dyn2.nextTurnFull?.call(
@@ -255,8 +305,8 @@ class GuidanceService {
         text: text,
         locale: locale,
         tz: tz,
-        history: history,
-        memories: memories,
+        history: messages,
+        memories: mems,
         memoryConsent: consent,
         userAction: userAction,
         clientContext: clientContext,
@@ -264,14 +314,16 @@ class GuidanceService {
       );
       if (fut2 != null) return await fut2;
     } catch (_) {/* ignore */}
+
+    // Statisch typisierter Fallback (falls dyn nicht verfügbar)
     return ApiService.instance.nextTurnFull(
       session: session,
       text: text,
       locale: locale,
       tz: tz,
-      history: history,
-      memories: memories,
-      memoryConsent: consent, // <- bool
+      history: messages,
+      memories: mems,
+      memoryConsent: consent,
       userAction: userAction,
       clientContext: clientContext,
     );
@@ -284,7 +336,12 @@ class GuidanceService {
     String tz = 'Europe/Zurich',
     Map<String, dynamic>? meta, // S3.3: meta optional
   }) async {
-    final Map<String, dynamic>? m = _attachIntroAndSessionMeta(meta, session);
+    Map<String, dynamic>? m = _attachIntroAndSessionMeta(meta, session);
+    // Auch bei Aktionen das Flag setzen (wenn Consent aktiv ist)
+    m = _withClientMemoryFlag(
+      m,
+      mem.MemoryService.instance.shareEnabled,
+    );
 
     final svc = ApiService.instance;
     try {
@@ -349,7 +406,12 @@ class GuidanceService {
     Map<String, dynamic>? meta,
   }) async {
     // S3.3: Meta inkl. round_count/session_hint
-    final Map<String, dynamic>? m = _attachIntroAndSessionMeta(meta, session);
+    Map<String, dynamic>? m = _attachIntroAndSessionMeta(meta, session);
+    // Bei Consent ebenfalls das client_memory-Flag setzen (observability/stabil)
+    m = _withClientMemoryFlag(
+      m,
+      mem.MemoryService.instance.shareEnabled,
+    );
 
     try {
       Map<String, dynamic> res;
@@ -395,7 +457,7 @@ class GuidanceService {
   }
 
   // ---------------------------------------------------------------------------
-  // Story — liefert StoryResult (mit required id, stabil via FNV-Hash)
+  // Story — liefert StoryResult (mit required id, stabil via FNV)
   // ---------------------------------------------------------------------------
   Future<StoryResult> story({
     required List<String> entryIds,
@@ -542,6 +604,7 @@ class GuidanceService {
     return _turnToJson(t);
   }
 
+  /// @deprecated: Bitte `nextTurnFull` mit HistoryTurn verwenden.
   Future<Json> reflectNormalized({
     required ReflectionSession session,
     required String text,
@@ -581,12 +644,14 @@ class GuidanceService {
     UserAction? userAction,
     Map<String, dynamic>? meta,
   }) async {
+    // Normalized-Variante bleibt auf Map-History für abwärtskompatible Call-Sites.
     final t = await nextTurnFull(
       session: session,
       text: text,
       locale: locale,
       tz: tz,
-      history: history,
+      // Falls hier noch Map-History verwendet wird, heben wir sie unverändert durch:
+      history: _mapsToHistoryTurns(history),
       memories: memories,
       memoryConsent: memoryConsent,
       clientContext: clientContext,
@@ -831,7 +896,7 @@ class GuidanceService {
       'thread_id': threadId,
     };
 
-    // Mirror sauber halten (Instruktions-Sätze entfernen, reine Frage ausblenden)
+    // Mirror säubern
     final mirror = (t.mirror ?? '').trim();
     if (mirror.isNotEmpty && !mirror.endsWith('?')) {
       final cleaned = _cleanMirror(mirror);
@@ -860,7 +925,6 @@ class GuidanceService {
     }
     if (t.talk.isNotEmpty) map['talk'] = t.talk;
     if ((t.smalltalkReply ?? '').trim().isNotEmpty) {
-      // S4.2 — Smalltalk passthrough (separat, ohne talk-Doppelung)
       map['smalltalk_reply'] = t.smalltalkReply!.trim();
     }
     if (t.tags.isNotEmpty) map['tags'] = t.tags;
@@ -874,7 +938,7 @@ class GuidanceService {
       map['topic_suggestions'] = t.topicSuggestions;
     }
 
-    // UI-Hinweise für Chips (nur Stil/Platzierung, keine Erzeugung)
+    // UI-Hinweise für Chips
     final sturn = (sessMap['turn_index'] ?? sessMap['turn'] ?? 0).toString();
     final seed = ah.join('|');
     final chipSetId = '$threadId:$sturn:${_fnv1a32(seed).toRadixString(16)}';
@@ -903,7 +967,7 @@ class GuidanceService {
     return map;
   }
 
-  // Mirror-Cleaner (Instruktionssätze entfernen; reine Fragen ausblenden)
+  // Mirror-Cleaner
   String? _cleanMirror(String? mirror) {
     if (mirror == null) return null;
     var text = mirror.trim();
@@ -991,6 +1055,170 @@ class GuidanceService {
     out['session_hint'] = _sessionHintMap(session);
 
     return out;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Consent/Memory Helpers
+  // ---------------------------------------------------------------------------
+
+  /// Setzt bei aktivem Consent das Flag meta.flags.client_memory = true.
+  Map<String, dynamic>? _withClientMemoryFlag(
+      Map<String, dynamic>? meta, bool consent) {
+    if (!consent) return meta;
+    final out =
+        meta != null ? Map<String, dynamic>.from(meta) : <String, dynamic>{};
+    final flags = Map<String, dynamic>.from(
+        out['flags'] is Map ? out['flags'] as Map : const <String, dynamic>{});
+    flags['client_memory'] = true;
+    out['flags'] = flags;
+    return out;
+  }
+
+  /// Bereitet Memories für den Call auf:
+  /// - Wenn kein Consent → null (nichts senden).
+  /// - Merge vorhandener Memories (Map/toJson).
+  /// - Falls leer: kleine Client-Memories vom MemoryService.
+  /// - Name-Injection aus userText (wenn erkennbar).
+  Future<Map<String, dynamic>?> _prepareMemories({
+    required dynamic incoming,
+    required bool consent,
+    String? userText,
+  }) async {
+    if (!consent) return null;
+
+    final Map<String, dynamic> out = <String, dynamic>{};
+
+    void mergeIn(dynamic src) {
+      if (src == null) return;
+      if (src is Map) {
+        out.addAll(Map<String, dynamic>.from(src));
+        return;
+      }
+      try {
+        final m = (src as dynamic).toJson?.call();
+        if (m is Map) out.addAll(Map<String, dynamic>.from(m));
+      } catch (_) {/* ignore */}
+    }
+
+    mergeIn(incoming);
+
+    // Leichte Memories als Fallback, wenn noch leer
+    if (out.isEmpty) {
+      try {
+        final built = await mem.MemoryService.instance
+            .buildContextMemories(consent: true);
+        if (built is Map<String, dynamic>) {
+          out.addAll(built);
+        }
+      } catch (_) {/* ignore */}
+    }
+
+    // Name-Injection
+    if (userText != null && userText.trim().isNotEmpty) {
+      final name = _extractDeclaredName(userText);
+      if (name != null && name.trim().isNotEmpty) {
+        final id = Map<String, dynamic>.from(
+            out['identity'] is Map ? out['identity'] as Map : const {});
+        id['name'] = name.trim();
+        out['identity'] = id;
+      }
+    }
+
+    return out.isEmpty ? null : out;
+  }
+
+  /// Extrahiert deklarierte Namen aus deutschen Mustern.
+  /// Robust gegen einfache Satzzeichen, erlaubt 1–3 Wörter.
+  String? _extractDeclaredName(String text) {
+    final t = text.trim();
+
+    // Häufige Phrasen: ich heiße | ich heisse | mein Name ist | ich bin
+    final patterns = <RegExp>[
+      RegExp(
+          r'\b(?:ich\s+hei(?:s|ß)e|mein\s+name\s+ist|ich\s+bin)\s+([A-ZÄÖÜ][a-zäöüß]+(?:\s+[A-ZÄÖÜ][a-zäöüß]+){0,2}|[a-zäöüß]+(?:\s+[a-zäöüß]+){0,2})\b'),
+    ];
+
+    for (final p in patterns) {
+      final m = p.firstMatch(t);
+      if (m != null && m.groupCount >= 1) {
+        var cand = (m.group(1) ?? '').trim();
+        // Satzzeichen/Anhänge säubern
+        cand = cand.replaceAll(RegExp(r'[.,;:!?]+$'), '').trim();
+
+        // Simple Stopliste (vermeide „ich bin müde/traurig/krank“
+        const stops = {
+          'müde',
+          'traurig',
+          'glücklich',
+          'wütend',
+          'krank',
+          'zuhause',
+          'unterwegs',
+          'ok',
+          'okay'
+        };
+        if (stops.contains(cand.toLowerCase())) continue;
+
+        // Name auf Wortgrenzen begrenzen (max 3 Wörter)
+        final parts =
+            cand.split(RegExp(r'\s+')).where((e) => e.isNotEmpty).toList();
+        if (parts.isEmpty) continue;
+        if (parts.length > 3) {
+          cand = parts.take(3).join(' ');
+        }
+        // Minimal-Heuristik: erstes Wort ≥ 2 Zeichen
+        if (parts.first.length < 2) continue;
+
+        return cand;
+      }
+    }
+    return null;
+  }
+
+  // ===========================================================================
+  // History Mapping
+  // ===========================================================================
+  /// Verlustfreies Mapping von HistoryTurn → {role, content} für das API.
+  List<Map<String, String>>? _historyToMessages(List<HistoryTurn>? history) {
+    if (history == null) return null;
+    final out = <Map<String, String>>[];
+    for (final h in history) {
+      try {
+        // Bevorzugt typisierte Felder
+        final role = h.role.trim();
+        final text = h.text.trim();
+        if (role.isEmpty && text.isEmpty) continue;
+        out.add({'role': role, 'content': text});
+      } catch (_) {
+        // Dynamische Fallbacks (tolerant)
+        try {
+          final dyn = h as dynamic;
+          final role = (dyn.role ?? dyn['role'] ?? '').toString().trim();
+          final text = (dyn.text ??
+                  dyn['text'] ??
+                  dyn.content ??
+                  dyn['content'] ??
+                  '')
+              .toString()
+              .trim();
+          if (role.isEmpty && text.isEmpty) continue;
+          out.add({'role': role, 'content': text});
+        } catch (_) {
+          continue;
+        }
+      }
+    }
+    return out;
+  }
+
+  /// Für Normalized-Fallbacks (alte Call-Sites mit Map-History).
+  List<HistoryTurn>? _mapsToHistoryTurns(List<Map<String, String>>? maps) {
+    if (maps == null) return null;
+    return maps.map((m) {
+      final role = (m['role'] ?? '').toString();
+      final content = (m['content'] ?? m['text'] ?? '').toString();
+      return HistoryTurn(role: role, text: content);
+    }).toList();
   }
 }
 

@@ -1,16 +1,22 @@
-// [BASELINE] lib/core/memory/memory_service.dart — v6.5.0 (S12.2 • 31.10.2025)
+// [BASELINE] lib/core/memory/memory_service.dart — v6.6.0 (S12.3 • 04.11.2025)
 // ZenYourself — MemoryService (Lokales Kontext-Gedächtnis, Ghost-Mode by default)
 // -----------------------------------------------------------------------------
-// D1: FactType.insight + Serialisierung (MemoryFact) integriert.
-//     buildContextHint(..., activeFacet, topicPin) erweitert.
-//     Public-API: saveInsightFact(...).
-// E1: saveFromWorker(...) upsertet zusätzlich memories_to_save[*] als Facts.
-// S6.3: Name-Load stabil (Sync-Caches + Consent).
-// S12.1: Hook-Integration (memories_to_save robust übernehmen).
-// S12.2: Recency/Timeline-Basis + Orts-Recall (lokal, PII-schonend).
+// NEU in v6.6.0 (S12.3):
+// • buildContextMemories(): liefert ein **kuratiertes Kontext-Paket ≤2 KB**
+//   – identity.name (nur mit Consent & greetByName)
+//   – last.topic  (jüngstes Thema; kompakt)
+//   – last.mood   (value + date YYYY-MM-DD), falls lokal verfügbar
+//   – share:true  (nur als Flag, wenn Freigabe aktiv)
+//   Keine Roh-Transkripte, keine History—reine, datensparsame Brücke.
+// • Optionaler Helper toHistoryTurns(lastN): liefert kompakte Turn-Liste
+//   für interne Zwecke (nicht automatisch versenden).
 //
-// Rückwärtskompatibel zu v6.3.8. Bestehende Signaturen bleiben erhalten;
-// neue optionale Named-Parameter sind additive Erweiterungen.
+// Beibehalten:
+// – saveUserTurn/savePandaTurn/saveFromWorker (keine Roh-Transkripte nach außen)
+// – Recency/Timeline & Geo-Breadcrumbs (rein lokal)
+// – Sync-Caches (Name/Greet/Profile) + Hint-Byte-Kontext
+//
+// Rückwärtskompatibel zu v6.5.x.
 
 import 'dart:convert' show jsonEncode, jsonDecode, utf8;
 
@@ -200,7 +206,7 @@ class MemoryService {
     final greet = _greetByNameCache == true;
     final ok = requireConsent ? (greet && _shareEnabled) : greet;
     return (name: ok ? name : null, greetByName: ok);
-    }
+  }
 
   /// NEU: Lädt Name/Greet in den Sync-Cache, wenn noch nicht vorhanden.
   Future<({String? name, bool greetByName})> ensureGreetingNameLoaded(
@@ -1002,14 +1008,16 @@ class MemoryService {
     }
   }
 
-  Future<Map<String, dynamic>> buildContextMemories(
-      {required bool consent}) async {
+  /// Baut ein **kompaktes, kuratiertes** Kontext-Paket ≤2 KB für den Worker.
+  /// Enthält **nur**: identity.name (bei Consent & Greet), last.topic, last.mood{value,date}, share-Flag.
+  /// Keine Roh-Transkripte, keine History.
+  Future<Map<String, dynamic>> buildContextMemories({required bool consent}) async {
     try {
       if (!_enabled || !consent) return const <String, dynamic>{};
 
       final out = <String, dynamic>{};
 
-      // NEU: Short-Circuit über Sync-Cache, erst bei Bedarf await
+      // 1) Identity.name nur bei Consent + greetByName
       String? nameToUse;
       bool greet = _greetByNameCache == true;
       if (greet && (_identityNameCache ?? '').trim().isNotEmpty) {
@@ -1019,37 +1027,81 @@ class MemoryService {
         greet = id.greetByName;
         nameToUse = id.name;
       }
-
       if (greet && nameToUse != null && nameToUse.isNotEmpty) {
         out['identity'] = <String, dynamic>{'name': nameToUse};
       }
 
-      if ((_profileUserNameCache ?? '').toString().trim().isNotEmpty ||
-          (_profileNicknamesCache?.isNotEmpty ?? false)) {
-        out['profile'] = <String, dynamic>{
-          if ((_profileUserNameCache ?? '').toString().trim().isNotEmpty)
-            'user_name': _profileUserNameCache!.trim(),
-          if (_profileNicknamesCache != null && _profileNicknamesCache!.isNotEmpty)
-            'nicknames': _profileNicknamesCache,
+      // 2) last.topic (prägnant; bevorzugt: topicPin/activeFacet → topics → facets)
+      String? lastTopic;
+      // aus Hint-Pins (sync)
+      lastTopic = _lastHint?.topicPin?.trim().isNotEmpty == true
+          ? _lastHint!.topicPin!.trim()
+          : (_lastHint?.activeFacet?.trim().isNotEmpty == true
+              ? _lastHint!.activeFacet!.trim()
+              : null);
+      // fallback: jüngste Labels
+      if ((lastTopic ?? '').isEmpty) {
+        final topics = await latestTopics(limit: 1);
+        if (topics.isNotEmpty) lastTopic = topics.first.trim();
+      }
+      // fallback: Facet-Label
+      if ((lastTopic ?? '').isEmpty) {
+        final facets = await topFacets(limit: 1);
+        if (facets.isNotEmpty) lastTopic = facets.first.label.trim();
+      }
+      // sanft kürzen
+      if ((lastTopic ?? '').isNotEmpty && lastTopic!.length > 36) {
+        lastTopic = '${lastTopic!.substring(0, 36).trimRight()}…';
+      }
+
+      // 3) last.mood (value + date), falls Store eine Info liefern kann
+      final lastMood = await _readLastMood();
+      Map<String, dynamic>? moodMap;
+      if (lastMood.value != null && lastMood.value!.trim().isNotEmpty) {
+        final dateStr = _ymd(lastMood.date ?? DateTime.now().toUtc());
+        moodMap = <String, dynamic>{
+          'value': _cap(lastMood.value!.trim()),
+          'date': dateStr,
         };
       }
 
-      final hint = buildContextHint();
-      if (hint != null) {
-        out['hint'] = hint.toJson()
-          ..remove('identity')
-          ..remove('profile'); // identity/profile sind oben explizit gesetzt
+      if ((lastTopic ?? '').isNotEmpty || moodMap != null) {
+        out['last'] = <String, dynamic>{
+          if ((lastTopic ?? '').isNotEmpty) 'topic': lastTopic,
+          if (moodMap != null) 'mood': moodMap,
+        };
       }
 
-      try {
-        final topics = await latestTopics(limit: 8);
-        if (topics.isNotEmpty) {
-          out['recent_topics'] = topics;
-        }
-      } catch (_) {/* ignore */}
-
+      // 4) share-Flag (klein, optional)
       if (_shareEnabled) {
         out['share'] = true;
+      }
+
+      // 5) Größenkappe ≤ 2048 Bytes (2 KB). Falls zu groß → aggressiv kürzen.
+      List<int> bytes() => utf8.encode(jsonEncode(out));
+      if (bytes().length > 2048) {
+        // zuerst share weglassen
+        out.remove('share');
+      }
+      if (bytes().length > 2048) {
+        // mood entfernen (größer als topic)
+        (out['last'] as Map<String, dynamic>?)?.remove('mood');
+      }
+      if (bytes().length > 2048) {
+        // topic härter kürzen
+        final t = (out['last'] as Map<String, dynamic>?)?['topic']?.toString() ?? '';
+        if (t.isNotEmpty) {
+          (out['last'] as Map<String, dynamic>)['topic'] =
+              (t.length <= 20) ? t : '${t.substring(0, 20).trimRight()}…';
+        }
+      }
+      if (bytes().length > 2048) {
+        // last komplett entfernen
+        out.remove('last');
+      }
+      if (bytes().length > 2048) {
+        // identity entfernen (als letzte Eskalation)
+        out.remove('identity');
       }
 
       return out;
@@ -1326,6 +1378,52 @@ class MemoryService {
       return keys.take(days).toList(growable: false);
     } catch (_) {
       return const <String>[];
+    }
+  }
+
+  /// OPTIONAL: Liefert die letzten N Turns (role/text/ts) kompakt.
+  /// Hinweis: Diese Funktion ist **nur für lokale/QA-Zwecke** gedacht und
+  /// wird von buildContextMemories **nicht** verwendet.
+  Future<List<Map<String, dynamic>>> toHistoryTurns({int lastN = 20}) async {
+    if (!_enabled) return const <Map<String, dynamic>>[];
+    try {
+      final dyn = _store as dynamic;
+
+      // 1) Direkt „latestLines“ bevorzugen
+      try {
+        final res = await dyn.latestLines?.call(limit: lastN);
+        if (res is List) {
+          final list = res
+              .where((e) => e is Map)
+              .map((e) => Map<String, dynamic>.from(e as Map))
+              .map((m) => <String, dynamic>{
+                    'role': (m['role'] ?? '').toString(),
+                    'text': (m['text'] ?? '').toString(),
+                    'ts': (m['ts'] ?? m['created_at'] ?? m['createdAt'] ?? DateTime.now().toUtc().toIso8601String()).toString(),
+                  })
+              .toList(growable: false);
+          list.sort((a, b) => _tsOf(a).compareTo(_tsOf(b)));
+          return list.take(lastN).toList(growable: false);
+        }
+      } catch (_) {/* try fallback */}
+
+      // 2) Fallback: aus Timeline extrahieren
+      final tl = await recentTimeline(limit: lastN * 3);
+      final out = <Map<String, dynamic>>[];
+      for (final e in tl) {
+        final kind = (e['kind'] ?? '').toString();
+        if (kind == 'line') {
+          out.add(<String, dynamic>{
+            'role': (e['role'] ?? '').toString(),
+            'text': (e['text'] ?? '').toString(),
+            'ts': (e['ts'] ?? e['created_at'] ?? e['createdAt'] ?? DateTime.now().toUtc().toIso8601String()).toString(),
+          });
+        }
+        if (out.length >= lastN) break;
+      }
+      return out.take(lastN).toList(growable: false);
+    } catch (_) {
+      return const <Map<String, dynamic>>[];
     }
   }
 
@@ -1688,6 +1786,60 @@ class MemoryService {
   }
 
   // -- Misc Helpers -----------------------------------------------------------
+
+  /// Liest die letzte Stimmung (mood) aus dem Store, falls verfügbar.
+  /// Unterstützt mehrere mögliche Store-Signaturen.
+  Future<({String? value, DateTime? date})> _readLastMood() async {
+    try {
+      final dyn = _store as dynamic;
+
+      // 1) Bevorzugt: dedicated API latestMood / lastMoodEntry
+      try {
+        final m = await dyn.latestMood?.call();
+        if (m is Map) {
+          final mm = Map<String, dynamic>.from(m);
+          final val = (mm['value'] ?? mm['mood'] ?? mm['name'])?.toString().trim();
+          final tsRaw = (mm['date'] ?? mm['ts'] ?? mm['created_at'] ?? mm['createdAt'])?.toString();
+          final ts = (tsRaw == null || tsRaw.trim().isEmpty) ? null : DateTime.tryParse(tsRaw)?.toUtc();
+          if ((val ?? '').toString().trim().isNotEmpty) return (value: val, date: ts);
+        }
+      } catch (_) {/* try next */}
+      try {
+        final m = await dyn.lastMoodEntry?.call();
+        if (m is Map) {
+          final mm = Map<String, dynamic>.from(m);
+          final val = (mm['value'] ?? mm['mood'] ?? mm['name'])?.toString().trim();
+          final tsRaw = (mm['date'] ?? mm['ts'] ?? mm['created_at'] ?? mm['createdAt'])?.toString();
+          final ts = (tsRaw == null || tsRaw.trim().isEmpty) ? null : DateTime.tryParse(tsRaw)?.toUtc();
+          if ((val ?? '').toString().trim().isNotEmpty) return (value: val, date: ts);
+        }
+      } catch (_) {/* try next */}
+
+      // 2) Fallback: über latestFacts (type == 'mood')
+      try {
+        final facts = await dyn.latestFacts?.call(limit: 10);
+        if (facts is List) {
+          for (final e in facts) {
+            if (e is Map) {
+              final mm = Map<String, dynamic>.from(e);
+              final type = (mm['type'] ?? '').toString().toLowerCase();
+              if (type == 'mood') {
+                final val = (mm['value'] ?? mm['line'] ?? mm['mood'])?.toString().trim();
+                final tsRaw = (mm['ts'] ?? mm['created_at'] ?? mm['createdAt'] ?? mm['date'])?.toString();
+                final ts = (tsRaw == null || tsRaw.trim().isEmpty) ? null : DateTime.tryParse(tsRaw)?.toUtc();
+                if ((val ?? '').isNotEmpty) return (value: val, date: ts);
+              }
+            }
+          }
+        }
+      } catch (_) {/* ignore */}
+
+      // nichts gefunden
+      return (value: null, date: null);
+    } catch (_) {
+      return (value: null, date: null);
+    }
+  }
 
   static DateTime _tsOf(Map<String, dynamic> m) {
     try {

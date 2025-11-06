@@ -1,8 +1,10 @@
 // lib/services/analytics.dart
 //
-// AnalyticsService — ZenYourself Statistik-Zentrale (Oxford-Zen, v3)
+// AnalyticsService — ZenYourself Statistik-Zentrale (Oxford-Zen, v3.2)
 // ------------------------------------------------------------------
 // • Events: app.start, reflection.answer, entry.save, mood.set
+// • NEU: next_turn_full.request / next_turn_full.response (PII-sicher,
+//        ohne Inhalte; nur Metriken wie historyLen, memoriesBytes, payloadBytes)
 // • Stabil sortierte Timelines (ASC) bei Insert/Batch/SetAll
 // • Side-effect-freie Getter (Unmodifiable Views)
 // • Klinik-ready Fenster-/Range-Analysen (Ø-Mood, Heatmaps, Counts)
@@ -58,6 +60,7 @@ class AnalyticsService with ChangeNotifier {
   // ===========
   //  EVENTS (öffentliche Kurz-APIs)
   // ===========
+
   /// App-Start (z. B. im AppRoot/Main aufrufen).
   void trackAppStart({String? source, String? version, String? platform}) {
     logEvent(
@@ -114,6 +117,111 @@ class AnalyticsService with ChangeNotifier {
         if (moodLabel != null && moodLabel.trim().isNotEmpty)
           'moodLabel': moodLabel.trim(),
       },
+    );
+  }
+
+  // ---- NEU: Netzwerk-Turn-Metriken (ohne Inhalte) ---------------------------
+
+  /// Loggt eine PII-sichere Anfrage-Metrik für next_turn_full (oder reflect_full).
+  /// Nur Kennzahlen, KEINE Texte.
+  ///
+  /// [kind] kann "reflect_full" oder "next_turn_full" sein (Default: "next_turn_full").
+  /// [historyLen] Anzahl History-Turns in der Payload.
+  /// [memoriesBytes] Größe von context.memories in Bytes (UTF-8, JSON-kodiert).
+  /// [payloadBytes] optionale geschätzte Gesamtgröße der Request-Payload (Bytes).
+  /// [threadId] optionale Thread-/Session-ID (Client).
+  /// [turnIndex] optionaler Turn-Index (Server-Session, falls bekannt).
+  /// [mode] z. B. "text" | "voice" | "action".
+  void trackNextTurnRequest({
+    String kind = 'next_turn_full',
+    required int historyLen,
+    int? memoriesBytes,
+    int? payloadBytes,
+    String? threadId,
+    int? turnIndex,
+    String? mode,
+  }) {
+    logEvent(
+      '$kind.request',
+      props: <String, Object?>{
+        'historyLen': historyLen,
+        if (memoriesBytes != null) 'memoriesBytes': memoriesBytes,
+        if (payloadBytes != null) 'payloadBytes': payloadBytes,
+        if (threadId != null) 'threadId': threadId,
+        if (turnIndex != null) 'turnIndex': turnIndex,
+        if (mode != null) 'mode': mode,
+      },
+    );
+  }
+
+  /// Bequemer Overload: schätzt memoriesBytes/payloadBytes anhand von Objekten (ohne Inhalte zu speichern).
+  void trackNextTurnRequestFromObjects({
+    String kind = 'next_turn_full',
+    required int historyLen,
+    Object? memoriesObject,
+    Object? payloadObject, // z. B. die gesamte Request-Map (ohne Inhalte zu loggen!)
+    String? threadId,
+    int? turnIndex,
+    String? mode,
+  }) {
+    final memBytes = _approxSizeBytes(memoriesObject);
+    final payBytes = _approxSizeBytes(payloadObject);
+    trackNextTurnRequest(
+      kind: kind,
+      historyLen: historyLen,
+      memoriesBytes: memBytes >= 0 ? memBytes : null,
+      payloadBytes: payBytes >= 0 ? payBytes : null,
+      threadId: threadId,
+      turnIndex: turnIndex,
+      mode: mode,
+    );
+  }
+
+  /// Loggt die Response-Metrik für next_turn_full (oder reflect_full).
+  ///
+  /// [status] HTTP-Status (falls vorhanden).
+  /// [durationMs] Dauer vom Absenden bis zum Eintreffen der Antwort.
+  /// [bytesIn] geschätzte Größe der Response (Bytes).
+  /// [answerChars] geschätzte Länge des kombinierten Antworttexts (z. B. mirror+question),
+  ///               ohne Inhalte zu persistieren.
+  /// [turnIndex] Turn-Index der resultierenden Server-Session.
+  void trackNextTurnResponse({
+    String kind = 'next_turn_full',
+    int? status,
+    int? durationMs,
+    int? bytesIn,
+    int? answerChars,
+    int? turnIndex,
+  }) {
+    logEvent(
+      '$kind.response',
+      props: <String, Object?>{
+        if (status != null) 'status': status,
+        if (durationMs != null) 'durationMs': durationMs,
+        if (bytesIn != null) 'bytesIn': bytesIn,
+        if (answerChars != null) 'answerChars': answerChars,
+        if (turnIndex != null) 'turnIndex': turnIndex,
+      },
+    );
+  }
+
+  /// Overload für Responses: schätzt [bytesIn] anhand eines Response-Objekts.
+  void trackNextTurnResponseFromObject({
+    String kind = 'next_turn_full',
+    int? status,
+    int? durationMs,
+    Object? responseObject,
+    int? answerChars,
+    int? turnIndex,
+  }) {
+    final bIn = _approxSizeBytes(responseObject);
+    trackNextTurnResponse(
+      kind: kind,
+      status: status,
+      durationMs: durationMs,
+      bytesIn: bIn >= 0 ? bIn : null,
+      answerChars: answerChars,
+      turnIndex: turnIndex,
     );
   }
 
@@ -267,7 +375,7 @@ class AnalyticsService with ChangeNotifier {
     final e = end.isAfter(start) ? end : start;
     var sum = 0, count = 0;
     for (final m in _moodEntries) {
-      final t = m.timestamp;
+    final t = m.timestamp;
       final inRange = (t.isAtSameMomentAs(s) || t.isAfter(s)) &&
           (t.isAtSameMomentAs(e) || t.isBefore(e));
       if (inRange) {
@@ -677,5 +785,20 @@ class AnalyticsService with ChangeNotifier {
         _try<Iterable>(() => dyn.categories);
 
     return _safeTags(raw);
+  }
+
+  // ===========
+  //  Byte-Schätzer (PII-sicher)
+  // ===========
+  /// Schätzt Byte-Größe (UTF-8) eines Objekts per JSON-Encoding.
+  /// Gibt -1 zurück, wenn Encoding fehlschlägt.
+  int _approxSizeBytes(Object? obj) {
+    if (obj == null) return 0;
+    try {
+      final jsonStr = jsonEncode(obj);
+      return utf8.encode(jsonStr).length;
+    } catch (_) {
+      return -1;
+    }
   }
 }

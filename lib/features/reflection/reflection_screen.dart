@@ -46,6 +46,9 @@ import '../../services/core/api_service.dart'; // Mood speichern
 // Memory-Layer
 import '../../core/memory/memory_service.dart';
 
+// Controller (History/Bridge/Typing Events)
+import 'reflection_logic.dart' show ReflectionController, UIEvent, UIEventKind;
+
 // CH Hotlines (Call-Buttons) + Launcher-Utilities
 import '../../widgets/hotline_widget.dart'; // SwissHotlineCard / Section
 
@@ -149,6 +152,10 @@ class _ReflectionScreenState extends State<ReflectionScreen>
 
   // ---------------- Memory Recall / Bridge (visuell unsichtbar) --------------
   String? _bridgeText; // (nicht angezeigt; nur für Worker-Kontext)
+
+  // Controller (History/Typing/Bridge)
+  late final ReflectionController _ctrl;
+  late final VoidCallback _ctrlListener;
 
   // ---------------- Intro (dynamisch, einmalig) ------------------------------
   bool _hasShownIntro = false; // Guards: nur 1× pro Sitzung
@@ -289,6 +296,41 @@ class _ReflectionScreenState extends State<ReflectionScreen>
 
     _attachSttEngine();
 
+    // Controller init + UIEvent-Anschluss
+    _ctrl = ReflectionController();
+    _ctrl.attachUiEventSink((UIEvent e) {
+      if (!mounted) return;
+      switch (e.kind) {
+        case UIEventKind.appendUser:
+          // Lokales Echo (zusätzlich zur Screen-internen Logik neutral)
+          if (_current == null) return;
+          setState(() {
+            // Nur Scroll; Echo erledigen wir ohnehin im Screen-Flow
+          });
+          _scrollToBottom();
+          break;
+        case UIEventKind.insertTypingPlaceholder:
+          setState(() => loading = true);
+          _scrollToBottom();
+          break;
+        case UIEventKind.removeTypingPlaceholder:
+          setState(() => loading = false);
+          break;
+        case UIEventKind.scrollToEnd:
+          _scrollToBottom();
+          break;
+      }
+    });
+    _ctrlListener = () {
+      // Falls wir später die VM nutzen wollen, könnten wir hier UI anpassen.
+      // Der Screen bleibt vorerst master of record für die Round-Visualisierung.
+      if (!mounted) return;
+      setState(() {});
+    };
+
+    _ctrl.addListener(_ctrlListener);
+    _ctrl.wireSessionFromContext(context);
+
     // Identity warm-up (best effort)
     unawaited(() async {
       try {
@@ -298,6 +340,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
 
     // Memory-Recall
     unawaited(_prefetchRecall());
+    unawaited(_ctrl.prefetchBridge());
 
     // Live-Transkript → direkt in Input einfügen (keine Voice-Action-Trigger mehr)
     _finalSub = _speech.transcript$.listen((t) async {
@@ -387,6 +430,11 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     _pageFocus.dispose();
     _listCtrl.dispose();
     _fadeSlideCtrl.dispose();
+
+    _ctrl.removeListener(_ctrlListener);
+    _ctrl.detachUiEventSink();
+    _ctrl.dispose();
+
     super.dispose();
   }
 
@@ -482,6 +530,9 @@ class _ReflectionScreenState extends State<ReflectionScreen>
           });
         } catch (_) {}
       }());
+
+      // Controller: history/typing mitschreiben (no-op wenn View weiter führt)
+      unawaited(_ctrl.send(text, context: context));
 
       unawaited(
         _continueReflectionFromWorker(round: _current!, userAnswer: text),
@@ -594,6 +645,9 @@ class _ReflectionScreenState extends State<ReflectionScreen>
         mode: mode,
         isStart: true,
       );
+
+      // Controller: history + typing/bridge für Start synchronisieren
+      unawaited(_ctrl.start(userText, fromVoice: mode == 'voice', context: context));
 
       try {
         // 1) Neuer Endpunkt
@@ -818,6 +872,9 @@ class _ReflectionScreenState extends State<ReflectionScreen>
           ? _ChipMode.answer
           : _ChipMode.none;
     });
+
+    // Controller: history update (falls View-first war)
+    unawaited(_ctrl.send(userAnswer, context: context));
 
     // Persist best-effort
     unawaited(() async {
