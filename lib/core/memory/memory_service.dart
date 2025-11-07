@@ -1,20 +1,37 @@
-// [BASELINE] lib/core/memory/memory_service.dart — v6.6.0 (S12.3 • 04.11.2025)
+// [BASELINE] lib/core/memory/memory_service.dart — v6.6.4 (S12.3+CB v1.4 • 07.11.2025)
 // ZenYourself — MemoryService (Lokales Kontext-Gedächtnis, Ghost-Mode by default)
 // -----------------------------------------------------------------------------
-// NEU in v6.6.0 (S12.3):
-// • buildContextMemories(): liefert ein **kuratiertes Kontext-Paket ≤2 KB**
-//   – identity.name (nur mit Consent & greetByName)
-//   – last.topic  (jüngstes Thema; kompakt)
-//   – last.mood   (value + date YYYY-MM-DD), falls lokal verfügbar
-//   – share:true  (nur als Flag, wenn Freigabe aktiv)
-//   Keine Roh-Transkripte, keine History—reine, datensparsame Brücke.
-// • Optionaler Helper toHistoryTurns(lastN): liefert kompakte Turn-Liste
-//   für interne Zwecke (nicht automatisch versenden).
+// MERGE-SIGNAL / Bridge-Guard:
+// • Api/Guidance senden context.memories **nur**, wenn enabled && consent && memoryActive.
+// • meta.flags.client_memory:true wird extern (ApiService/ReflectionLogic) gesetzt.
+// -----------------------------------------------------------------------------
+// NEU in v6.6.3 (S12.3+Context-Bridge v1.3):
+// • saveFact(MemoryFact) & saveFacts(List<MemoryFact>) als generische Public-APIs.
+// • Kleinere Robustheits-Verbesserungen (Null-Safety, defensive Trims, try/catch).
+//
+// NEU in v6.6.2 (S12.3+Context-Bridge v1.2):
+// • memoryActive-Fenster inkl. 7-Tage-Trial ab Erststart (lokal, ohne Cloud).
+// • Getter: memoryActive / isActive, Expiry-Handling, Setters: setMemoryActive(...),
+//   setMemoryExpiry(...), ensureTrialWindow(...).
+// • buildContextMemories(consent) respektiert jetzt memoryActive: sendet nur bei
+//   enabled && consent && memoryActive (wie per Projektstand gefordert).
+//
+// NEU in v6.6.1 (S12.3+Context-Bridge v1.1):
+// • buildContextMemories(): kuratiertes Kontext-Paket ≤2 KB
+//   – identity.name (nur mit Consent & greetByName; niemals vom Worker überschrieben)
+//   – last.topic  (aus saveFromWorker: understanding.topic_shift oder memories_to_save[].topic)
+//   – last.mood   (aus saveFromWorker: flow.mood_prompt/mood; numerisch, falls möglich)
+//   – last.date   (YYYY-MM-DD; beim erfolgreichen Panda-Turn gesetzt)
+// • saveFromWorker(...):
+//   – extrahiert last.topic & last.mood aus Worker-Response
+//   – setzt last.date auf heutiges Datum (UTC, YYYY-MM-DD)
+//   – **kein** Upsert von identity.name aus Worker (Name bleibt lokal/quellwahr)
+// • 2 KB Budget-Guard: aggressive Kürzung (share → mood → topic → last → identity)
 //
 // Beibehalten:
-// – saveUserTurn/savePandaTurn/saveFromWorker (keine Roh-Transkripte nach außen)
+// – Keine Roh-Transkripte im Kontextpaket
 // – Recency/Timeline & Geo-Breadcrumbs (rein lokal)
-// – Sync-Caches (Name/Greet/Profile) + Hint-Byte-Kontext
+// – Sync-Caches (Name/Greet/Profile) + Byte-Kontext
 //
 // Rückwärtskompatibel zu v6.5.x.
 
@@ -141,11 +158,21 @@ class MemoryService {
   final MemoryStore _store = MemoryStore.instance;
 
   // Flags
-  bool _enabled = true; // Ghost-Mode (lokales Gedächtnis)
-  bool _shareEnabled = false; // Therapist-Mode (Opt-in)
+  bool _enabled = true;          // Ghost-Mode (lokales Gedächtnis)
+  bool _shareEnabled = false;    // Therapist-Mode (Opt-in → Name teilen erlaubt, etc.)
+
+  // Memory-Bridge Aktivierung + Trial-Fenster
+  bool _memoryActive = true;     // Bridge aktiv (Trial/Premium)
+  DateTime? _memoryExpiryUtc;    // Ende des Trial-Fensters
 
   bool get enabled => _enabled;
   bool get shareEnabled => _shareEnabled;
+
+  /// true, wenn Memory-Bridge aktiv ist (Trial/Premium) und nicht abgelaufen
+  bool get memoryActive => _memoryActive && !_isExpired();
+  /// Alias für Kompatibilität mit älteren Call-Sites
+  bool get isActive => memoryActive;
+  DateTime? get memoryExpiryUtc => _memoryExpiryUtc;
 
   // Kleiner, rein lokaler Cache für buildContextHint() (sync!)
   MemoryContextHint? _lastHint;
@@ -170,6 +197,11 @@ class MemoryService {
   // NEU (S12.2): Letzter Orts-Recall (lokal)
   String? _lastLocationLabelCache;
   DateTime? _lastLocationTsCache;
+
+  // NEU (v6.6.1): „last.*“-Opt-Keys
+  static const String _kLastTopic = 'last.topic';
+  static const String _kLastMood = 'last.mood';
+  static const String _kLastDate = 'last.date';
 
   bool get profileHasNicknamesSync =>
       (_profileNicknamesCache?.isNotEmpty ?? false);
@@ -233,6 +265,10 @@ class MemoryService {
   static const String _kIdentityGreetByName = 'identity.greet_by_name';
   static const String _kShareEnabled = 'share_enabled';
 
+  // Memory-Bridge Keys
+  static const String _kMemoryActive = 'memory.active';
+  static const String _kMemoryExpiry = 'memory.expiry_utc';
+
   // Profile-Keys
   static const String _kProfileUserName = 'profile.user_name';
   static const String _kProfileNicknames = 'profile.nicknames'; // JSON-Array
@@ -251,8 +287,12 @@ class MemoryService {
       await _store.init();
       _enabled = _store.isEnabled;
 
+      // shareEnabled (Consent)
       final se = await _getOptBool(_kShareEnabled);
       _shareEnabled = se ?? _tryReadShareEnabledReflective() ?? false;
+
+      // Memory-Bridge: active + expiry (mit Default-7-Tage-Trial)
+      await _initMemoryBridgeWindow();
 
       // Identity & Profile vorladen (für sync use)
       try {
@@ -278,13 +318,13 @@ class MemoryService {
                 .toList(growable: false);
       } catch (_) {/* ignore */}
 
-      // NEU: Greet-Consent vorladen
+      // Greet-Consent vorladen
       try {
         final greet = await _getOptBool(_kIdentityGreetByName);
         _greetByNameCache = greet ?? false;
       } catch (_) {/* ignore */}
 
-      // NEU (S12.2): Letzten Ort vorladen
+      // Letzten Ort vorladen
       try {
         _lastLocationLabelCache = await _getOptString(_kGeoLastLabel);
         final ts = await _getOptString(_kGeoLastTs);
@@ -324,11 +364,100 @@ class MemoryService {
     try {
       await _setOptBool(_kShareEnabled, v);
     } catch (_) {/* ignore */}
-    // NEU: Bei aktivierter Freigabe sicherstellen, dass Name/Greet im Cache sind
+    // Bei aktivierter Freigabe Name/Greet sicherstellen
     if (v && ((_identityNameCache ?? '').trim().isEmpty || _greetByNameCache == null)) {
       try {
         await ensureGreetingNameLoaded();
       } catch (_) {/* ignore */}
+    }
+  }
+
+  // -------- Memory-Bridge Window (Trial / Premium) ---------------------------
+
+  Future<void> _initMemoryBridgeWindow() async {
+    try {
+      final active = await _getOptBool(_kMemoryActive);
+      final expIso = await _getOptString(_kMemoryExpiry);
+
+      if (active == null && (expIso == null || expIso.trim().isEmpty)) {
+        // Erststart → 7-Tage-Trial ab jetzt
+        _memoryActive = true;
+        _memoryExpiryUtc = DateTime.now().toUtc().add(const Duration(days: 7));
+        await _setOptBool(_kMemoryActive, true);
+        await _setOptString(_kMemoryExpiry, _memoryExpiryUtc!.toIso8601String());
+        return;
+      }
+
+      _memoryActive = active ?? true;
+      _memoryExpiryUtc = (expIso == null || expIso.trim().isEmpty)
+          ? null
+          : DateTime.tryParse(expIso)?.toUtc();
+
+      // Expiry prüfen – abgelaufen → ausgeschaltet persistieren
+      if (_memoryActive && _isExpired()) {
+        _memoryActive = false;
+        try {
+          await _setOptBool(_kMemoryActive, false);
+        } catch (_) {/* ignore */}
+      }
+    } catch (_) {
+      // Fallback: aktiv ohne Expiry (konservativ)
+      _memoryActive = true;
+      _memoryExpiryUtc ??= DateTime.now().toUtc().add(const Duration(days: 7));
+    }
+  }
+
+  bool _isExpired() {
+    try {
+      if (_memoryExpiryUtc == null) return false;
+      return DateTime.now().toUtc().isAfter(_memoryExpiryUtc!);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Aktiviert/Deaktiviert die Memory-Bridge. Optional Expiry setzen.
+  Future<void> setMemoryActive(bool active, {DateTime? expiryUtc, Duration? trial}) async {
+    _memoryActive = active;
+    if (expiryUtc != null) {
+      _memoryExpiryUtc = expiryUtc.toUtc();
+      try {
+        await _setOptString(_kMemoryExpiry, _memoryExpiryUtc!.toIso8601String());
+      } catch (_) {/* ignore */}
+    } else if (trial != null) {
+      _memoryExpiryUtc = DateTime.now().toUtc().add(trial);
+      try {
+        await _setOptString(_kMemoryExpiry, _memoryExpiryUtc!.toIso8601String());
+      } catch (_) {/* ignore */}
+    }
+    try {
+      await _setOptBool(_kMemoryActive, _memoryActive);
+    } catch (_) {/* ignore */}
+  }
+
+  /// Setzt nur die Expiry (z. B. nach Upgrade).
+  Future<void> setMemoryExpiry(DateTime? expiryUtc) async {
+    _memoryExpiryUtc = expiryUtc?.toUtc();
+    if (_memoryExpiryUtc == null) {
+      // Entfernen → kein Ablauf
+      try {
+        final dyn = _store as dynamic;
+        final r = dyn.removeOpt?.call(_kMemoryExpiry);
+        if (r is Future) await r;
+      } catch (_) {/* ignore */}
+    } else {
+      await _setOptString(_kMemoryExpiry, _memoryExpiryUtc!.toIso8601String());
+    }
+    // Wenn abgelaufen → deaktivieren
+    if (_memoryActive && _isExpired()) {
+      await setMemoryActive(false);
+    }
+  }
+
+  /// Stellt sicher, dass eine Trial-Laufzeit existiert (idempotent).
+  Future<void> ensureTrialWindow({int days = 7}) async {
+    if (_memoryExpiryUtc == null) {
+      await setMemoryActive(true, trial: Duration(days: days));
     }
   }
 
@@ -339,7 +468,7 @@ class MemoryService {
       final n = _cap(name.trim());
       if (n.isEmpty) return;
       _identityNameCache = n; // Sync-Cache
-      _greetByNameCache = greetByName; // NEU: Cache aktualisieren
+      _greetByNameCache = greetByName; // Cache aktualisieren
       await _setOptString(_kIdentityName, n);
       await _setOptBool(_kIdentityGreetByName, greetByName);
 
@@ -379,15 +508,15 @@ class MemoryService {
 
   Future<void> setGreetingConsent(bool greetByName) async {
     try {
-      _greetByNameCache = greetByName; // NEU: Cache aktualisieren
+      _greetByNameCache = greetByName;
       await _setOptBool(_kIdentityGreetByName, greetByName);
     } catch (_) {/* ignore */}
   }
 
   Future<void> forgetIdentityName() async {
     try {
-      _identityNameCache = null; // Sync-Cache löschen
-      _greetByNameCache = false; // NEU: auch Greet-Cache zurücksetzen
+      _identityNameCache = null;
+      _greetByNameCache = false;
       final dyn = _store as dynamic;
       try {
         final r = dyn.removeOpt?.call(_kIdentityName);
@@ -426,7 +555,7 @@ class MemoryService {
         _identityNameCache = null;
         _profileUserNameCache = null;
         _profileNicknamesCache = null;
-        _greetByNameCache = false; // NEU
+        _greetByNameCache = false;
         return;
       } catch (_) {/* try next */}
       await forgetIdentityName();
@@ -439,8 +568,8 @@ class MemoryService {
       final name = await _getOptString(_kIdentityName);
       final greet = await _getOptBool(_kIdentityGreetByName) ?? false;
       final trimmed = (name?.trim().isEmpty ?? true) ? null : _cap(name!.trim());
-      _identityNameCache = trimmed;      // Cache aktualisieren
-      _greetByNameCache = greet;         // NEU: Cache aktualisieren
+      _identityNameCache = trimmed;
+      _greetByNameCache = greet;
       return (name: trimmed, greetByName: greet);
     } catch (_) {
       return (name: _identityNameCache, greetByName: _greetByNameCache == true);
@@ -518,7 +647,7 @@ class MemoryService {
 
       if (candidate == null) return;
 
-      // Nur das erste "Wort" (vermeidet Anhänge wie "und", "uund.", etc.)
+      // Nur das erste "Wort"
       final firstToken = candidate.split(RegExp(r"\s+")).first;
 
       String clean =
@@ -581,9 +710,68 @@ class MemoryService {
     } catch (_) {/* ignore */}
   }
 
+  /// Public-API: Generischer Fakt (alle Typen), sicher upserten.
+  Future<void> saveFact(MemoryFact fact) async {
+    if (!_enabled) return;
+    try {
+      final map = fact.toMap();
+      final s = _store as dynamic;
+      try {
+        final r = s.upsertFact?.call(map);
+        if (r is Future) await r;
+        return;
+      } catch (_) {/* try next */}
+      try {
+        final r = s.saveFact?.call(map);
+        if (r is Future) await r;
+        return;
+      } catch (_) {/* try next */}
+      try {
+        final r = s.upsertFacts?.call([map]);
+        if (r is Future) await r;
+        return;
+      } catch (_) {/* ignore */}
+    } catch (_) {/* ignore */}
+  }
+
+  /// Public-API: Batch-Speichern mehrerer Fakten (upsert bevorzugt).
+  Future<void> saveFacts(List<MemoryFact> facts) async {
+    if (!_enabled || facts.isEmpty) return;
+    try {
+      final maps = facts.map((f) => f.toMap()).toList(growable: false);
+      final s = _store as dynamic;
+      bool ok = false;
+      try {
+        final r = s.upsertFacts?.call(maps);
+        if (r is Future) await r;
+        ok = true;
+      } catch (_) {/* try next */}
+      if (!ok) {
+        try {
+          final r = s.saveFacts?.call(maps);
+          if (r is Future) await r;
+          ok = true;
+        } catch (_) {/* try next */}
+      }
+      if (!ok) {
+        for (final m in maps) {
+          try {
+            final r = s.upsertFact?.call(m);
+            if (r is Future) await r;
+          } catch (_) {
+            try {
+              final r2 = s.saveFact?.call(m);
+              if (r2 is Future) await r2;
+            } catch (_) {/* swallow */}
+          }
+        }
+      }
+    } catch (_) {/* ignore */}
+  }
+
   /// Speichert tolerant aus einer Worker-Response (no-op, wenn disabled).
-  /// Verarbeitet zusätzlich memories_to_save[] (Identity/Profile + Insights).
-  /// **Neu (S12.2):** Liest optional Geo-Felder und legt Location-Breadcrumbs an.
+  /// Verarbeitet zusätzlich memories_to_save[] (Insights).
+  /// **Neu (v6.6.1):** Upsert von last.topic/last.mood/last.date (kein Identity-Overwrite).
   Future<void> saveFromWorker(dynamic workerResponse, {String? source}) async {
     if (!_enabled) return;
     try {
@@ -613,7 +801,6 @@ class MemoryService {
             facets: facetKeys.take(6).toList(growable: false),
             tags: null,
             topics: facetLabels.take(6).toList(growable: false),
-            // Name/activeFacet/topicPin werden unten ggf. ergänzt
           );
           _lastHintTs = DateTime.now();
         }
@@ -672,10 +859,104 @@ class MemoryService {
         }
       }
 
-      // 3) Bestehende Identity/Profile-Upserts aus memories_to_save (PII)
-      await _ingestMemoriesToSave(map);
+      // 3) „last.*“ direkt aus Worker-Response extrahieren
+      bool touchedLast = false;
 
-      // 4) NEU (S12.2): Geo-Felder tolerant übernehmen (falls vorhanden)
+      // 3a) last.topic – bevorzugt understanding.topic_shift
+      String? _topicFromUnderstanding(Map<String, dynamic> root) {
+        try {
+          final u = root['understanding'];
+          if (u is Map) {
+            final m = Map<String, dynamic>.from(u);
+            final t = (m['topic_shift'] ?? m['topicShift'] ?? m['topic'])
+                ?.toString()
+                .trim();
+            if (t != null && t.isNotEmpty) return t;
+          }
+          final flat = (root['understanding.topic_shift'] ??
+                  root['understanding_topic_shift'])
+              ?.toString()
+              .trim();
+          if (flat != null && flat.isNotEmpty) return flat;
+        } catch (_) {/* ignore */}
+        return null;
+      }
+
+      String? lastTopic = _topicFromUnderstanding(map);
+
+      // Fallback: memories_to_save[].topic
+      if ((lastTopic ?? '').isEmpty) {
+        try {
+          final list = (map['memories_to_save'] as List?) ??
+              (map['memoriesToSave'] as List?) ??
+              const [];
+          for (final it in list) {
+            if (it is Map) {
+              final m = Map<String, dynamic>.from(it);
+              final t = (m['topic'] ?? m['last_topic'] ?? m['label'])
+                  ?.toString()
+                  .trim();
+              if (t != null && t.isNotEmpty) {
+                lastTopic = t;
+                break;
+              }
+            }
+          }
+        } catch (_) {/* ignore */}
+      }
+
+      if ((lastTopic ?? '').isNotEmpty) {
+        await _setOptString(_kLastTopic, lastTopic!.trim());
+        // kleinen Pin setzen (sync)
+        final base = _lastHint;
+        _lastHint = MemoryContextHint(
+          facets: base?.facets,
+          tags: base?.tags,
+          topics: base?.topics,
+          identityName: base?.identityName,
+          profileUserName: base?.profileUserName,
+          profileNicknames: base?.profileNicknames,
+          activeFacet: base?.activeFacet,
+          topicPin: lastTopic!.trim(),
+        );
+        _lastHintTs ??= DateTime.now();
+        touchedLast = true;
+      }
+
+      // 3b) last.mood – flow.mood_prompt oder flow.mood
+      String? _moodFromFlow(Map<String, dynamic> root) {
+        try {
+          final f = root['flow'];
+          if (f is Map) {
+            final m = Map<String, dynamic>.from(f);
+            final v = (m['mood_prompt'] ?? m['moodPrompt'] ?? m['mood'])
+                ?.toString()
+                .trim();
+            if (v != null && v.isNotEmpty) return v;
+          }
+          final flat = (root['mood'] ?? root['flow.mood_prompt'])
+              ?.toString()
+              .trim();
+          if (flat != null && flat.isNotEmpty) return flat;
+        } catch (_) {/* ignore */}
+        return null;
+      }
+
+      final moodVal = _moodFromFlow(map);
+      if ((moodVal ?? '').isNotEmpty) {
+        await _setOptString(_kLastMood, moodVal!.trim());
+        touchedLast = true;
+      }
+
+      // 3c) last.date – heute, wenn etwas an last.* geändert wurde
+      if (touchedLast) {
+        await _setOptString(_kLastDate, _ymd(DateTime.now().toUtc()));
+      }
+
+      // 4) Identity/Profile NICHT vom Worker übernehmen (Explizit v6.6.1-Regel).
+      await _ingestMemoriesToSave(map, allowIdentity: false);
+
+      // 5) Geo-Felder tolerant übernehmen (falls vorhanden)
       await _ingestGeoIfPresent(map);
 
       _invalidateSoftCaches();
@@ -1001,7 +1282,7 @@ class MemoryService {
         profileUserName: profName.isEmpty ? null : profName,
         profileNicknames: nicks.isEmpty ? null : nicks,
         activeFacet: (activeFacet ?? '').trim().isEmpty ? null : activeFacet!.trim(),
-        topicPin: (topicPin ?? '').trim().isEmpty ? null : topicPin!.trim(),
+        topicPin: (topicPin ?? '').trim().isNotEmpty ? topicPin!.trim() : null,
       );
     } catch (_) {
       return null;
@@ -1009,11 +1290,12 @@ class MemoryService {
   }
 
   /// Baut ein **kompaktes, kuratiertes** Kontext-Paket ≤2 KB für den Worker.
-  /// Enthält **nur**: identity.name (bei Consent & Greet), last.topic, last.mood{value,date}, share-Flag.
+  /// Enthält **nur**: identity.name (bei Consent & Greet), last.topic, last.mood, last.date, share-Flag.
   /// Keine Roh-Transkripte, keine History.
   Future<Map<String, dynamic>> buildContextMemories({required bool consent}) async {
     try {
-      if (!_enabled || !consent) return const <String, dynamic>{};
+      // Gate streng nach Projektstand: nur wenn enabled && consent && memoryActive
+      if (!_enabled || !consent || !memoryActive) return const <String, dynamic>{};
 
       final out = <String, dynamic>{};
 
@@ -1031,53 +1313,53 @@ class MemoryService {
         out['identity'] = <String, dynamic>{'name': nameToUse};
       }
 
-      // 2) last.topic (prägnant; bevorzugt: topicPin/activeFacet → topics → facets)
-      String? lastTopic;
-      // aus Hint-Pins (sync)
-      lastTopic = _lastHint?.topicPin?.trim().isNotEmpty == true
-          ? _lastHint!.topicPin!.trim()
-          : (_lastHint?.activeFacet?.trim().isNotEmpty == true
-              ? _lastHint!.activeFacet!.trim()
-              : null);
-      // fallback: jüngste Labels
-      if ((lastTopic ?? '').isEmpty) {
+      // 2) last.topic/mood/date – primär aus Opt-Keys, dann sanfte Fallbacks
+      String? lastTopic = await _getOptString(_kLastTopic);
+      String? lastMoodStr = await _getOptString(_kLastMood);
+      String? lastDateStr = await _getOptString(_kLastDate);
+
+      // Fallback topic: Pins/Topics/Facets
+      if ((lastTopic ?? '').trim().isEmpty) {
+        lastTopic = _lastHint?.topicPin?.trim().isNotEmpty == true
+            ? _lastHint!.topicPin!.trim()
+            : (_lastHint?.activeFacet?.trim().isNotEmpty == true
+                ? _lastHint!.activeFacet!.trim()
+                : null);
+      }
+      if ((lastTopic ?? '').trim().isEmpty) {
         final topics = await latestTopics(limit: 1);
         if (topics.isNotEmpty) lastTopic = topics.first.trim();
       }
-      // fallback: Facet-Label
-      if ((lastTopic ?? '').isEmpty) {
-        final facets = await topFacets(limit: 1);
-        if (facets.isNotEmpty) lastTopic = facets.first.label.trim();
-      }
-      // sanft kürzen
       if ((lastTopic ?? '').isNotEmpty && lastTopic!.length > 36) {
         lastTopic = '${lastTopic!.substring(0, 36).trimRight()}…';
       }
 
-      // 3) last.mood (value + date), falls Store eine Info liefern kann
-      final lastMood = await _readLastMood();
-      Map<String, dynamic>? moodMap;
-      if (lastMood.value != null && lastMood.value!.trim().isNotEmpty) {
-        final dateStr = _ymd(lastMood.date ?? DateTime.now().toUtc());
-        moodMap = <String, dynamic>{
-          'value': _cap(lastMood.value!.trim()),
-          'date': dateStr,
-        };
+      // Fallback date: heute
+      lastDateStr ??= _ymd(DateTime.now().toUtc());
+
+      // mood numerisch, falls möglich
+      dynamic moodField;
+      if ((lastMoodStr ?? '').trim().isNotEmpty) {
+        final s = lastMoodStr!.trim();
+        final n = int.tryParse(s);
+        moodField = n ?? s; // Zahl, falls parsebar; sonst String
       }
 
-      if ((lastTopic ?? '').isNotEmpty || moodMap != null) {
+      // Zusammenstellen von "last"
+      if ((lastTopic ?? '').isNotEmpty || moodField != null || (lastDateStr ?? '').isNotEmpty) {
         out['last'] = <String, dynamic>{
           if ((lastTopic ?? '').isNotEmpty) 'topic': lastTopic,
-          if (moodMap != null) 'mood': moodMap,
+          if (moodField != null) 'mood': moodField,
+          if ((lastDateStr ?? '').isNotEmpty) 'date': lastDateStr,
         };
       }
 
-      // 4) share-Flag (klein, optional)
+      // 3) share-Flag (klein, optional)
       if (_shareEnabled) {
         out['share'] = true;
       }
 
-      // 5) Größenkappe ≤ 2048 Bytes (2 KB). Falls zu groß → aggressiv kürzen.
+      // 4) Größenkappe ≤ 2048 Bytes (2 KB). Falls zu groß → aggressiv kürzen.
       List<int> bytes() => utf8.encode(jsonEncode(out));
       if (bytes().length > 2048) {
         // zuerst share weglassen
@@ -1153,11 +1435,11 @@ class MemoryService {
     if (!_enabled) return;
     try {
       final stamp = LocationBreadcrumb(
-        label: (label ?? '').trim().isEmpty ? null : _cap(label!.trim()),
+        label: (label ?? '').trim().isNotEmpty ? _cap(label!.trim()) : null,
         lat: lat,
         lon: lon,
         accuracy: accuracy,
-        source: (source ?? '').trim().isEmpty ? null : source!.trim(),
+        source: (source ?? '').trim().isNotEmpty ? source!.trim() : null,
         tsUtc: (tsUtc ?? DateTime.now().toUtc()),
       );
 
@@ -1222,7 +1504,6 @@ class MemoryService {
       // 2) Optional: Store befragen
       try {
         final dyn = _store as dynamic;
-        // bevorzugte, spezifische API
         final r = await dyn.latestLocations?.call(limit: 1);
         if (r is List && r.isNotEmpty) {
           final crumb = LocationBreadcrumb.fromMap(r.first);
@@ -1354,6 +1635,7 @@ class MemoryService {
       for (final e in events) {
         final ts = _tsOf(e);
         final key = _ymd(ts);
+        // FIX: List-Initialisierung mit [] statt ().
         (map[key] ??= <Map<String, dynamic>>[]).add(e);
       }
       // täglich auf 64 begrenzen, stabil sortiert
@@ -1429,49 +1711,52 @@ class MemoryService {
 
   // ---------------- interne Helfer ------------------------------------------
 
-  Future<void> _ingestMemoriesToSave(Map<String, dynamic> root) async {
+  /// Ingest von memories_to_save. **allowIdentity=false** verhindert PII-Overwrite (Name etc.).
+  Future<void> _ingestMemoriesToSave(Map<String, dynamic> root, {bool allowIdentity = false}) async {
     try {
       final list = (root['memories_to_save'] as List?) ??
           (root['memoriesToSave'] as List?) ??
           const [];
       if (list.isEmpty) return;
 
-      // 1) Identity/Profile + 2) generische Saves + 3) Insight-Facts
+      // 1) generische Saves + 2) Insight-Facts + 3) optional: last.topic (Fallback)
       final factMaps = <Map<String, dynamic>>[];
+      String? topicFallback;
 
       for (final item in list) {
         if (item == null) continue;
         if (item is Map) {
           final mem = Map<String, dynamic>.from(item);
 
-          // (1) identity.name
-          final idMap = (mem['identity'] is Map)
-              ? Map<String, dynamic>.from(mem['identity'])
-              : null;
-          final idName =
-              (idMap?['name'] ?? mem['identity_name'] ?? mem['name'])
-                  ?.toString()
-                  .trim();
-          if ((idName ?? '').isNotEmpty) {
-            await saveIdentityName(idName!);
-          }
-
-          // (1) profile.user_name & profile.nicknames[]
-          final profMap = (mem['profile'] is Map)
-              ? Map<String, dynamic>.from(mem['profile'])
-              : null;
-          final profName =
-              (profMap?['user_name'] ?? mem['profile_user_name'])
-                  ?.toString()
-                  .trim();
-          if ((profName ?? '').isNotEmpty) {
-            await saveProfileUserName(profName!);
-          }
-
-          final nicksDyn = (profMap?['nicknames'] ?? mem['nicknames']);
-          final nicks = _parseStringList(nicksDyn);
-          for (final nick in nicks) {
-            await addNickname(nick);
+          // (PII) Identity/Profile: NICHT speichern, außer explizit erlaubt
+          if (allowIdentity) {
+            try {
+              final idMap = (mem['identity'] is Map)
+                  ? Map<String, dynamic>.from(mem['identity'])
+                  : null;
+              final idName =
+                  (idMap?['name'] ?? mem['identity_name'] ?? mem['name'])
+                      ?.toString()
+                      .trim();
+              if ((idName ?? '').isNotEmpty && (_identityNameCache ?? '').trim().isEmpty) {
+                await saveIdentityName(idName!);
+              }
+              final profMap = (mem['profile'] is Map)
+                  ? Map<String, dynamic>.from(mem['profile'])
+                  : null;
+              final profName =
+                  (profMap?['user_name'] ?? mem['profile_user_name'])
+                      ?.toString()
+                      .trim();
+              if ((profName ?? '').isNotEmpty && (_profileUserNameCache ?? '').trim().isEmpty) {
+                await saveProfileUserName(profName!);
+              }
+              final nicksDyn = (profMap?['nicknames'] ?? mem['nicknames']);
+              final nicks = _parseStringList(nicksDyn);
+              for (final nick in nicks) {
+                await addNickname(nick);
+              }
+            } catch (_) {/* ignore */}
           }
 
           // (2) best-effort generisch sichern (falls Store es unterstützt)
@@ -1501,12 +1786,18 @@ class MemoryService {
             final fact = MemoryFact.fromMap(m);
             factMaps.add(fact.toMap());
           } catch (_) {/* ignore */}
+
+          // Fallback: topic sammeln
+          final t = (mem['topic'] ?? mem['last_topic'] ?? mem['label'])
+              ?.toString()
+              .trim();
+          if ((t ?? '').isNotEmpty && (topicFallback ?? '').isEmpty) {
+            topicFallback = t;
+          }
         } else if (item is String) {
-          // einfacher String → kann ein Insight-Satz sein ODER Nickname
+          // einfacher String → Insight-Satz
           final s = item.trim();
-          if (s.split(' ').length == 1 && s.length >= 2 && s.length <= 24) {
-            await addNickname(s); // kurzer Alias
-          } else if (s.isNotEmpty) {
+          if (s.isNotEmpty) {
             try {
               final fact = MemoryFact.fromMap({
                 'type': 'insight',
@@ -1518,6 +1809,7 @@ class MemoryService {
         }
       }
 
+      // batch persist
       if (factMaps.isNotEmpty) {
         final s = _store as dynamic;
         bool ok = false;
@@ -1548,7 +1840,29 @@ class MemoryService {
         }
       }
 
-      // Hint um Namen/Pins ergänzen (sync), ohne await
+      // Fallback: last.topic aus memories_to_save setzen (falls noch nicht gesetzt)
+      if ((topicFallback ?? '').isNotEmpty) {
+        final existing = await _getOptString(_kLastTopic);
+        if ((existing ?? '').trim().isEmpty) {
+          await _setOptString(_kLastTopic, topicFallback!.trim());
+          await _setOptString(_kLastDate, _ymd(DateTime.now().toUtc()));
+          // Pin auch sync aktualisieren
+          final base = _lastHint;
+          _lastHint = MemoryContextHint(
+            facets: base?.facets,
+            tags: base?.tags,
+            topics: base?.topics,
+            identityName: base?.identityName,
+            profileUserName: base?.profileUserName,
+            profileNicknames: base?.profileNicknames,
+            activeFacet: base?.activeFacet,
+            topicPin: topicFallback!.trim(),
+          );
+          _lastHintTs ??= DateTime.now();
+        }
+      }
+
+      // Hint um Namen/Pins ergänzen (sync), **ohne** Worker-PII-Overwrite
       final idNameNow = (_identityNameCache ?? '').trim();
       final profNameNow = (_profileUserNameCache ?? '').trim();
       final nicksNow = (_profileNicknamesCache ?? const <String>[])

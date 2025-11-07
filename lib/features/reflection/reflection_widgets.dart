@@ -1,4 +1,4 @@
-// [BASELINE] lib/features/reflection/reflection_widgets.dart (Stand: 01.11., v6.3.4)
+// [BASELINE] lib/features/reflection/reflection_widgets.dart (Stand: 01.11., v6.3.5)
 // lib/features/reflection/reflection_widgets.dart
 // Part: UI-Widgets (library: reflection_screen)
 // -----------------------------------------------------------------------------
@@ -9,6 +9,8 @@
 //                    _MessageItemState ohne SingleTickerProviderStateMixin.
 // - v6.3.4 (01.11.): Flutter 3.22+ API — Color.withValue → Color.withValues
 //                    (alle Vorkommen ersetzt).
+// - v6.3.5 (07.11.): BUGFIX PandaBridgeBubble — nutzt jetzt das übergebene `icon`
+//                    statt immer `Icons.link_rounded` (kleine A11y-/Semantik-Korrektur).
 // -----------------------------------------------------------------------------
 //
 // + v6.12 (neu):
@@ -21,6 +23,8 @@
 //   • User-Bubble, Panda-Step und Typing-Placeholder nutzen _MessageItem
 //     → keine Layoutsprünge bei schnellen Local-Inserts.
 // -----------------------------------------------------------------------------
+//
+// MERGE SIGNAL: v6.3.5 – nur PandaBridgeBubble-Icon-Bug; keine API-/Layout-Änderungen.
 
 part of 'reflection_screen.dart';
 
@@ -1036,9 +1040,8 @@ class PandaBridgeBubble extends StatelessWidget {
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const ExcludeSemantics(
-                          child:
-                              Icon(Icons.link_rounded, size: 18, color: _kInk),
+                        ExcludeSemantics(
+                          child: Icon(icon, size: 18, color: _kInk),
                         ),
                         const SizedBox(width: 8),
                         Expanded(

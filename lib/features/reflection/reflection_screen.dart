@@ -1,6 +1,17 @@
-// [BASELINE] lib/features/reflection/reflection_screen.dart (Stand: 01.11., fixed typedef + toIso8601String)
-// P0-S3.1-DONE — Dynamische Intro-Bubble (einmalig) via _maybeShowIntro in initState
-// Update 01.11. — Meta-Handshake: meta.flags.client_memory:true + kleine Robustheitsfixes
+// [BASELINE] lib/features/reflection/reflection_screen.dart (Stand: 07.11.2025, v6.7.3)
+// MERGE SIGNAL: Reflection v6.7.3 — next_turn_full/closure_full, Client-Memory-Handshake,
+// Only worker answer_helpers (max 3), Mood/Closure-Gates,
+// CH-Safety, STT, sofortiges User-Echo & Auto-Scroll (kein Leerbildschirm)
+// Hinweis: KEIN In-Session-Consent-Hint mehr (Einstellung nur im Privacy-/Settings-Screen)
+//
+// Kompatibilitäten:
+// • MemoryService: recall()/learnNameFromText()/saveUserTurn()/savePandaTurn()/saveFromWorker()
+// • ApiService: mood(entryId, icon, note)
+// • GuidanceService: startSessionFull(...), nextTurnFull(...), closureFull(...)
+// • DTOs: ../../services/guidance/dtos.dart
+//
+// Design: Oxford-Zen; Full-bleed Backdrop (kein schwarzer Rahmen)
+
 library reflection_screen;
 
 import 'dart:async';
@@ -150,8 +161,8 @@ class _ReflectionScreenState extends State<ReflectionScreen>
           defaultTargetPlatform == TargetPlatform.windows ||
           defaultTargetPlatform == TargetPlatform.macOS);
 
-  // ---------------- Memory Recall / Bridge (visuell unsichtbar) --------------
-  String? _bridgeText; // (nicht angezeigt; nur für Worker-Kontext)
+  // ---------------- Memory Recall / Bridge -----------------------------------
+  String? _bridgeText; // (aktuell unsichtbar; nur für Worker-Kontext)
 
   // Controller (History/Typing/Bridge)
   late final ReflectionController _ctrl;
@@ -225,7 +236,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
   }) {
     return {
       'flags': {
-        'client_memory': true, // Merge-Signal / Handshake
+        'client_memory': true, // Merge-Signal / Handshake (immer an)
         if (reopen) 'reopen': true, // Closure-Recovery (Reserve)
       },
       'ui': {
@@ -234,7 +245,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
         'platform': kIsWeb ? 'web' : 'flutter',
         'is_desktop': _isDesktop,
         'chip_mode': _chipMode.name,
-        'answer_chips_min': 2,
+        'answer_chips_min': 0, // keine lokalen Fallback-Chips
         'save_hint_after_rounds': 2,
       },
       'session': {
@@ -269,7 +280,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       'telemetry': {
         'feature_flags': {
           'reflection.meta': true,
-          'chips.min2': true,
+          'chips.worker_only': true,
           'memory.inject': true,
         },
       },
@@ -302,11 +313,8 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       if (!mounted) return;
       switch (e.kind) {
         case UIEventKind.appendUser:
-          // Lokales Echo (zusätzlich zur Screen-internen Logik neutral)
           if (_current == null) return;
-          setState(() {
-            // Nur Scroll; Echo erledigen wir ohnehin im Screen-Flow
-          });
+          setState(() {});
           _scrollToBottom();
           break;
         case UIEventKind.insertTypingPlaceholder:
@@ -322,8 +330,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       }
     });
     _ctrlListener = () {
-      // Falls wir später die VM nutzen wollen, könnten wir hier UI anpassen.
-      // Der Screen bleibt vorerst master of record für die Round-Visualisierung.
       if (!mounted) return;
       setState(() {});
     };
@@ -342,7 +348,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     unawaited(_prefetchRecall());
     unawaited(_ctrl.prefetchBridge());
 
-    // Live-Transkript → direkt in Input einfügen (keine Voice-Action-Trigger mehr)
+    // Live-Transkript → direkt in Input einfügen
     _finalSub = _speech.transcript$.listen((t) async {
       if (!mounted) return;
       final spoken = t.trim();
@@ -381,7 +387,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     if (!mounted) return;
     if (_hasShownIntro) return; // nur 1× pro Sitzung
     if (_rounds.isNotEmpty) return; // sobald Runde existiert → kein Intro
-    if ((widget.initialUserText ?? '').trim().isNotEmpty) return; // Seed → direkt Start
+    if ((widget.initialUserText ?? '').trim().isNotEmpty) return; // Seed → Start
 
     String? name;
     bool consent = false;
@@ -399,7 +405,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       text =
           'Hey, ${name.toString().trim()}, schön, dass du wieder da bist. Schreib mir in 1–2 Sätzen, wie es dir heute geht.';
     } else {
-      // neutraler Comeback-Intro (auch passend für erste Sitzung)
       text =
           'Schön, dass du wieder da bist. Schreib mir in 1–2 Sätzen, wie es dir heute geht.';
     }
@@ -508,7 +513,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
 
     if (_current!.hasPendingQuestion) {
       setState(() {
-        _current!.steps.last.answer = text;
+        _current!.steps.last.answer = text; // sofortiges lokal-Echo
         _controller.clear();
         _chipMode = _ChipMode.none;
       });
@@ -531,7 +536,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
         } catch (_) {}
       }());
 
-      // Controller: history/typing mitschreiben (no-op wenn View weiter führt)
+      // Controller: history/typing mitschreiben
       unawaited(_ctrl.send(text, context: context));
 
       unawaited(
@@ -707,7 +712,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
         round.allowClosure = wantClosure;
 
         final hasHelpers = step.followups.isNotEmpty;
-        _chipMode = (step.expectsAnswer || hasHelpers)
+        _chipMode = (step.expectsAnswer && !wantClosure && hasHelpers)
             ? _ChipMode.answer
             : _ChipMode.none;
       });
@@ -868,12 +873,12 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       if (flagMoodPrompt || flagRecommendEnd) round.allowClosure = true;
 
       final hasHelpers = step.followups.isNotEmpty;
-      _chipMode = (step.expectsAnswer || hasHelpers)
+      _chipMode = (step.expectsAnswer && !(flagMoodPrompt || flagRecommendEnd) && hasHelpers)
           ? _ChipMode.answer
           : _ChipMode.none;
     });
 
-    // Controller: history update (falls View-first war)
+    // Controller: history update
     unawaited(_ctrl.send(userAnswer, context: context));
 
     // Persist best-effort
@@ -938,17 +943,16 @@ class _ReflectionScreenState extends State<ReflectionScreen>
 
     final mirrorRaw = _coerceMirror(t).trim();
     final questionRaw = _coerceQuestion(t);
+    // helperSuggestion wird nicht mehr UI-seitig verwendet
     final helperSuggestion = _coerceHelperSuggestion(t);
 
     final level = _safeString(t, ['risk_level']).toLowerCase();
     final risk = _safeBool(t, ['risk']) || level == 'high' || level == 'mild';
 
-    final fromSvc = _safeStringList(t, ['answer_helpers']).take(3).toList();
+    // Nur Worker-answer_helpers (max 3). Keine lokalen Fallback-Chips.
     final helpers = isClosure
         ? <String>[]
-        : (fromSvc.isNotEmpty
-            ? fromSvc
-            : _coerceAnswerHelpers(t).take(3).toList());
+        : _safeStringList(t, ['answer_helpers']).take(3).toList();
 
     final talk = _safeStringList(t, ['talk']).take(2).toList();
 
@@ -1270,48 +1274,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     return '';
   }
 
-  List<String> _coerceAnswerHelpers(dynamic t) {
-    List<String> acc = [];
-    void addAll(dynamic obj) {
-      if (obj == null) return;
-      acc.addAll(_safeStringList(obj, [
-        'answer_helpers',
-        'answer_scaffolds',
-        'answer_templates',
-        'answer_suggestions',
-        'chips',
-        'helpers',
-        'answers',
-      ]));
-    }
-
-    addAll(t);
-    addAll(_extract(t, 'primary'));
-    addAll(_extract(t, 'flow'));
-
-    acc = acc.map(_sanitizeHelperText).where((s) => s.isNotEmpty).toList();
-
-    final seen = <String>{};
-    final deduped = <String>[];
-    for (final s in acc) {
-      if (seen.add(s.toLowerCase())) deduped.add(s);
-      if (deduped.length >= 3) break;
-    }
-    return deduped;
-  }
-
-  String _sanitizeHelperText(String raw) {
-    var s = raw.toString().trim();
-    if (s.isEmpty) return '';
-    s = s.replaceAll(RegExp(r'^[„“"»«]+|[„“"»«]+$'), '');
-    s = s.replaceAll(RegExp(r'\s*[:：]\s*$'), ''); // trailing ':' entfernen
-    s = s.replaceAll(RegExp(r'[?？]+$'), '');
-    s = s.replaceAll(RegExp(r'\s+'), ' ').trim();
-    if (s.length > 72) s = '${s.substring(0, 72).trimRight()}…';
-    s = s.replaceAll(RegExp(r'[.。]+$'), '').trim();
-    return s;
-  }
-
   // ---------------- Utils -----------------------------------------------------
 
   bool _talkContainsLengthHint(_PandaStep? step) {
@@ -1494,9 +1456,8 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     final List<String> answerTemplatesRefined =
         _refineChips(rawTemplates, question: lastQ, lastAnswer: lastA);
 
-    // --- Mindestens 2 Chips (sanfter Fallback)
-    final List<String> answerTemplates =
-        _ensureMinTwoChips(answerTemplatesRefined, lastQ, lastA);
+    // Keine lokalen Fallback-Chips generieren (Worker-only).
+    final List<String> answerTemplates = answerTemplatesRefined;
 
     // Save-Hinweis soll explizit erst NACH 2 Runden erscheinen
     final bool canPermanentSave =
@@ -1732,6 +1693,8 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                                 ),
                               ),
 
+                              // (Consent-Hint wurde bewusst entfernt)
+
                               // CHIPS (Starter/Antwort) – nicht in Mood-Phase
                               AnimatedSize(
                                 duration: _animShort,
@@ -1953,23 +1916,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       if (kept.length >= 3) break;
     }
 
-    return kept.isNotEmpty
-        ? kept
-        : chips.map(_ensureEllipsisSuffix).take(3).toList();
-  }
-
-  // NEU: sorge für mind. 2 Chips – generischer Zusatz bei nur 1
-  List<String> _ensureMinTwoChips(List<String> chips, String q, String a) {
-    if (chips.length >= 2) return chips;
-    final List<String> out = List<String>.from(chips);
-    const fallback = 'Noch etwas dazu … ';
-    String fromQ(String qq) {
-      final s = qq.trim();
-      if (s.isEmpty) return fallback;
-      return 'Wichtig ist mir außerdem … ';
-    }
-    out.add(_ensureEllipsisSuffix(fromQ(q)));
-    return out;
+    return kept;
   }
 
   void _onTapChip(String text, {required bool isAnswerTemplate}) {
@@ -2128,6 +2075,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       question: '',
       talkLines: const <String>[],
       risk: r.steps.isNotEmpty ? r.steps.last.risk : false,
+      // Hinweis: diese beiden Chips sind bewusst leicht – sie dienen nur der Navigation nach dem Speichern.
       followups: const <String>[
         'Ja, ich möchte weiterreden … ',
         'Für heute reicht es mir, danke … ',
