@@ -1,7 +1,21 @@
-// [BASELINE] lib/features/pro/pro_screen.dart (Stand: 29.10.)
-// P2-S10.1-DONE — Export-Dialog sauber (keine Überläufer) + Back wie Journey
-// ProScreen — Oxford Journey Board (v4.8.6 · 2025-11-01)
+// [BASELINE] lib/features/pro/pro_screen.dart (Stand: 2025-11-07)
+// P2-S10.4 — Settings-Zahnrad neben Range-Bubbles (statt AppBar); Graph-Switch @200px
+// ProScreen — Oxford Journey Board (v4.8.9 · 2025-11-07)
 // ------------------------------------------------------------------
+// v4.8.9 (S10.4):
+// • Zahnrad aus der AppBar entfernt und in die Range-Bubble rechts gesetzt.
+// • _RangeBubble erhält onOpenSettings; IconButton mit Tooltip & A11y.
+// • Layout bleibt auf kleinen Screens stabil (Chips können umbrechen).
+//
+// v4.8.8 (S10.3):
+// • Back-Button & Settings-Zahnrad über ZenAppBar (actions) – wie Journey.
+// • Graph-Ansicht: Switch-Schwelle jetzt bei 200 px statt 410 px.
+// • UTF-8 Fix: entferntes unsichtbares Zeichen vor "Widget build" in _MemoryCard.
+//
+// v4.8.7 (S10.2):
+// • Back-Button & Settings-Zahnrad über zw.ZenAppBar(actions:[...]) realisiert.
+// • Entfernt: manuell positioniertes Zahnrad im Body-Stack (Z-Reihenfolge/Taps).
+//
 // v4.8.6 (S10.1):
 // • Export-Dialog: auf kleinen Screens als BottomSheet (scrollbar, SafeArea),
 //   auf größeren als Dialog mit MaxBreite + Scroll → keine Überläufer mehr.
@@ -58,7 +72,7 @@ class ProScreen extends StatefulWidget {
   final List<MoodEntry> moodEntries;
   final List<ReflectionEntry> reflectionEntries;
 
-  /// Öffnet die Settings – Zahnrad oben rechts (optional überschreibbar).
+  /// Öffnet die Settings – Zahnrad (optional überschreibbar).
   final VoidCallback? onOpenSettings;
 
   /// Falls du Host/Calls extern überschreiben willst:
@@ -362,12 +376,21 @@ class _ProScreenState extends State<ProScreen>
     );
   }
 
+  // Zentraler Settings-Opener (für Bubble & Fallback)
+  void _openProSettings() {
+    if (widget.onOpenSettings != null) {
+      widget.onOpenSettings!.call();
+    } else {
+      _openZenSettingsSheet(context);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final tt = Theme.of(context).textTheme;
     final size = MediaQuery.of(context).size;
     final isMobile = size.width < 470;
-    final isNarrow410 = size.width <= 410;
+    final isNarrow200 = size.width <= 200; // ← neue Schwelle
     final isPhoneTall = size.height > 720;
 
     // ---- Provider (optional) -------------------------------------------------
@@ -400,13 +423,16 @@ class _ProScreenState extends State<ProScreen>
     final last7FromSeries = series.takeLast(7);
 
     final showMoodGraph =
-        (series.length >= 4) && !isNarrow410 && size.width > 0 && size.height > 0;
+        (series.length >= 4) && !isNarrow200 && size.width > 0 && size.height > 0;
 
     return Scaffold(
       extendBodyBehindAppBar: true,
       backgroundColor: Colors.transparent,
-      // Back-Button wie Journeyscreen
-      appBar: const zw.ZenAppBar(title: null, showBack: true),
+      // AppBar: nur Back (Zahnrad ist jetzt in der Range-Bubble)
+      appBar: const zw.ZenAppBar(
+        title: null,
+        showBack: true,
+      ),
       body: Stack(
         children: [
           // 0) Einheitlicher Backdrop (extra milchig)
@@ -420,28 +446,6 @@ class _ProScreenState extends State<ProScreen>
               hazeStrength: .18,
               saturation: .92,
               wash: .12,
-            ),
-          ),
-
-          // 0.5) Settings-Zahnrad (oben rechts)
-          Positioned(
-            right: 12,
-            top: 0,
-            child: SafeArea(
-              child: Material(
-                color: Colors.transparent,
-                child: InkResponse(
-                  onTap: widget.onOpenSettings ??
-                      () => _openZenSettingsSheet(context),
-                  radius: 24,
-                  child: CircleAvatar(
-                    backgroundColor: Colors.white.withValue(alpha: .18),
-                    radius: 18,
-                    child: const Icon(Icons.settings_rounded,
-                        size: 18, color: zs.ZenColors.deepSage),
-                  ),
-                ),
-              ),
             ),
           ),
 
@@ -503,11 +507,12 @@ class _ProScreenState extends State<ProScreen>
                           ],
                         ),
 
-                        // Range Switcher
+                        // Range Switcher + Zahnrad rechts
                         _RangeBubble(
                           range: _range,
                           onChange: (r) => setState(() => _range = r),
                           isMobile: isMobile,
+                          onOpenSettings: _openProSettings,
                         ),
 
                         const SizedBox(height: 12),
@@ -519,8 +524,8 @@ class _ProScreenState extends State<ProScreen>
                             filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
                             child: zw.ZenGlassCard(
                               padding: EdgeInsets.symmetric(
-                                horizontal: isNarrow410 ? 14 : 20,
-                                vertical: isNarrow410 ? 12 : 16,
+                                horizontal: isNarrow200 ? 14 : 20,
+                                vertical: isNarrow200 ? 12 : 16,
                               ),
                               topOpacity: .26,
                               bottomOpacity: .10,
@@ -1171,11 +1176,13 @@ class _RangeBubble extends StatelessWidget {
   final _Range range;
   final ValueChanged<_Range> onChange;
   final bool isMobile;
+  final VoidCallback? onOpenSettings;
 
   const _RangeBubble({
     required this.range,
     required this.onChange,
     required this.isMobile,
+    this.onOpenSettings,
   });
 
   @override
@@ -1192,35 +1199,51 @@ class _RangeBubble extends StatelessWidget {
           borderRadius: const BorderRadius.all(zs.ZenRadii.s),
           padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
           child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              _RangeChip(
-                label: '7 Tage',
-                selected: range == _Range.d7,
-                onTap: () => onChange(_Range.d7),
-              ),
-              const SizedBox(width: 6),
-              _RangeChip(
-                label: '30 Tage',
-                selected: range == _Range.d30,
-                onTap: () => onChange(_Range.d30),
-              ),
-              const SizedBox(width: 6),
-              _RangeChip(
-                label: '90 Tage',
-                selected: range == _Range.d90,
-                onTap: () => onChange(_Range.d90),
-              ),
-              if (!isMobile) ...[
-                const SizedBox(width: 10),
-                Opacity(
-                  opacity: .75,
-                  child: Text(
-                    'Ansicht verfeinern',
-                    style: tt.bodySmall,
-                  ),
+              // zentrierter Block mit den Chips (+ optionalem Text)
+              Expanded(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    _RangeChip(
+                      label: '7 Tage',
+                      selected: range == _Range.d7,
+                      onTap: () => onChange(_Range.d7),
+                    ),
+                    const SizedBox(width: 6),
+                    _RangeChip(
+                      label: '30 Tage',
+                      selected: range == _Range.d30,
+                      onTap: () => onChange(_Range.d30),
+                    ),
+                    const SizedBox(width: 6),
+                    _RangeChip(
+                      label: '90 Tage',
+                      selected: range == _Range.d90,
+                      onTap: () => onChange(_Range.d90),
+                    ),
+                    if (!isMobile) ...[
+                      const SizedBox(width: 10),
+                      Opacity(
+                        opacity: .75,
+                        child: Text('Ansicht verfeinern', style: tt.bodySmall),
+                      ),
+                    ],
+                  ],
                 ),
-              ]
+              ),
+              // Zahnrad rechts (wie markiert)
+              SizedBox(
+                height: 28,
+                width: 36,
+                child: IconButton(
+                  padding: EdgeInsets.zero,
+                  iconSize: 20,
+                  tooltip: 'Einstellungen',
+                  onPressed: onOpenSettings,
+                  icon: const Icon(Icons.settings_rounded),
+                ),
+              ),
             ],
           ),
         ),

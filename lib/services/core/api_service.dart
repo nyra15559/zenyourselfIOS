@@ -1,31 +1,13 @@
-// [BASELINE] lib/services/core/api_service.dart (Stand: 2025-11-05, v6.4.7+full-session+bridge-guard)
-// MERGE SIGNAL: meta.flags.client_memory — Merge-Signal-File 1.4 (Plan v6.4.7)
-//
-// ZenYourself — Core ApiService (server+offline, Samfring optional)
-// -----------------------------------------------------------------------------
-// - Einheitlicher HTTP/Retries/Fallbacks (_tryEndpoints / _postMaybe)
-// - Zentrale Payload-Builder (_buildSessionMap / _basePayload)
-// - Memory-Hooks & Byte-Kontext (best-effort, ohne await)
-// - Light Contact-Tints (Header + Payload), Samfring=optional
-// - Out-Soft-Gate: kleiner Start-Blocker; blockiert NIE Offline-Flows
-// - v6.4.6 updates:
-//     • Full-Session aktiviert: next_turn_full als Primär-Endpunkt.
-//     • Neue Public-API sendNextTurnFull(...).
-//     • session.history zusätzlich zu messages (letzte ~20 Turns).
-//     • History-Hardcap (~20 Turns).
-//     • Parser/Felder unverändert (answer_helpers, flow.mood_prompt, risk_level,
-//       helper_suggestion, talk, closure).
-// - v6.4.7 updates (dieser Patch):
-//     • _basePayload(): Privacy/Toggle-Fix — Wenn kein Consent ODER memoryActive==false
-//       → KEIN context.memories; meta.flags.client_memory=false; meta.memory.bridge=false.
-//       Wenn aktiv → context.memories=MemoryService.buildContextMemories() (Size-Guard ≤2 kB),
-//       meta.flags.client_memory=true; meta.memory.bridge=true.
-//     • configureForWorker(): identische Guard-Logik (kein Auto-Inject bei inactive),
-//       Size-Guard ≤ 2 kB, Flag-Setzung synchron gehalten.
-//     • Kleinere Robustheits-Helpers (_memoryActiveNow, _setClientMemoryFlagOnBody).
-//     • BUGFIX: mem nicht mehr als const-Map anlegen (verhinderte Mutationen & Name/Mood-Inject).
-//     • NEW: contact_tints Alias (zusätzlich zu contact_tins) + X-Thread-Id Header.
-//     • NEW: maybeResetThreadOnPrivacyChange(...) Helfer für Session-Reset bei Privacy-Off.
+// [BASELINE] lib/services/core/api_service.dart — Stand: 2025-11-07 — ZenYourself v6.7.0
+// Merge-Signal: client_memory Bridge (Consent+Active), ContextMemories ≤2kB, Quick-Inject (Name/Mood/Emotion), X-Thread-Id
+// Changes:
+// • _basePayload(): Consent/Active Guard; context.memories (≤2 kB) + Flags; Quick-Inject Name/Mood/Emotion; History in session.history.
+// • configureForWorker(): identische Bridge-Logik; Header X-Thread-Id; contact_tints + contact_tins; context_bytes_b64; Size-Guard ≤2 kB.
+// • sendNextTurnFull(...): History-Cap (~20) + Memories-Cap (≤2 kB); Priorität /next_turn_full.
+// • maybeResetThreadOnPrivacyChange(...): neue thread_id bei Privacy-Off (optional force).
+// • Byte-Kontext: context_bytes_b64 (≤2 kB); Out-Soft-Gate Warmup.
+// • Parser/DTO: robust (helpers, flow, tags, schools, speech_meta, understanding); memories_to_save → MemoryService.saveFromWorker().
+// Safety: keine Breaking Changes; Public-Signaturen stabil; Null-Safety & Imports geprüft; Stil = Oxford‑Zen.
 
 import 'dart:async';
 import 'dart:convert';
@@ -380,7 +362,7 @@ class ApiService {
     unawaited(() async {
       final ms = 120 + _rand.nextInt(80);
       await Future.delayed(Duration(milliseconds: ms));
-      unawaited(healthCheck());
+      unawaited(healthCheck().then((_) {}));
       _outGateOpen = true;
     }());
   }
@@ -1363,7 +1345,7 @@ class ApiService {
     final sanitized = _redactPII(firstLine.trim());
     if (sanitized.isEmpty) return q;
     final hint = _neatEllipsis(sanitized, 90);
-    if (RegExp(r'^\[[^\]]]+\]$').hasMatch(hint)) return q;
+    if (RegExp(r'^\[[^\]]+\]$').hasMatch(hint)) return q;
     return '$q\n\n(Bezug: $hint)';
   }
 
@@ -1434,7 +1416,7 @@ class ApiService {
     final raw =
         text.replaceAll('\r', ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
     final parts = raw
-        .split(RegExp(r'[\.!\?\n;:]+'))
+        .split(RegExp(r'[\.!\?\n;:]'))
         .map((s) => s.trim())
         .where((s) => s.length >= 3)
         .toList();

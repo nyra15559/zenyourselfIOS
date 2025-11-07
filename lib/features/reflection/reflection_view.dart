@@ -1,4 +1,4 @@
-// [BASELINE] lib/features/reflection/reflection_view.dart (Stand: 2025-11-04, v6.7)
+// [BASELINE] lib/features/reflection/reflection_view.dart (Stand: 2025-11-07, v6.7.2)
 // ReflectionView — reine Layout-Schicht (Plan v6.2.2 + v6.3.x VM-Wiring)
 // + v6.4 AutoScroll v1 (2025-10-31):
 //   • Stateful (ScrollController, extentAfter-Heuristik, Jump-to-Bottom FAB)
@@ -25,6 +25,10 @@
 // v6.7 Patch (2025-11-04):
 //   • Mood-Gate strikt an `moodPrompt` gebunden (kein CTA bei allowClosure-only).
 //   • Kleinere Robustheits-Fixes (Width-Clamp, Null-Guards), Analyzer-clean.
+//
+// v6.7.2 (2025-11-07):
+//   • BUGFIX: Composer verwendete konstanten Hint-Text; jetzt `hint`-Prop korrekt genutzt.
+//   • Kleinere Mikro-Polishes (sanftere Auto-Scroll-Signatur, Null-Guards).
 //
 
 import 'dart:math' as math;
@@ -983,11 +987,11 @@ class _ComposerBar extends StatelessWidget {
               onSubmitted: (_) {
                 if (canSend) onSend?.call();
               },
-              decoration: const InputDecoration(
-                hintText: 'Antworte in 1–2 Sätzen.',
+              decoration: InputDecoration(
+                hintText: hint, // ← BUGFIX: nutzt jetzt das Prop
                 border: InputBorder.none,
                 isDense: true,
-                contentPadding: EdgeInsets.symmetric(vertical: 10),
+                contentPadding: const EdgeInsets.symmetric(vertical: 10),
               ),
             ),
           ),

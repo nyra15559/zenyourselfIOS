@@ -1,30 +1,35 @@
-// [BASELINE] lib/features/reflection/reflection_logic.dart (Stand: 2025-11-04)
+// [BASELINE] lib/features/reflection/reflection_logic.dart (Stand: 2025-11-07)
 // ZenYourself — ReflectionLogic (Controller & Handler)
-// PANDA-REFLECT-12.8 → v6.7.1
+// PANDA-REFLECT-12.8 → v6.7.2 (Patched 2025-11-07)
 // -----------------------------------------------------------------------------
-// Merge-Signal / Handshake:
-// • Bei jedem Call wird `meta.flags.client_memory:true` übergeben.
-// • Bridge (Recall) wird als `meta.memory.bridge` mitgegeben.
-// • Memories/Consent werden 1:1 als context.memories + memory_consent (Guidance/API).
-// -----------------------------------------------------------------------------
+// Merge-Signal / Handshake (aktualisiert):
+// • Bei JEDEM Call wird meta.flags.client_memory = (consent && memoryActive) gesetzt.
+// • Memories werden NUR gesendet, wenn (consent && memoryActive) →
+//   MemoryService.buildContextMemories(consent:true), sonst null.
+// • History (typed gdt.HistoryTurn) wird 1:1 an GuidanceService.startSessionFull/nextTurnFull(...) durchgereicht.
+//
 // Aufgaben (v6.7):
 // • In-Memory History-Buffer aller Turns dieser Session (max ~20) für Payload.
-// • Senden-Flow: User-Echo lokal, dann nextTurnFull(sessionId, history, userText, memories).
+// • Senden-Flow: User-Echo lokal, dann startSessionFull/nextTurnFull(..., history, memories, meta).
 // • Response verarbeiten: Panda-Turn anhängen; Chips/Risk/Closure steuern.
 // • Session-Lifecycle: threadId (aus Provider<AppReflectionSession>) sofort in Meta mitschicken;
 //   API-Session (gdt.ReflectionSession) aus Turn übernehmen und bis Abschluss halten.
 // • Limits: Bei >N Turns älteste 10–20 % kappen (hier: ~20 %; mind. 2).
 // • Keine UI-Logik in diesem Controller; View rendert nur via VM & UIEvents.
-// • Rückwärtskompatibel: GuidanceService-Methoden dynamisch mit `history` aufrufen, falls vorhanden.
+//
+// Neu:
+// • Toggle-Wechsel (Privacy/Mem-Switch) erzwingt neue thread_id (lokal auf null → App liefert neu)
+//   und setzt History-Buffer + Session zurück (onPrivacyOrMemoryToggleChanged).
+// • Striktes List.unmodifiable für Linux-Builds.
+// • Hope-Text & Topic-Pins defensiv extrahiert (speechSequence/analysis/understanding).
 // -----------------------------------------------------------------------------
 
 import 'dart:async';
-import 'dart:collection';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:provider/provider.dart';
 
-// Wichtig: Alias für Guidance-DTOs, um Namenskonflikte zu vermeiden
+// Guidance-DTOs
 import '../../services/guidance/dtos.dart' as gdt;
 
 // Guidance-Service
@@ -33,14 +38,12 @@ import '../../services/guidance_service.dart';
 // Memory
 import '../../core/memory/memory_service.dart';
 
-// ⚠️ Entfernt: Import aus package:your_app/main.dart (hat Build gebrochen)
-
 const Duration _kNetTimeout = Duration(seconds: 18);
-const Duration _kTypingGuard = Duration(seconds: 12); // Fallback, falls etwas hängen bleibt;
+const Duration _kTypingGuard = Duration(seconds: 12); // Fallback, falls etwas hängt
 
-const int _kMaxHistoryTurns = 20; // ≈ Anzahl Nachrichten (User+Assistant) pro Session in Payload
+const int _kMaxHistoryTurns = 20;  // ≈ Anzahl Nachrichten (User+Assistant) pro Session in Payload
 const double _kTrimFraction = 0.2; // 20 % der ältesten Einträge kappen, wenn Cap überschritten ist
-const int _kTrimMin = 2; // mindestens 2 Einträge entfernen, falls getrimmt wird
+const int _kTrimMin = 2;           // mindestens 2 Einträge entfernen, falls getrimmt wird
 
 // --------------------------- UI Events (für View) -----------------------------
 enum UIEventKind { appendUser, insertTypingPlaceholder, removeTypingPlaceholder, scrollToEnd }
@@ -109,25 +112,11 @@ class ReflectionController extends ChangeNotifier {
   ReflectionController({
     Duration sendMinGap = const Duration(milliseconds: 420),
   }) : _sendMinGap = sendMinGap {
-    // Consent best-effort asynchron initialisieren (Property ODER Methode unterstützt)
+    // Consent/Active best-effort asynchron initialisieren
     Future.microtask(() async {
       try { await MemoryService.instance.warmup(); } catch (_) {}
-      try {
-        bool v = false;
-        // ignore: avoid_dynamic_calls
-        final dyn = MemoryService.instance as dynamic;
-        final val = dyn.shareEnabled;
-        if (val is bool) {
-          v = val;
-        } else if (val is Future<bool>) {
-          v = await val;
-        } else if (val is Function) {
-          final res = val();
-          if (res is bool) v = res; else if (res is Future<bool>) v = await res;
-        }
-        _memoryConsent = v;
-        notifyListeners();
-      } catch (_) {/* keep default=false */}
+      await _refreshConsentAndActive();
+      notifyListeners();
     });
   }
 
@@ -137,21 +126,21 @@ class ReflectionController extends ChangeNotifier {
   ReflectionVM? get vm => _vm;
   gdt.ReflectionSession? get session => _apiSession;
   String? get bridgeText => _bridgeText;
-  dynamic get memories => _memories;
   bool get memoryConsent => _memoryConsent;
+  bool get memoryActive => _memoryActive;
 
   bool get hasSeenIntroThisSession => _hasSeenIntroThisSession;
   int get roundCount => (_apiSession?.turnIndex ?? 0);
   bool get canShowIntro => !_hasSeenIntroThisSession && roundCount == 0 && _vm == null;
 
-  UnmodifiableListView<String> get facetQueue => UnmodifiableListView(_facetQueue);
+  List<String> get facetQueue => List.unmodifiable(_facetQueue);
   String? get activeFacet => _activeFacet;
   String? get topicPin => _topicPin;
-  UnmodifiableListView<AvailableAction> get availableActions => UnmodifiableListView(_availableActions);
+  List<AvailableAction> get availableActions => List.unmodifiable(_availableActions);
   bool get inSkillFlow => _inSkillFlow;
 
   // History (read-only view for UI/diagnostics if needed)
-  UnmodifiableListView<gdt.HistoryTurn> get history => UnmodifiableListView(_history);
+  List<gdt.HistoryTurn> get history => List.unmodifiable(_history);
 
   // ---------------- UI Event Sink (optional) ----------------------------------
 
@@ -167,22 +156,23 @@ class ReflectionController extends ChangeNotifier {
   ReflectionVM? _vm;
   String? _bridgeText;
 
-  // Thread-ID (aus Provider – dynamisch gelesen, kein App-Typ nötig)
+  // Thread-ID (aus Provider – dynamisch gelesen)
   String? _threadId;
 
   DateTime? _lastSendAt;
   Timer? _pendingSend;
   bool _actionUsedInThisSession = false;
 
-  dynamic _memories;
-  bool _memoryConsent = false;
+  bool _memoryConsent = false;     // User-Consent (Privacy)
+  bool _memoryActive = true;       // Lokaler Memory-Toggle/Status
+  bool _lastClientMemoryFlag = false; // wird pro Call gesetzt (consent && active)
 
   bool _hasSeenIntroThisSession = false;
 
   final List<String> _facetQueue = <String>[];
   String? _activeFacet;
   String? _topicPin;
-  final List<AvailableAction> _availableActions = <String, AvailableAction>{}.values.toList();
+  final List<AvailableAction> _availableActions = <AvailableAction>[];
   bool _inSkillFlow = false;
 
   bool _typingActive = false;
@@ -196,46 +186,57 @@ class ReflectionController extends ChangeNotifier {
   // ---------------- Init / Bridge / Thread-ID --------------------------------
 
   /// Liest die aktuelle Thread-ID aus einem beliebigen Provider-Objekt, das ein `id`-Feld hat.
-  /// Safe: funktioniert auch, wenn kein passender Provider vorhanden ist.
   void wireSessionFromContext(BuildContext context) {
     try {
-      // dynamisch lesen, keine harte Typ-Kopplung
       final obj = context.read<Object?>();
       final dyn = obj as dynamic;
       final id = dyn?.id?.toString();
       if (id != null && id.trim().isNotEmpty) {
         _threadId = id.trim();
       }
-      // kein notify nötig – wird in Meta erst beim nächsten Call genutzt
     } catch (_) {/* ignore */}
   }
 
   Future<void> prefetchBridge() async {
     try {
       final recall = await MemoryService.instance.recall(limit: 6);
-      try {
-        // ignore: avoid_dynamic_calls
-        final dyn = MemoryService.instance as dynamic;
-        final se = dyn.shareEnabled;
-        if (se is bool) _memoryConsent = se;
-        else if (se is Future<bool>) _memoryConsent = await se;
-        else if (se is Function) {
-          final res = se();
-          if (res is bool) _memoryConsent = res;
-          else if (res is Future<bool>) _memoryConsent = await res;
-        }
-      } catch (_) {}
+      await _refreshConsentAndActive();
       _bridgeText = _composeBridgeText(recall);
       notifyListeners();
     } catch (_) {/* never throw */}
   }
 
-  void setMemoryConsent(bool consent) {
-    _memoryConsent = consent;
+  /// Extern aufrufbar, wenn Privacy/Mem-Switch umgelegt wurde:
+  /// • erzwingt neue thread_id (lokal leeren → App liefert neu)
+  /// • setzt History & Session zurück
+  void onPrivacyOrMemoryToggleChanged({bool? consent, bool? active, String? newThreadId}) {
+    if (consent != null) _memoryConsent = consent;
+    if (active != null) _memoryActive = active;
+
+    _apiSession = null;
+    _vm = null;
+    _history.clear();
+    _facetQueue.clear();
+    _activeFacet = null;
+    _topicPin = null;
+    _availableActions.clear();
+    _inSkillFlow = false;
+    _hasSeenIntroThisSession = false;
+
+    // neue Thread-ID erzwingen: lokal leeren oder explizit setzen
+    _threadId = (newThreadId != null && newThreadId.trim().isNotEmpty) ? newThreadId.trim() : null;
+
+    notifyListeners();
   }
 
-  void setMemories(dynamic memories) {
-    _memories = memories;
+  void setMemoryConsent(bool consent) {
+    _memoryConsent = consent;
+    notifyListeners();
+  }
+
+  void setMemoryActive(bool active) {
+    _memoryActive = active;
+    notifyListeners();
   }
 
   /// (Legacy) Setzt eine bereits vorhandene API-Session (z. B. nach Navigation).
@@ -274,14 +275,21 @@ class ReflectionController extends ChangeNotifier {
 
   // ---------------- Sending ---------------------------------------------------
 
-  Future<void> start(String text, {bool fromVoice = false, BuildContext? context}) async {
-    if (context != null) {
-      // Stelle sicher, dass die Thread-ID geladen ist
-      wireSessionFromContext(context);
+  /// Einfache öffentliche API, die Start/Next intern entscheidet.
+  Future<void> sendUser(String text, {bool fromVoice = false, BuildContext? context}) async {
+    if (_apiSession == null) {
+      await start(text, fromVoice: fromVoice, context: context);
+    } else {
+      await send(text, context: context);
     }
+  }
+
+  Future<void> start(String text, {bool fromVoice = false, BuildContext? context}) async {
+    if (context != null) wireSessionFromContext(context);
 
     _debounceCancel();
     if (!_gateSendNow()) return;
+
     text = _sanitizeInput(text);
     if (text.isEmpty) return;
 
@@ -290,45 +298,44 @@ class ReflectionController extends ChangeNotifier {
 
     _hasSeenIntroThisSession = true;
 
+    // Memories + Flag vorbereiten (consent && active)
+    final _MemPrep mem = await _prepareMemForCall(userText: text);
+
     _setLoading(true);
     try {
       final svc = GuidanceService.instance;
-      final meta = _buildMeta(mode: fromVoice ? 'voice' : 'text');
-
+      final meta = _buildMeta(); // enthält aktuelles _lastClientMemoryFlag
       gdt.ReflectionTurn turn;
+
       try {
-        // ignore: avoid_dynamic_calls
         final dyn = svc as dynamic;
-        // **NEU**: Sessionstart über startSessionFull (keine reflectFull-Calls mehr)
         turn = await (dyn.startSessionFull(
           text: text,
           session: null,
           locale: 'de',
           tz: 'Europe/Zurich',
-          memories: _memories,
-          memoryConsent: _memoryConsent,
+          memories: mem.memories,
+          memoryConsent: mem.consent,
           meta: meta,
           clientContext: {
             'mode': fromVoice ? 'voice' : 'text',
-            'source': 'reflection_screen',
+            'source': 'reflection_logic',
             if (_threadId != null) 'thread_id': _threadId,
           },
-          // history beim Start optional weglassen; Service handled das selbst
         ) as Future<gdt.ReflectionTurn>).timeout(_kNetTimeout);
       } catch (_) {
-        // typisierter Fallback
         turn = await svc
             .startSessionFull(
               text: text,
               session: null,
               locale: 'de',
               tz: 'Europe/Zurich',
-              memories: _memories,
-              memoryConsent: _memoryConsent,
+              memories: mem.memories,
+              memoryConsent: mem.consent,
               meta: meta,
               clientContext: {
                 'mode': fromVoice ? 'voice' : 'text',
-                'source': 'reflection_screen',
+                'source': 'reflection_logic',
                 if (_threadId != null) 'thread_id': _threadId,
               },
             )
@@ -375,17 +382,20 @@ class ReflectionController extends ChangeNotifier {
 
   Future<void> _sendNow(String text) async {
     if (!_gateSendNow()) return;
+
     text = _sanitizeInput(text);
     if (text.isEmpty && _apiSession == null) return;
 
+    if (_apiSession == null) {
+      await start(text);
+      return;
+    }
+
+    // Memories + Flag vorbereiten (consent && active)
+    final _MemPrep mem = await _prepareMemForCall(userText: text);
+
     _setLoading(true);
     try {
-      if (_apiSession == null) {
-        // Es gab noch keinen Server-Turn: starte regulär
-        await start(text);
-        return;
-      }
-
       _localEchoBeforeCall(text);
       _appendUserToHistory(text);
 
@@ -393,38 +403,36 @@ class ReflectionController extends ChangeNotifier {
       gdt.ReflectionTurn turn;
 
       try {
-        // ignore: avoid_dynamic_calls
         final dyn = svc as dynamic;
-        // prefer call mit typed History + API-Session + thread_id in Context
         turn = await (dyn.nextTurnFull(
           session: _apiSession!,
           text: text,
           locale: 'de',
           tz: 'Europe/Zurich',
-          memories: _memories,
-          memoryConsent: _memoryConsent,
-          meta: _buildMeta(mode: 'text'),
+          history: _history, // typed History
+          memories: mem.memories,
+          memoryConsent: mem.consent,
+          meta: _buildMeta(),
           clientContext: {
             'mode': 'text',
-            'source': 'reflection_screen',
+            'source': 'reflection_logic',
             if (_threadId != null) 'thread_id': _threadId,
           },
-          history: _history, // typed HistoryTurn
         ) as Future<gdt.ReflectionTurn>).timeout(_kNetTimeout);
       } catch (_) {
-        // fallback ohne dyn
         turn = await svc
             .nextTurnFull(
               session: _apiSession!,
               text: text,
               locale: 'de',
               tz: 'Europe/Zurich',
-              memories: _memories,
-              memoryConsent: _memoryConsent,
-              meta: _buildMeta(mode: 'text'),
+              history: _history, // typed History (wird intern ggf. gemappt)
+              memories: mem.memories,
+              memoryConsent: mem.consent,
+              meta: _buildMeta(),
               clientContext: {
                 'mode': 'text',
-                'source': 'reflection_screen',
+                'source': 'reflection_logic',
                 if (_threadId != null) 'thread_id': _threadId,
               },
             )
@@ -438,7 +446,7 @@ class ReflectionController extends ChangeNotifier {
       _inSkillFlow = false;
       _updateFacetsFromTurn(turn);
       _recomputeAvailableActions();
-    } catch (_) {/* ignore, keep old vm */} finally {
+    } catch (_) {/* keep old vm */} finally {
       _emitTypingOff();
       _setLoading(false);
     }
@@ -459,36 +467,32 @@ class ReflectionController extends ChangeNotifier {
       gdt.ReflectionTurn turn;
 
       try {
-        // ignore: avoid_dynamic_calls
         final dyn = svc as dynamic;
-        // Spezielle Action-Route (ohne unbekannte Named-Args wie history/clientContext)
         final Future<gdt.ReflectionTurn>? fut = dyn.nextTurnAction?.call(
           session: _apiSession!,
           action: action,
           locale: 'de',
           tz: 'Europe/Zurich',
-          meta: _buildMeta(mode: 'action'),
+          meta: _buildMeta(),
         );
         if (fut != null) {
           turn = await fut.timeout(_kNetTimeout);
         } else {
-          // Fallback: nextTurnFull ohne userText (Server generiert Antwort)
           try {
-            // bevorzugt mit typed history
             turn = await (dyn.nextTurnFull(
               session: _apiSession!,
               text: '',
               locale: 'de',
               tz: 'Europe/Zurich',
-              memories: _memories,
+              history: _history,
+              memories: (await _prepareMemForCall(userText: '')).memories,
               memoryConsent: _memoryConsent,
-              meta: _buildMeta(mode: 'action-fallback'),
+              meta: _buildMeta(),
               clientContext: {
                 'mode': 'action',
-                'source': 'reflection_screen',
+                'source': 'reflection_logic',
                 if (_threadId != null) 'thread_id': _threadId,
               },
-              history: _history, // typed HistoryTurn
             ) as Future<gdt.ReflectionTurn>).timeout(_kNetTimeout);
           } catch (_) {
             turn = await svc
@@ -497,12 +501,12 @@ class ReflectionController extends ChangeNotifier {
                   text: '',
                   locale: 'de',
                   tz: 'Europe/Zurich',
-                  memories: _memories,
+                  memories: (await _prepareMemForCall(userText: '')).memories,
                   memoryConsent: _memoryConsent,
-                  meta: _buildMeta(mode: 'action-fallback'),
+                  meta: _buildMeta(),
                   clientContext: {
                     'mode': 'action',
-                    'source': 'reflection_screen',
+                    'source': 'reflection_logic',
                     if (_threadId != null) 'thread_id': _threadId,
                   },
                 )
@@ -516,12 +520,12 @@ class ReflectionController extends ChangeNotifier {
               text: '',
               locale: 'de',
               tz: 'Europe/Zurich',
-              memories: _memories,
+              memories: (await _prepareMemForCall(userText: '')).memories,
               memoryConsent: _memoryConsent,
-              meta: _buildMeta(mode: 'action-fallback'),
+              meta: _buildMeta(),
               clientContext: {
                 'mode': 'action',
-                'source': 'reflection_screen',
+                'source': 'reflection_logic',
                 if (_threadId != null) 'thread_id': _threadId,
               },
             )
@@ -643,7 +647,6 @@ class ReflectionController extends ChangeNotifier {
       q = pq;
     } else {
       try {
-        // ignore: avoid_dynamic_calls
         final dynQ = (t as dynamic).question?.toString().trim();
         if ((dynQ ?? '').isNotEmpty) q = dynQ!;
       } catch (_) {/* ignore */}
@@ -668,7 +671,6 @@ class ReflectionController extends ChangeNotifier {
 
     final String rf = (t.riskFlag ?? '').toString().toLowerCase().trim();
     final bool risk = (rf == 'crisis' || rf == 'support') ||
-        // ignore: avoid_dynamic_calls
         ((t as dynamic).risk == true);
 
     final allowClosure =
@@ -815,20 +817,20 @@ class ReflectionController extends ChangeNotifier {
     return '$base…';
   }
 
-  Map<String, dynamic> _buildMeta({String? mode}) {
+  Map<String, dynamic> _buildMeta() {
     final bool reopen = (_vm?.allowClosure == true);
-
+    // meta.flags.client_memory = dynamisch gemäß letztem Prep
     return {
       'ui': {
         'controller': 'reflection_logic',
-        'version': 'v6.7.1',
+        'version': 'v6.7.2',
       },
       'memory': {
         'bridge': _bridgeText,
       },
       'flags': {
-        'client_memory': true, // *** Merge-Signal / Handshake ***
-        'reopen': reopen,      // *** Closure-Recovery ***
+        'client_memory': _lastClientMemoryFlag, // *** dynamisch ***
+        'reopen': reopen,                       // *** Closure-Recovery ***
       },
       'thread': {
         if (_threadId != null) 'id': _threadId,
@@ -840,7 +842,6 @@ class ReflectionController extends ChangeNotifier {
       },
       'client': {
         'source': 'reflection_logic',
-        if (mode != null) 'mode': mode,
         if (_inSkillFlow) 'skill': 'on',
       },
       'tz': 'Europe/Zurich',
@@ -885,22 +886,18 @@ class ReflectionController extends ChangeNotifier {
   }
 
   String? _extractHopeText(gdt.ReflectionTurn t) {
-    // Kein direkter Zugriff auf t.hopeText (nicht in allen DTO-Versionen vorhanden)
     try {
-      // ignore: avoid_dynamic_calls
       final dyn = t as dynamic;
       final d = dyn.hopeText?.toString().trim();
       if ((d ?? '').isNotEmpty) return d!;
     } catch (_) {/* ignore */}
     try {
-      // ignore: avoid_dynamic_calls
       final dyn = t as dynamic;
       final cand = (dyn.hope ?? dyn.hope_text)?.toString().trim();
       if ((cand ?? '').isNotEmpty) return cand!;
     } catch (_) {/* ignore */}
 
     try {
-      // ignore: avoid_dynamic_calls
       final seq = (t as dynamic).speechSequence as List?;
       if (seq != null) {
         for (final e in seq) {
@@ -910,9 +907,7 @@ class ReflectionController extends ChangeNotifier {
             if (type == 'hope' && txt.isNotEmpty) return txt;
           } else {
             try {
-              // ignore: avoid_dynamic_calls
               final type = (e as dynamic).type?.toString().toLowerCase().trim();
-              // ignore: avoid_dynamic_calls
               final txt = (e as dynamic).text?.toString().trim();
               if (type == 'hope' && (txt ?? '').isNotEmpty) return txt!;
             } catch (_) {/* ignore */}
@@ -923,7 +918,6 @@ class ReflectionController extends ChangeNotifier {
 
     try {
       final a = t.analysis;
-      // analysis.hope/summary/… nur dynamisch lesen
       final adyn = a as dynamic;
       final hope = adyn?.hope?.toString().trim();
       if ((hope ?? '').isNotEmpty) return hope!;
@@ -941,7 +935,6 @@ class ReflectionController extends ChangeNotifier {
 
     try {
       final a = t.analysis;
-      // facets dynamisch lesen (nicht in allen TurnAnalysis vorhanden)
       final adyn = a as dynamic;
       final lf = (adyn?.facets as List?) ?? const <dynamic>[];
       for (final e in lf) {
@@ -951,7 +944,6 @@ class ReflectionController extends ChangeNotifier {
     } catch (_) {/* ignore */}
 
     try {
-      // understanding.facets dynamisch
       final dyn = t as dynamic;
       final u = dyn.understanding;
       final lf = (u?.facets as List?) ?? const <dynamic>[];
@@ -979,8 +971,7 @@ class ReflectionController extends ChangeNotifier {
       } else {
         _activeFacet = unique.isNotEmpty ? unique.first : null;
         if (_activeFacet != null && _facetQueue.isNotEmpty) {
-          if (_facetQueue.isNotEmpty &&
-              _facetQueue.first.toLowerCase() == _activeFacet!.toLowerCase()) {
+          if (_facetQueue.first.toLowerCase() == _activeFacet!.toLowerCase()) {
             _facetQueue.removeAt(0);
           }
         }
@@ -1002,7 +993,6 @@ class ReflectionController extends ChangeNotifier {
 
     if (pin == null) {
       try {
-        // ignore: avoid_dynamic_calls
         final dyn = t as dynamic;
         final utopic = (dyn.understanding?.topic ?? '').toString().trim();
         if (utopic.isNotEmpty) pin = utopic;
@@ -1069,7 +1059,6 @@ class ReflectionController extends ChangeNotifier {
     // Bevorzugt 'output_text'; fallback: Mirror + Frage
     final pieces = <String>[];
     try {
-      // ignore: avoid_dynamic_calls
       final dyn = turn as dynamic;
       final txt = dyn.outputText?.toString().trim();
       if ((txt ?? '').isNotEmpty) {
@@ -1079,13 +1068,11 @@ class ReflectionController extends ChangeNotifier {
     if (pieces.isEmpty) {
       final m = (turn.mirror ?? '').trim();
       if (m.isNotEmpty) pieces.add(m);
-      // Frage ebenfalls defensiv
       final pq = (turn.primaryQuestion ?? '').toString().trim();
       if (pq.isNotEmpty) {
         pieces.add(pq);
       } else {
         try {
-          // ignore: avoid_dynamic_calls
           final q = (turn as dynamic).question?.toString().trim();
           if ((q ?? '').isNotEmpty) pieces.add(q!);
         } catch (_) {/* ignore */}
@@ -1112,4 +1099,74 @@ class ReflectionController extends ChangeNotifier {
     final n = (frac < _kTrimMin) ? _kTrimMin : frac;
     return n.clamp(1, want);
   }
+
+  // ---------------- Consent/Active & Memories --------------------------------
+
+  Future<void> _refreshConsentAndActive() async {
+    // Consent (shareEnabled)
+    try {
+      bool v = _memoryConsent;
+      final dyn = MemoryService.instance as dynamic;
+      final val = dyn.shareEnabled;
+      if (val is bool) v = val;
+      else if (val is Future<bool>) v = await val;
+      else if (val is Function) {
+        final r = val();
+        if (r is bool) v = r; else if (r is Future<bool>) v = await r;
+      }
+      _memoryConsent = v;
+    } catch (_) {/* keep */}
+
+    // Active (memoryActive / isActive / bridgeActive) — tolerant
+    try {
+      bool a = _memoryActive;
+      final dyn = MemoryService.instance as dynamic;
+
+      bool _coerceBool(dynamic v) {
+        if (v is bool) return v;
+        if (v is Future) return false; // handled below
+        return v == true;
+      }
+
+      dynamic x = dyn.memoryActive;
+      if (x is Future) { x = await x; }
+      if (x == null) {
+        x = dyn.isActive;
+        if (x is Future) { x = await x; }
+      }
+      if (x == null) {
+        x = dyn.bridgeActive;
+        if (x is Future) { x = await x; }
+      }
+      if (x is Function) {
+        final r = x();
+        x = (r is Future) ? await r : r;
+      }
+      if (x != null) a = _coerceBool(x);
+
+      _memoryActive = a;
+    } catch (_) {/* keep */}
+  }
+
+  Future<_MemPrep> _prepareMemForCall({required String userText}) async {
+    await _refreshConsentAndActive();
+    final bool flag = _memoryConsent && _memoryActive;
+    _lastClientMemoryFlag = flag;
+
+    if (!flag) return const _MemPrep(null, false);
+
+    try {
+      final built = await MemoryService.instance.buildContextMemories(consent: true);
+      if (built is Map<String, dynamic>) {
+        return _MemPrep(built, true);
+      }
+    } catch (_) {/* ignore */}
+    return const _MemPrep(null, true); // Consent ja, aber kein Bundle → null senden ist ok
+  }
+}
+
+class _MemPrep {
+  final Map<String, dynamic>? memories;
+  final bool consent;
+  const _MemPrep(this.memories, this.consent);
 }

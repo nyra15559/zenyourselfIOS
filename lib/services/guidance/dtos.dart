@@ -1,4 +1,4 @@
-// [V7.1] lib/services/guidance/dtos.dart (Stand: 2025-11-04)
+// [BASELINE] lib/services/guidance/dtos.dart (Stand: 2025-11-07, v7.1.2+compat.1)
 // DTOs & Value-Types für Guidance-Service (standalone, ohne Api-Abhängigkeit)
 // ────────────────────────────────────────────────────────────────────────────
 // • Keine externen Abhängigkeiten
@@ -13,6 +13,10 @@
 //   – HistoryTurn {role, text}
 //   – NextTurnFullRequest {sessionId, history[], userText, context.memories?, meta.flags.client_memory?}
 //   – Response-Felder verifiziert: answer_helpers, flow.mood_prompt, risk_level, closure{...}, talk[]
+// • UPDATE (2025-11-07, v7.1.2+compat.1):
+//   – Compat: NextTurnFullRequest.contextMemories erlaubt Map<String,dynamic> ODER List<dynamic>;
+//     toJson() serialisiert beides nach {context:{memories:…}}.
+//   – SpeechMeta.fromMaybe: leere topic/safety → null statt "" (sauberere Serialisierung).
 // ────────────────────────────────────────────────────────────────────────────
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -113,13 +117,17 @@ class HistoryTurn {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-/* V7.1: NextTurnFullRequest — Request-Envelope für /next_turn_full */
+/* V7.1 (+compat): NextTurnFullRequest — Request-Envelope für /next_turn_full */
 // ────────────────────────────────────────────────────────────────────────────
 class NextTurnFullRequest {
   final String sessionId;                 // = ReflectionSession.threadId
   final String userText;                  // aktueller User-Text (kann leer sein bei Actions)
   final List<HistoryTurn> history;        // verlustfrei, ohne Heuristik
-  final List<dynamic>? contextMemories;   // context.memories (kuratiert, klein)
+
+  /// Kompakter Memory-Context (kuratiert). Darf Map<String,dynamic> ODER List<dynamic> sein.
+  /// Wird in toJson() nach {context:{memories:…}} serialisiert.
+  final dynamic contextMemories;
+
   final bool? metaClientMemory;           // meta.flags.client_memory
 
   const NextTurnFullRequest({
@@ -137,9 +145,15 @@ class NextTurnFullRequest {
       'user_text': userText,
       if (hist.isNotEmpty) 'history': hist,
     };
-    if (contextMemories != null && contextMemories!.isNotEmpty) {
-      map['context'] = {'memories': List<dynamic>.from(contextMemories!)};
+
+    if (contextMemories != null) {
+      if (contextMemories is Map) {
+        map['context'] = {'memories': Map<String, dynamic>.from(contextMemories as Map)};
+      } else if (contextMemories is List && (contextMemories as List).isNotEmpty) {
+        map['context'] = {'memories': List<dynamic>.from(contextMemories as List)};
+      }
     }
+
     if (metaClientMemory != null) {
       map['meta'] = {
         'flags': {'client_memory': metaClientMemory}
@@ -152,16 +166,14 @@ class NextTurnFullRequest {
     required String sessionId,
     required String userText,
     List<HistoryTurn>? history,
-    List<dynamic>? contextMemories,
+    dynamic contextMemories, // Map<String,dynamic> ODER List<dynamic>
     bool? metaClientMemory,
   }) {
     return NextTurnFullRequest(
       sessionId: sessionId,
       userText: userText,
       history: history ?? const <HistoryTurn>[],
-      contextMemories: (contextMemories == null || contextMemories.isEmpty)
-          ? null
-          : List<dynamic>.from(contextMemories),
+      contextMemories: contextMemories,
       metaClientMemory: metaClientMemory,
     );
   }
@@ -198,10 +210,14 @@ class SpeechMeta {
       if (x is String) return double.tryParse(x.trim());
       return null;
     }
+    String? nz(dynamic x) {
+      final s = x?.toString().trim() ?? '';
+      return s.isEmpty ? null : s;
+    }
     return SpeechMeta(
       tone: ToneTypeWire.parse(m['tone']),
-      topic: m['topic']?.toString().trim().ifEmpty(() => ''),
-      safety: m['safety']?.toString().trim().ifEmpty(() => ''),
+      topic: nz(m['topic']),
+      safety: nz(m['safety']),
       confidence: asDouble(m['confidence']),
     );
   }
