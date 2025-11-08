@@ -1,13 +1,13 @@
 // [BASELINE] lib/services/core/api_service.dart — Stand: 2025-11-07 — ZenYourself v6.7.0
 // Merge-Signal: client_memory Bridge (Consent+Active), ContextMemories ≤2kB, Quick-Inject (Name/Mood/Emotion), X-Thread-Id
 // Changes:
-// • _basePayload(): Consent/Active Guard; context.memories (≤2 kB) + Flags; Quick-Inject Name/Mood/Emotion; History in session.history.
-// • configureForWorker(): identische Bridge-Logik; Header X-Thread-Id; contact_tints + contact_tins; context_bytes_b64; Size-Guard ≤2 kB.
-// • sendNextTurnFull(...): History-Cap (~20) + Memories-Cap (≤2 kB); Priorität /next_turn_full.
+// • _basePayload(): Consent/Active Guard; context.memories (≤2 kB) + Flags; Quick-Inject Name/Mood/Emotion; History in session.history.
+// • configureForWorker(): identische Bridge-Logik; Header X-Thread-Id; contact_tints + contact_tins; context_bytes_b64; Size-Guard ≤ 2 kB.
+// • sendNextTurnFull(...): History-Cap (~20) + Memories-Cap (≤2 kB); Priorität /next_turn_full.
 // • maybeResetThreadOnPrivacyChange(...): neue thread_id bei Privacy-Off (optional force).
-// • Byte-Kontext: context_bytes_b64 (≤2 kB); Out-Soft-Gate Warmup.
+// • Byte-Kontext: context_bytes_b64 (≤2 kB); Out-Soft-Gate Warmup.
 // • Parser/DTO: robust (helpers, flow, tags, schools, speech_meta, understanding); memories_to_save → MemoryService.saveFromWorker().
-// Safety: keine Breaking Changes; Public-Signaturen stabil; Null-Safety & Imports geprüft; Stil = Oxford‑Zen.
+// Safety: keine Breaking Changes; Public-Signaturen stabil; Null-Safety & Imports geprüft; Stil = Oxford-Zen.
 
 import 'dart:async';
 import 'dart:convert';
@@ -983,7 +983,7 @@ class ApiService {
     String userText = '';
     final lastUser =
         messages.lastWhereOrNull((m) => (m['role'] ?? '') == 'user');
-    if (lastUser != null && (lastUser['content'] ?? '').trim().isNotEmpty) {
+    if (lastUser != null && ((lastUser['content'] ?? '').trim().isNotEmpty)) {
       userText = lastUser['content']!.trim();
     } else if (messages.isNotEmpty &&
         (messages.last['content'] ?? '').trim().isNotEmpty) {
@@ -1345,7 +1345,7 @@ class ApiService {
     final sanitized = _redactPII(firstLine.trim());
     if (sanitized.isEmpty) return q;
     final hint = _neatEllipsis(sanitized, 90);
-    if (RegExp(r'^\[[^\]]+\]$').hasMatch(hint)) return q;
+    if (RegExp(r'^\[[^\]]]+\]$').hasMatch(hint)) return q;
     return '$q\n\n(Bezug: $hint)';
   }
 

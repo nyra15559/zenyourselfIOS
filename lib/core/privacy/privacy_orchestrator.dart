@@ -1,19 +1,12 @@
-// [BASELINE] lib/core/privacy/privacy_orchestrator.dart (v1.3, 2025-11-04)
+// [BASELINE] lib/features/settings/privacy_orchestrator.dart (v1.4, 2025-11-07)
 // ZenYourself — Privacy Orchestrator (Glue UI ↔ MemoryService)
 // -----------------------------------------------------------------------------
 // Aufgaben (konkret):
+// • 3-Stufen-Toggle 🕊️/🍃/🌿 & Consent (shareEnabled) steuern.
 // • Gating für context.memories: Nur wenn BOTH true → memory_consent && memory_active.
 // • Trial-Expiry: 7-Tage-Fenster ab erstem Einschalten. Danach memory_active=false,
 //   bis Premium/Upgrade (hier nur Platzhalter-Hook).
-// • UI-Glue: liest/stellt Consent (shareEnabled), Greet-by-Name & Name ein.
-//
-// Technische Hinweise:
-// • ApiService liest je Turn: MemoryService.shareEnabled (== memory_consent).
-// • Zusätzlich wird memory_active über diesen Orchestrator verwaltet (Expiry-Check).
-// • Für Abwärtskompatibilität nutzt der Code defensive dynamic-Calls auf MemoryService,
-//   damit er mit älteren MemoryService-Versionen lauffähig bleibt. Existieren Methoden
-//   nicht, fallen wir auf lokale Berechnung/Keys zurück (über MemoryService optionale
-//   KV-APIs).
+// • UI-Glue: liest/stellt Consent (shareEnabled), Greet-by-Name & Name.
 //
 // Public-Gating-Regel (für ApiService):
 //   SEND_CONTEXT := memory_consent && memory_active
@@ -24,11 +17,19 @@
 //   privacy.memory_trial_started_at : ISO-UTC String
 //   privacy.memory_expiry_at        : ISO-UTC String (trialStart + 7 Tage)
 //
-// -----------------------------------------------------------------------------
+// Hinweise:
+// • Import-Pfad zum MemoryService korrigiert (../.. → core).
+// • Lints: defensive dynamic-Calls bewusst erlaubt (Backward-Compat).
+//
+// ignore_for_file: avoid_dynamic_calls
 
 import 'package:flutter/material.dart';
+
+// Erwartet deine UI-Komponente + Settings-Types im selben Feature-Ordner:
 import 'privacy_screen.dart';
-import '../memory/memory_service.dart' as mem;
+
+// Korrigierter Pfad zur kanonischen MemoryService-Baseline:
+import '../../core/memory/memory_service.dart' as mem;
 
 class PrivacyOrchestrator extends StatefulWidget {
   const PrivacyOrchestrator({super.key});
@@ -42,7 +43,7 @@ class _PrivacyOrchestratorState extends State<PrivacyOrchestrator> {
 
   // Quellen der Wahrheit (aus MemoryService):
   bool _memoryConsent = false; // -> MemoryService.shareEnabled (consent)
-  bool _memoryActive = true;   // -> Trial- / Premium-Gate
+  bool _memoryActive = true;   // -> Trial-/Premium-Gate
   bool _greetByName = false;   // true == Name darf aktiv verwendet werden
   String? _currentName;        // nur gesetzt, wenn greetByName == true
 
@@ -120,9 +121,7 @@ class _PrivacyOrchestratorState extends State<PrivacyOrchestrator> {
       try {
         final v = await dyn.getMemoryActive?.call();
         if (v is bool) _memoryActive = v;
-      } catch (_) {
-        // noop
-      }
+      } catch (_) {/* noop */}
 
       // trial started
       try {
@@ -154,9 +153,6 @@ class _PrivacyOrchestratorState extends State<PrivacyOrchestrator> {
       _expiryAtUtc = _trialStartedAtUtc!.add(const Duration(days: 7));
       await _persistTrial(_trialStartedAtUtc!, _expiryAtUtc!);
     }
-
-    // Wenn es gar keinen Eintrag gibt, setze memory_active true als Default.
-    // Die _checkAndApplyExpiry() entscheidet dann, ob es verfallen ist.
   }
 
   Future<void> _persistTrial(DateTime startedUtc, DateTime expiryUtc) async {
@@ -205,10 +201,12 @@ class _PrivacyOrchestratorState extends State<PrivacyOrchestrator> {
 
     if (_expiryAtUtc != null) {
       final remaining = _expiryAtUtc!.difference(now);
-      _daysLeft = remaining.isNegative ? 0 : remaining.inDays.clamp(0, 9999);
-      // Trial abgelaufen → Active auf false setzen
       if (remaining.isNegative) {
-        _memoryActive = false;
+        _daysLeft = 0;
+        _memoryActive = false; // Trial abgelaufen
+      } else {
+        // clamp() gibt num zurück → toInt() für int-Field
+        _daysLeft = (remaining.inDays.clamp(0, 9999)).toInt();
       }
     } else {
       _daysLeft = 0;
@@ -221,7 +219,9 @@ class _PrivacyOrchestratorState extends State<PrivacyOrchestrator> {
 
   Future<void> _applySave(PrivacySettings s) async {
     // 1) Consent (memory_consent)
-    await _svc.setShareEnabled(s.memoryConsent);
+    try {
+      await _svc.setShareEnabled(s.memoryConsent);
+    } catch (_) {/* ignore */}
     _memoryConsent = s.memoryConsent;
 
     // 2) Greet/Name

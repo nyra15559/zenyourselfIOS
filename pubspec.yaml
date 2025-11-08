@@ -2,7 +2,7 @@ name: zenyourself
 description: ZenYourself App mit Sprach-Input und GPT-Antwort
 publish_to: "none"
 
-# Version-Bump (Patch + Build): vorher 1.0.3+3
+# Version-Bump (Patch + Build)
 version: 1.0.28+1028
 
 # Dart/Flutter Basis – passt zu Flutter ≥3.19 (Dart 3.3)
@@ -45,14 +45,18 @@ dependencies:
   flutter_local_notifications: ^19.0.0
 
   # ---- Utilities ------------------------------------------------------
-  url_launcher: ^6.3.0            # <— für tel: und https:, nötig für CH-Hotlines
-  share_plus: ^11.0.0             # Bei sehr altem Flutter ggf. ^10.0.2 verwenden
+  url_launcher: ^6.3.0           # tel:, https: – auch für CH-Hotlines
+  share_plus: ^11.0.0            # Bei sehr altem Flutter ggf. ^10.0.2 verwenden
   speech_to_text: ^7.2.0
   flutter_dotenv: ^5.0.2
   screenshot: ^3.0.0
   uuid: ^4.4.2
   collection: ^1.18.0
   intl: ^0.20.2
+
+  # ---- Dokumente / Export --------------------------------------------
+  pdf: ^3.11.3
+  # printing: ^5.12.0             # Optional: PDF-Vorschau/Druck (wenn gewünscht aktivieren)
 
 dev_dependencies:
   flutter_test:
@@ -144,9 +148,8 @@ flutter:
       fonts:
         - asset: assets/fonts/NotoSans-Regular.ttf
 
-    # ZenKalligrafie vorläufig auf NotoSans aliasiert, damit der Build nie
-    # an einer fehlenden Datei scheitert. Wenn vorhanden, ersetze den Pfad
-    # durch assets/fonts/ZenKalligrafie-Regular.ttf
+    # ZenKalligrafie vorläufig auf NotoSans aliasiert, damit der Build robust bleibt.
+    # Wenn vorhanden: Pfad auf echte ZenKalligrafie-Datei anpassen.
     - family: ZenKalligrafie
       fonts:
         - asset: assets/fonts/NotoSans-Regular.ttf

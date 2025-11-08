@@ -1,4 +1,4 @@
-// [BASELINE] lib/services/guidance/dtos.dart (Stand: 2025-11-07, v7.1.2+compat.1)
+// [BASELINE] lib/services/guidance/dtos.dart (Stand: 2025-11-07, v7.1.3+compat.2)
 // DTOs & Value-Types für Guidance-Service (standalone, ohne Api-Abhängigkeit)
 // ────────────────────────────────────────────────────────────────────────────
 // • Keine externen Abhängigkeiten
@@ -17,6 +17,10 @@
 //   – Compat: NextTurnFullRequest.contextMemories erlaubt Map<String,dynamic> ODER List<dynamic>;
 //     toJson() serialisiert beides nach {context:{memories:…}}.
 //   – SpeechMeta.fromMaybe: leere topic/safety → null statt "" (sauberere Serialisierung).
+// • UPDATE (2025-11-07, v7.1.3+compat.2):
+//   – Optionales Mapping für Marker-Quelle: `understanding.topic_shift` **und** `understanding.tags`.
+//   – `understanding.tags` wird in `ReflectionTurn.understandingTags` abgelegt **und** in `tags` hinein-
+//     gemerged (dedupliziert). `toJson()` schreibt beides zurück, falls vorhanden.
 // ────────────────────────────────────────────────────────────────────────────
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -524,6 +528,9 @@ class ReflectionTurn {
   final bool? metaClientMemory;
   final List<dynamic> contextMemories;
 
+  // ── NEU (v7.1.3): understanding.tags separat verfügbar
+  final List<String> understandingTags;
+
   // ── V7 A1: neue Felder
   final SpeechMeta? speechMeta;
   final SkillBlock? skill;                 // strukturierter Block
@@ -555,6 +562,8 @@ class ReflectionTurn {
     this.understandingTopicShift,
     this.metaClientMemory,
     this.contextMemories = const <dynamic>[],
+    // v7.1.3
+    this.understandingTags = const <String>[],
     // V7
     this.speechMeta,
     this.skill,
@@ -614,8 +623,15 @@ class ReflectionTurn {
       // S4.1
       if ((smalltalkReply ?? '').trim().isNotEmpty) 'smalltalk_reply': smalltalkReply!.trim(),
     };
-    if ((understandingTopicShift ?? '').trim().isNotEmpty) {
-      map['understanding'] = {'topic_shift': understandingTopicShift!.trim()};
+
+    // understanding.{topic_shift,tags} zurückschreiben, wenn vorhanden
+    final hasShift = (understandingTopicShift ?? '').trim().isNotEmpty;
+    final hasUTags = understandingTags.isNotEmpty;
+    if (hasShift || hasUTags) {
+      final u = <String, dynamic>{};
+      if (hasShift) u['topic_shift'] = understandingTopicShift!.trim();
+      if (hasUTags) u['tags'] = understandingTags;
+      map['understanding'] = u;
     }
     return map;
   }
@@ -628,6 +644,7 @@ class ReflectionTurn {
     final primary = asMap(m['primary']);
     final flowMap = asMap(m['flow']);
     final uiMap   = asMap(m['ui']);
+    final understandingMap = asMap(m['understanding']) ?? const <String, dynamic>{};
 
     final outputText = (m['output_text'] ?? m['outputText'] ?? m['question'] ?? m['primary_question']
           ?? _pickString(primary, const ['output_text', 'text', 'question'])
@@ -658,7 +675,10 @@ class ReflectionTurn {
       m['talk'], primary?['talk'], flowMap?['talk'],
     ]).where((t) => t.trim().isNotEmpty).toList());
 
-    final tags = _strings([m['tags'], primary?['tags'], flowMap?['tags']]);
+    // understanding.tags optional dazumergen (Quelle für Marker)
+    final uTags = _orderedDedup(_strings([understandingMap['tags']]));
+    final tagsTop = _strings([m['tags'], primary?['tags'], flowMap?['tags']]);
+    final tags = _orderedDedup(<String>[...tagsTop, ...uTags]);
 
     final helpersRaw = _strings([
       m['answer_helpers'], m['answer_scaffolds'], m['answer_templates'],
@@ -709,7 +729,7 @@ class ReflectionTurn {
     );
 
     String? understandingTopicShift() {
-      final u = asMap(m['understanding']) ?? const <String, dynamic>{};
+      final u = understandingMap;
       final s = (u['topic_shift'] ?? u['topicShift'] ?? u['shift'])?.toString().trim();
       return (s == null || s.isEmpty) ? null : s;
     }
@@ -762,6 +782,8 @@ class ReflectionTurn {
       understandingTopicShift: understandingTopicShift(),
       metaClientMemory: metaClientMemory(),
       contextMemories: cmem,
+      // v7.1.3
+      understandingTags: uTags,
       // V7
       speechMeta: speechMeta,
       skill: skill,
@@ -775,8 +797,6 @@ class ReflectionTurn {
   }
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// ReflectionFlow / Session
 // ────────────────────────────────────────────────────────────────────────────
 class ReflectionFlow {
   final bool recommendEnd;

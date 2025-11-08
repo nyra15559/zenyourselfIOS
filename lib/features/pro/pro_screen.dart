@@ -1,25 +1,42 @@
 // [BASELINE] lib/features/pro/pro_screen.dart (Stand: 2025-11-07)
-// P2-S10.4 — Settings-Zahnrad neben Range-Bubbles (statt AppBar); Graph-Switch @200px
-// ProScreen — Oxford Journey Board (v4.8.9 · 2025-11-07)
+// P2-S10.8 — Rückblick-Card (Text + Mini-Trend), Mini-Sparkline integriert; A11y & ruhiger Ton
+// ProScreen — Oxford Journey Board (v4.9.4 · 2025-11-07)
 // ------------------------------------------------------------------
+// NEU (v4.9.4):
+// • „Rückblick“-Card direkt unter der Range-Bubble: kurzer Textvergleich
+//   (letzte 7 Tage vs. vorherige 7 Tage) + integrierte Mini-Sparkline (14 Tage).
+// • A11y-Semantics für Rückblick-Card; sanfte Formulierungen („ruhiger“, „ähnlich“, „schwerer“).
+// • Entfernt: alte, alleinstehende Mini-Sparkline-Zeile (duplizierte Darstellung).
+//
+// v4.9.3:
+// • Sektion „Letzte Einsichten“ standardmäßig NICHT anzeigen (Raum atmen lassen, kein Coaching-Ton).
+// • Optionales, sehr dezentes Widget _LastInsightsSection vorbereitet; rendert nur bei showLastInsights=true.
+//
+// v4.9.2:
+// • Timeline-Berechnung aus State herausgelöst → Helper buildTimelineDotsFromProvider(...).
+// • buildTimelineTopicCounts(...) nutzt den Helper.
+//
+// v4.9.1:
+// • Mini-Sparkline direkt unter der Range-Bubble (2 Linien: Trend & Ø7) — kompakt, 14-Tage-Fenster.
+// • A11y-Semantics für Sparkline.
+//
+// v4.9.0:
+// • Timeline-Leiste (Punkte) mit performantem ListView.builder (Viewport).
+// • Tap → Bottom-Sheet (Datum, Top-Thema(n), 1-Satz-Zusammenfassung).
+// • Range-Chips (7/30/90) steuern Timeline.
+// • Utilities: Themen-Extraktion aus Tags (topic:/thema:), Mood-Farbe.
+// • Exportierte Utility: buildTimelineTopicCounts(...).
+//
 // v4.8.9 (S10.4):
-// • Zahnrad aus der AppBar entfernt und in die Range-Bubble rechts gesetzt.
-// • _RangeBubble erhält onOpenSettings; IconButton mit Tooltip & A11y.
-// • Layout bleibt auf kleinen Screens stabil (Chips können umbrechen).
+// • Zahnrad aus der AppBar entfernt → in Range-Bubble rechts (onOpenSettings).
 //
 // v4.8.8 (S10.3):
-// • Back-Button & Settings-Zahnrad über ZenAppBar (actions) – wie Journey.
-// • Graph-Ansicht: Switch-Schwelle jetzt bei 200 px statt 410 px.
-// • UTF-8 Fix: entferntes unsichtbares Zeichen vor "Widget build" in _MemoryCard.
-//
-// v4.8.7 (S10.2):
-// • Back-Button & Settings-Zahnrad über zw.ZenAppBar(actions:[...]) realisiert.
-// • Entfernt: manuell positioniertes Zahnrad im Body-Stack (Z-Reihenfolge/Taps).
+// • Back-Button & Settings über ZenAppBar(actions: [...]).
+// • Graph-Schwelle 200 px; UTF-8 Invisible Char Fix.
 //
 // v4.8.6 (S10.1):
-// • Export-Dialog: auf kleinen Screens als BottomSheet (scrollbar, SafeArea),
-//   auf größeren als Dialog mit MaxBreite + Scroll → keine Überläufer mehr.
-// • AppBar-Back konsistent via ZenAppBar(showBack:true).
+// • Export-Dialog: BottomSheet für kleine Screens; Dialog (maxWidth + Scroll) für größere.
+// • ZenAppBar(showBack:true) konsistent.
 //
 // Abhängigkeiten: fl_chart, provider, http, eigene Zen-UI.
 
@@ -67,6 +84,98 @@ extension on _Range {
 // Gedächtnis-Modi (Sheet)
 enum _MemoryMode { off, light, full }
 
+// -------- Timeline: Data -----------------------------------------------------
+
+class _TimelineDayDot {
+  final DateTime dayUtc;          // Tagesstempel (UTC, Start des Tages)
+  final List<String> topics;      // extrahierte Themen (topic:/thema:)
+  final double? avgMood;          // −2..+2 (optional)
+  final int count;                // Einträge an diesem Tag
+
+  const _TimelineDayDot({
+    required this.dayUtc,
+    required this.topics,
+    required this.avgMood,
+    required this.count,
+  });
+
+  String get dayHuman {
+    final d = dayUtc.toLocal();
+    return '${_pad2(d.day)}.${_pad2(d.month)}.${d.year}';
+  }
+
+  static String _pad2(int v) => v.toString().padLeft(2, '0');
+
+  String get oneLiner {
+    final t = topics.isNotEmpty ? topics.first : '—';
+    final moodWord = avgMood == null
+        ? null
+        : (avgMood! >= 1.2
+            ? 'hell'
+            : (avgMood! <= -1.2 ? 'schwer' : 'ruhiger'));
+    if (moodWord == null) return 'Thema: $t';
+    return 'Wirkte $moodWord · Thema: $t';
+  }
+}
+
+// ---------- top-level Timeline-Logic (v4.9.2) --------------------------------
+
+List<_TimelineDayDot> buildTimelineDotsFromProvider(
+  JournalEntriesProvider prov,
+  int days,
+) {
+  if (prov.entries.isEmpty) return const [];
+
+  final now = DateTime.now().toUtc();
+  final start = now.subtract(Duration(days: days));
+  final byDayTopics = <String, List<String>>{};
+  final byDayMood = <String, List<double>>{};
+  final byDayCount = <String, int>{};
+
+  for (final e in prov.entries) {
+    final t = e.createdAt.toUtc();
+    if (t.isBefore(start)) continue;
+
+    final key = _toDayTag(t);
+    final topics = _extractTopics(e.tags);
+    if (topics.isNotEmpty) {
+      (byDayTopics[key] ??= <String>[]).addAll(topics);
+    } else {
+      byDayTopics.putIfAbsent(key, () => <String>[]);
+    }
+
+    final mood = _scoreFromTags(e.tags);
+    if (mood != null) {
+      (byDayMood[key] ??= <double>[]).add(mood);
+    }
+    byDayCount[key] = (byDayCount[key] ?? 0) + 1;
+  }
+
+  if (byDayCount.isEmpty) return const [];
+
+  final keys = byDayCount.keys.toList()..sort((a, b) => b.compareTo(a)); // neueste zuerst
+  final out = <_TimelineDayDot>[];
+
+  for (final k in keys) {
+    final dt = _parseDayTag(k) ?? DateTime.now().toUtc();
+    final topics = byDayTopics[k] ?? const <String>[];
+    final topThemes = _topN(topics, 3);
+    final moods = byDayMood[k];
+    final avgMood = (moods == null || moods.isEmpty)
+        ? null
+        : (moods.reduce((a, b) => a + b) / moods.length).clamp(-2.0, 2.0);
+    out.add(_TimelineDayDot(
+      dayUtc: dt,
+      topics: topThemes,
+      avgMood: avgMood,
+      count: byDayCount[k] ?? 0,
+    ));
+  }
+  return out;
+}
+
+// ------------------------------------------------------------------ ProScreen
+
 class ProScreen extends StatefulWidget {
   /// Legacy-Props bleiben für Export/Fallback erhalten.
   final List<MoodEntry> moodEntries;
@@ -80,6 +189,10 @@ class ProScreen extends StatefulWidget {
   final Future<int?> Function()? loadCommunityTalkCount;
   final Future<void> Function()? sendCommunityHelpAck;
 
+  /// Optional einblendbare, sehr dezente Sektion „Letzte Einsichten“.
+  /// Default: false (wir lassen Raum zum Atmen, kein Coaching-Ton).
+  final bool showLastInsights;
+
   const ProScreen({
     super.key,
     required this.moodEntries,
@@ -88,6 +201,7 @@ class ProScreen extends StatefulWidget {
     this.loadCommunityHelpCount,
     this.loadCommunityTalkCount,
     this.sendCommunityHelpAck,
+    this.showLastInsights = false,
   });
 
   @override
@@ -385,12 +499,14 @@ class _ProScreenState extends State<ProScreen>
     }
   }
 
+  // ---------------- Build -----------------------------------------------------
+
   @override
   Widget build(BuildContext context) {
     final tt = Theme.of(context).textTheme;
     final size = MediaQuery.of(context).size;
     final isMobile = size.width < 470;
-    final isNarrow200 = size.width <= 200; // ← neue Schwelle
+    final isNarrow200 = size.width <= 200; // ← Schwelle
     final isPhoneTall = size.height > 720;
 
     // ---- Provider (optional) -------------------------------------------------
@@ -424,6 +540,10 @@ class _ProScreenState extends State<ProScreen>
 
     final showMoodGraph =
         (series.length >= 4) && !isNarrow200 && size.width > 0 && size.height > 0;
+
+    // Timeline-Dots
+    final timelineDots =
+        hasProv ? buildTimelineDotsFromProvider(prov!, _range.days) : const <_TimelineDayDot>[];
 
     return Scaffold(
       extendBodyBehindAppBar: true,
@@ -515,9 +635,17 @@ class _ProScreenState extends State<ProScreen>
                           onOpenSettings: _openProSettings,
                         ),
 
+                        const SizedBox(height: 8),
+
+                        // ────────────────────────────────────────────────────
+                        // Rückblick-Card (Text + Mini-Sparkline)
+                        // ────────────────────────────────────────────────────
+                        if (series.isNotEmpty)
+                          _RueckblickCard(series: series),
+
                         const SizedBox(height: 12),
 
-                        // Mood-Trend
+                        // Mood-Trend (groß)
                         ClipRRect(
                           borderRadius: const BorderRadius.all(zs.ZenRadii.l),
                           child: BackdropFilter(
@@ -630,20 +758,86 @@ class _ProScreenState extends State<ProScreen>
                           ),
                         ),
 
-                        // Live-Werte für Stats nachtragen (separater Build pass)
-                        Builder(builder: (context) {
-                          return Padding(
-                            padding: const EdgeInsets.only(top: 0),
-                            child: IgnorePointer(
-                              ignoring: true,
-                              child: Opacity(
-                                opacity: 0.0,
-                                child: Text(
-                                    '$reflectionsCount $activeDays $streak'),
+                        // (Optional) Dezente „Letzte Einsichten“ – standardmäßig AUS.
+                        if (widget.showLastInsights) ...[
+                          const SizedBox(height: 16),
+                          const _LastInsightsSection(),
+                        ],
+
+                        const SizedBox(height: 16),
+
+                        // ────────────────────────────────────────────────────
+                        // Timeline (Punkte)
+                        // ────────────────────────────────────────────────────
+                        ClipRRect(
+                          borderRadius: const BorderRadius.all(zs.ZenRadii.l),
+                          child: BackdropFilter(
+                            filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+                            child: zw.ZenGlassCard(
+                              padding: const EdgeInsets.fromLTRB(10, 12, 10, 12),
+                              topOpacity: .22,
+                              bottomOpacity: .10,
+                              borderOpacity: .14,
+                              borderRadius:
+                                  const BorderRadius.all(zs.ZenRadii.l),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      const Icon(Icons.timeline_rounded,
+                                          size: 18, color: zs.ZenColors.sage),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        'Verlauf – letzte ${_range.label} Tage',
+                                        style: tt.bodyMedium!.copyWith(
+                                          fontWeight: FontWeight.w700,
+                                          color: zs.ZenColors.deepSage,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 10),
+                                  SizedBox(
+                                    height: 220, // fester Viewport für Performance
+                                    child: timelineDots.isEmpty
+                                        ? const Center(
+                                            child: _EmptyRowHint(
+                                              icon: Icons.hourglass_empty_rounded,
+                                              text:
+                                                  'Noch keine Verlaufspunkte im Zeitraum.',
+                                            ),
+                                          )
+                                        : ListView.builder(
+                                            key: ValueKey(_range), // rebuild bei Range-Wechsel
+                                            padding: const EdgeInsets.symmetric(horizontal: 6),
+                                            itemCount: timelineDots.length,
+                                            itemExtent: 48, // fix für schnelle Layouts
+                                            physics: const BouncingScrollPhysics(),
+                                            itemBuilder: (ctx, i) {
+                                              final dot = timelineDots[i];
+                                              return _TimelineItem(
+                                                dot: dot,
+                                                onTap: () => _openTimelineSheet(dot),
+                                              );
+                                            },
+                                          ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Opacity(
+                                    opacity: .78,
+                                    child: Text(
+                                      'Tippe auf einen Punkt für Details (Datum, Thema, 1-Satz).',
+                                      textAlign: TextAlign.center,
+                                      style: tt.bodySmall,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                          );
-                        }),
+                          ),
+                        ),
 
                         const SizedBox(height: 16),
 
@@ -947,6 +1141,238 @@ class _ProScreenState extends State<ProScreen>
       'Dein Tempo ist willkommen.',
     ];
     return lines[idx % lines.length];
+  }
+
+  void _openTimelineSheet(_TimelineDayDot dot) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      showDragHandle: true,
+      builder: (ctx) {
+        final tt = Theme.of(ctx).textTheme;
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 640),
+                child: ClipRRect(
+                  borderRadius: const BorderRadius.all(zs.ZenRadii.l),
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                    child: zw.ZenGlassCard(
+                      borderRadius: const BorderRadius.all(zs.ZenRadii.l),
+                      topOpacity: .26,
+                      bottomOpacity: .10,
+                      borderOpacity: .16,
+                      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Row(
+                            children: [
+                              _MoodDot(color: _moodColor(dot.avgMood), size: 16),
+                              const SizedBox(width: 8),
+                              Text('Verlaufspunkt', style: tt.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w800,
+                                color: zs.ZenColors.deepSage,
+                              )),
+                              const Spacer(),
+                              if (dot.count > 1)
+                                Opacity(
+                                  opacity: .85,
+                                  child: Text('${dot.count} Einträge', style: tt.bodySmall),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          _InfoRow(icon: Icons.event_rounded, text: dot.dayHuman),
+                          const SizedBox(height: 6),
+                          _InfoRow(
+                            icon: Icons.sell_rounded,
+                            text: dot.topics.isEmpty ? 'Kein Thema markiert' : dot.topics.join(' · '),
+                          ),
+                          const SizedBox(height: 6),
+                          _InfoRow(
+                            icon: Icons.short_text_rounded,
+                            text: dot.oneLiner,
+                          ),
+                          const SizedBox(height: 8),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ---------- Timeline Widgets -------------------------------------------------
+
+class _TimelineItem extends StatelessWidget {
+  final _TimelineDayDot dot;
+  final VoidCallback onTap;
+
+  const _TimelineItem({required this.dot, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+    final color = _moodColor(dot.avgMood);
+
+    return Semantics(
+      button: true,
+      label:
+          'Verlaufspunkt ${dot.dayHuman}. ${dot.topics.isEmpty ? "Kein Thema" : "Thema: ${dot.topics.first}"} . Doppeltippen für Details.',
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Row(
+          children: [
+            SizedBox(
+              width: 26,
+              child: Center(
+                child: _MoodDot(color: color, size: 10),
+              ),
+            ),
+            Expanded(
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      dot.dayHuman,
+                      style: tt.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: zs.ZenColors.deepSage,
+                      ),
+                    ),
+                  ),
+                  Flexible(
+                    flex: 2,
+                    child: Opacity(
+                      opacity: .85,
+                      child: Text(
+                        dot.topics.isEmpty
+                            ? '—'
+                            : dot.topics.join(' · '),
+                        textAlign: TextAlign.right,
+                        overflow: TextOverflow.ellipsis,
+                        style: tt.bodySmall,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MoodDot extends StatelessWidget {
+  final Color color;
+  final double size;
+  const _MoodDot({required this.color, this.size = 10});
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size, height: size,
+      decoration: BoxDecoration(
+        color: color,
+        shape: BoxShape.circle,
+        boxShadow: [
+          BoxShadow(
+            color: color.withValue(alpha: .30),
+            blurRadius: 8, spreadRadius: 1.2, offset: const Offset(0, 2),
+          )
+        ],
+        border: Border.all(color: Colors.black.withValue(alpha: .10)),
+      ),
+    );
+  }
+}
+
+class _InfoRow extends StatelessWidget {
+  final IconData icon;
+  final String text;
+  const _InfoRow({required this.icon, required this.text});
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+    return Row(
+      children: [
+        Icon(icon, size: 16, color: zs.ZenColors.sage),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(text, style: tt.bodyMedium),
+        ),
+      ],
+    );
+  }
+}
+
+// ---------- (Optional) Letzte Einsichten ------------------------------------
+// Dezent, viel Luft, kein Coaching-Ton. Wird nur angezeigt, wenn showLastInsights=true.
+
+class _LastInsightsSection extends StatelessWidget {
+  const _LastInsightsSection();
+
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+    return ClipRRect(
+      borderRadius: const BorderRadius.all(zs.ZenRadii.l),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+        child: zw.ZenGlassCard(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+          topOpacity: .18,
+          bottomOpacity: .08,
+          borderOpacity: .12,
+          borderRadius: const BorderRadius.all(zs.ZenRadii.l),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Opacity(
+                opacity: .85,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.light_mode_rounded,
+                        size: 16, color: zs.ZenColors.sage),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Letzte Einsichten',
+                      style: tt.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: zs.ZenColors.deepSage,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+              Opacity(
+                opacity: .78,
+                child: Text(
+                  'Heute lassen wir Raum. Wenn etwas wichtig ist, zeigt es sich von selbst.',
+                  textAlign: TextAlign.center,
+                  style: tt.bodySmall,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -1621,8 +2047,8 @@ class ZenMoodGraphSeries extends StatelessWidget {
     if (data.isEmpty) return const SizedBox(height: 124);
 
     // Glatte Tageslinie + 7-Tage-Average
-    final smoothed = _smooth(data, strength: 0.35);
-    final avg7 = _movingAverage(data, 7);
+    final smoothed = _smoothSeries(data, strength: 0.35);
+    final avg7 = _movingAverageSeries(data, 7);
 
     return SizedBox(
       height: 124,
@@ -1689,34 +2115,196 @@ class ZenMoodGraphSeries extends StatelessWidget {
       ),
     );
   }
+}
 
-  static List<double> _smooth(List<double> d, {double strength = 0.3}) {
-    if (d.isEmpty) return const [];
-    final s = <double>[];
-    double prev = d.first;
-    for (final v in d) {
-      prev = prev + (v - prev) * (0.2 + strength * 0.6);
-      s.add(prev.clamp(-2.0, 2.0));
-    }
-    return s;
+// Mini-Sparkline (2 Linien: Trend & Ø7) — 14 Tage, kompakt
+class _MiniSparkline extends StatelessWidget {
+  final List<double> series;
+  const _MiniSparkline({required this.series});
+
+  @override
+  Widget build(BuildContext context) {
+    final data = series.takeLast(14);
+    if (data.isEmpty) return const SizedBox(height: 36);
+
+    final smoothed = _smoothSeries(data, strength: 0.35);
+    final avg7 = _movingAverageSeries(data, 7);
+
+    return ClipRRect(
+      borderRadius: const BorderRadius.all(zs.ZenRadii.s),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),
+        child: zw.ZenGlassCard(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          topOpacity: .16,
+          bottomOpacity: .08,
+          borderOpacity: .12,
+          borderRadius: const BorderRadius.all(zs.ZenRadii.s),
+          child: SizedBox(
+            height: 36,
+            child: LineChart(
+              LineChartData(
+                minY: -2,
+                maxY: 2,
+                gridData: const FlGridData(show: false),
+                titlesData: const FlTitlesData(show: false),
+                borderData: FlBorderData(show: false),
+                lineTouchData: const LineTouchData(enabled: false),
+                lineBarsData: [
+                  LineChartBarData(
+                    spots: List.generate(
+                        avg7.length, (i) => FlSpot(i.toDouble(), avg7[i])),
+                    isCurved: true,
+                    color: zs.ZenColors.sage,
+                    barWidth: 2.0,
+                    isStrokeCapRound: true,
+                    dotData: const FlDotData(show: false),
+                    belowBarData: BarAreaData(show: false),
+                  ),
+                  LineChartBarData(
+                    spots: List.generate(smoothed.length,
+                        (i) => FlSpot(i.toDouble(), smoothed[i])),
+                    isCurved: true,
+                    color: zs.ZenColors.deepSage,
+                    barWidth: 2.2,
+                    isStrokeCapRound: true,
+                    dotData: const FlDotData(show: false),
+                    belowBarData: BarAreaData(show: false),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// Rückblick-Card (Text + Mini-Sparkline 14T)
+class _RueckblickCard extends StatelessWidget {
+  final List<double> series; // gesamte Serie (−2..+2)
+  const _RueckblickCard({required this.series});
+
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+    final label = _reviewLabel(series);
+    return Semantics(
+      label: 'Rückblick. ${label.a11y}',
+      child: ClipRRect(
+        borderRadius: const BorderRadius.all(zs.ZenRadii.s),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),
+          child: zw.ZenGlassCard(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+            topOpacity: .18,
+            bottomOpacity: .08,
+            borderOpacity: .12,
+            borderRadius: const BorderRadius.all(zs.ZenRadii.s),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.history_rounded,
+                        size: 16, color: zs.ZenColors.sage),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Rückblick',
+                      style: tt.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: zs.ZenColors.deepSage,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Opacity(
+                  opacity: .90,
+                  child: Text(
+                    label.text,
+                    textAlign: TextAlign.center,
+                    style: tt.bodySmall,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                _MiniSparkline(series: series),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ReviewLabel {
+  final String text;
+  final String a11y;
+  const _ReviewLabel(this.text, this.a11y);
+}
+
+// bildet sanften Vergleich: letzte 7 vs. vorherige 7 (falls vorhanden)
+_ReviewLabel _reviewLabel(List<double> series) {
+  final data = series.takeLast(20); // etwas Puffer
+  final last7 = data.takeLast(7);
+  final prev7 = data.length > 7 ? data.takeLast(14).take(7).toList() : <double>[];
+
+  double avg(List<double> xs) =>
+      xs.isEmpty ? 0.0 : xs.reduce((a, b) => a + b) / xs.length;
+
+  final a = avg(prev7);
+  final b = avg(last7);
+  final delta = (b - a);
+
+  String trendWord() {
+    if (prev7.isEmpty) return 'Erste Eindrücke entstehen.';
+    if (delta.abs() < 0.12) return 'Ähnlich ruhig wie zuvor.';
+    return delta > 0
+        ? 'Etwas ruhiger als zuvor.'
+        : 'Etwas schwerer als zuvor.';
   }
 
-  static List<double> _movingAverage(List<double> d, int window) {
-    if (d.isEmpty || window <= 1) return List<double>.from(d);
-    final out = <double>[];
-    double sum = 0;
-    int start = 0;
-    for (int i = 0; i < d.length; i++) {
-      sum += d[i];
-      if (i - start + 1 > window) {
-        sum -= d[start];
-        start++;
-      }
-      final len = (i - start + 1);
-      out.add((sum / len).clamp(-2.0, 2.0));
-    }
-    return out;
+  final text = prev7.isEmpty
+      ? 'Erste Eindrücke – wir sammeln noch ein Gefühl.'
+      : '${trendWord()} (Δ ${delta >= 0 ? '+' : ''}${delta.toStringAsFixed(2)})';
+
+  final a11y = prev7.isEmpty
+      ? 'Erste Eindrücke. Zu wenig Daten für einen Vergleich.'
+      : 'Vergleich letzte sieben Tage zu den sieben Tagen davor: Differenz ${delta.toStringAsFixed(2)}.';
+
+  return _ReviewLabel(text, a11y);
+}
+
+// Gemeinsame Helper für Linien
+List<double> _smoothSeries(List<double> d, {double strength = 0.3}) {
+  if (d.isEmpty) return const [];
+  final s = <double>[];
+  double prev = d.first;
+  for (final v in d) {
+    prev = prev + (v - prev) * (0.2 + strength * 0.6);
+    s.add(prev.clamp(-2.0, 2.0));
   }
+  return s;
+}
+
+List<double> _movingAverageSeries(List<double> d, int window) {
+  if (d.isEmpty || window <= 1) return List<double>.from(d);
+  final out = <double>[];
+  double sum = 0;
+  int start = 0;
+  for (int i = 0; i < d.length; i++) {
+    sum += d[i];
+    if (i - start + 1 > window) {
+      sum -= d[start];
+      start++;
+    }
+    final len = (i - start + 1);
+    out.add((sum / len).clamp(-2.0, 2.0));
+  }
+  return out;
 }
 
 // vertikale Trennlinie
@@ -1865,6 +2453,39 @@ double? _scoreFromTags(List<String> tags) {
   return null;
 }
 
+List<String> _extractTopics(List<String> tags) {
+  final out = <String>[];
+  for (final t in tags) {
+    final s = t.trim();
+    if (s.toLowerCase().startsWith('topic:')) {
+      final v = s.substring(6).trim();
+      if (v.isNotEmpty) out.add(v);
+    } else if (s.toLowerCase().startsWith('thema:')) {
+      final v = s.substring(6).trim();
+      if (v.isNotEmpty) out.add(v);
+    }
+  }
+  return out;
+}
+
+List<String> _topN(List<String> items, int n) {
+  if (items.isEmpty) return const [];
+  final map = <String, int>{};
+  for (final x in items) {
+    map[x] = (map[x] ?? 0) + 1;
+  }
+  final sorted = map.keys.toList()
+    ..sort((a, b) => (map[b]!).compareTo(map[a]!));
+  return sorted.take(n).toList();
+}
+
+Color _moodColor(double? v) {
+  if (v == null) return Colors.grey.withValue(alpha: .65);
+  if (v >= 1.0) return zs.ZenColors.deepSage;
+  if (v <= -1.0) return Colors.redAccent.withValue(alpha: .85);
+  return zs.ZenColors.sage;
+}
+
 List<double> _seriesFromProvider(JournalEntriesProvider prov,
     {required int days}) {
   if (prov.entries.isEmpty) return const [];
@@ -1923,7 +2544,8 @@ int _activeDaysCountFromProvider(JournalEntriesProvider prov) {
 
 // ---------- DayTag/Date Helfer ----------------------------------------------
 
-String _toDayTag(DateTime dtUtc) => '${dtUtc.year}-${dtUtc.month}-${dtUtc.day}';
+String _toDayTag(DateTime dtUtc) => '${dtUtc.year}-${_pad2(dtUtc.month)}-${_pad2(dtUtc.day)}';
+String _pad2(int v) => v.toString().padLeft(2, '0');
 
 DateTime? _parseDayTag(String tag) {
   try {
@@ -2065,4 +2687,18 @@ int _streakFromLegacy(List<MoodEntry> list) {
     }
   }
   return streak;
+}
+
+// ---------- OPTIONAL EXPORT (für Worker-Brücke) ------------------------------
+// Liefert eine Map {topic -> Vorkommen} im aktuellen Fenster.
+// Kann z.B. vom ApiService als "timeline.topics" in den Kontext übernommen werden.
+Map<String, int> buildTimelineTopicCounts(JournalEntriesProvider prov, {required int days}) {
+  final dots = buildTimelineDotsFromProvider(prov, days);
+  final map = <String, int>{};
+  for (final d in dots) {
+    for (final t in d.topics) {
+      map[t] = (map[t] ?? 0) + 1;
+    }
+  }
+  return map;
 }

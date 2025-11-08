@@ -1,21 +1,31 @@
-// lib/features/story/story_screen.dart
+// [BASELINE] lib/features/story/story_screen.dart (Stand: 2025-11-07, v6.7.0)
+// Kutsche 6 — Story (Bedeutung & Narrativ)
+// MERGE SIGNAL v6.7.0:
+// • Sichtbar nach ≥5 Reflexionen (lokal gezählt; Reset via Persistenz).
+// • Lokale Anzeige + Aktionen: Speichern ins Journal, Vorlesen (TTS), Kopieren,
+//   TXT-Export und **PDF-Export** (on-device).
+// • Oxford-Zen: Top-Anchor-Hero (wie StartScreen), ruhige Typo, Glas-Karten.
+// • A11y/Robustheit: Semantics, Haptik, mounted-Guards, defensive Fehlertexte.
+// • Keine serverseitige Persistenz; Story kann optional via GuidanceService.story()
+//   generiert werden (useServerIfAvailable: true).
 //
-// StoryScreen — Zen v6.54 (Oxford polish · StartScreen-Matching · Top-Anchor)
-// Update: 2025-09-15
-// -----------------------------------------------------------------------------
-// • Hero-Panda wie im StartScreen (160/200 px), identische Typo-Abstände.
-// • NEU: Top-Anchor statt Zentrierung → Panda steht im oberen Drittel
-//   (viewport-abhängig: ~12% Höhe, mit Min/Max-Klammern).
-// • Anordnung: Panda → Titel → Tagline → Gate-Karte (wie StartScreen).
-// • Keine Breaking Changes (Public API unverändert).
-// • A11y/Robustheit: Semantics, mounted-Guards, defensive errorBuilder.
-//
+// Kompatibilität:
+// – GuidanceService.story(...) → StoryResult { title, body } (services/guidance/dtos.dart)
+// – JournalEntriesProvider.addStory(...)
+// – LocalStorageService (init/loadSetting/saveSetting)
+// – TTS: services/tts_service.dart (TtsService.instance)
+// – Zen UI: ZenBackdrop, ZenAppBar, ZenGlassCard, ZenToast, Tokens (zs/zw)
 
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
+
+// PDF (on-device)
+import 'package:pdf/widgets.dart' as pw;
+import 'package:pdf/pdf.dart';
+
 import '../../services/guidance/dtos.dart';
 
 // Zen-Design (Tokens)
@@ -41,10 +51,10 @@ import '../reflection/reflection_screen.dart';
 const String kStoryPandaAsset = 'assets/story_panda_final.png';
 
 // Feintuning für die vertikale Verankerung des Heros.
-// Passe factor/min/max bei Bedarf minimal an.
-const double _kHeroTopAnchorFactor = 0.01; // 12% der Höhe
-const double _kHeroTopAnchorMin = -10; // min. 36 px
-const double _kHeroTopAnchorMax = 60; // max. 120 px
+// ~12% der Höhe, min 36 px, max 120 px (Viewport-abhängig).
+const double _kHeroTopAnchorFactor = 0.12;
+const double _kHeroTopAnchorMin = 36;
+const double _kHeroTopAnchorMax = 120;
 
 class StoryScreen extends StatefulWidget {
   const StoryScreen({super.key});
@@ -808,6 +818,17 @@ class _StoryCard extends StatelessWidget {
                     : (onToggleSpeak ?? () {}),
               ),
               _StoryAction(
+                icon: Icons.picture_as_pdf_rounded,
+                label: 'PDF exportieren',
+                onTap: () async {
+                  final path = await _saveAsPdf(title, body);
+                  if (context.mounted) {
+                    zw.ZenToast.show(context, 'Gespeichert: $path');
+                  }
+                  HapticFeedback.lightImpact();
+                },
+              ),
+              _StoryAction(
                 icon: Icons.copy_rounded,
                 label: 'Kopieren',
                 onTap: () async {
@@ -859,6 +880,47 @@ class _StoryCard extends StatelessWidget {
     final safe = _sanitizeFileName(title);
     final file = File('${dir.path}/$safe.txt');
     await file.writeAsString('$title\n\n$text');
+    return file.path;
+  }
+
+  Future<String> _saveAsPdf(String title, String text) async {
+    final doc = pw.Document();
+    final pageTheme = pw.PageTheme(
+      pageFormat: PdfPageFormat.a4,
+      margin: const pw.EdgeInsets.symmetric(horizontal: 36, vertical: 40),
+    );
+
+    doc.addPage(
+      pw.MultiPage(
+        pageTheme: pageTheme,
+        build: (ctx) => [
+          pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              if (title.trim().isNotEmpty)
+                pw.Text(
+                  title.trim(),
+                  style: pw.TextStyle(
+                    fontSize: 20,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+              if (title.trim().isNotEmpty) pw.SizedBox(height: 10),
+              pw.Text(
+                text.trim(),
+                style: const pw.TextStyle(fontSize: 12.5, height: 1.35),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+
+    final bytes = await doc.save();
+    final dir = await getApplicationDocumentsDirectory();
+    final safe = _sanitizeFileName(title);
+    final file = File('${dir.path}/$safe.pdf');
+    await file.writeAsBytes(bytes, flush: true);
     return file.path;
   }
 
