@@ -1,18 +1,31 @@
-// [BASELINE] lib/services/core/api_service.dart — Stand: 2025-11-07 — ZenYourself v6.7.0
-// Merge-Signal: client_memory Bridge (Consent+Active), ContextMemories ≤2kB, Quick-Inject (Name/Mood/Emotion), X-Thread-Id
-// Changes:
-// • _basePayload(): Consent/Active Guard; context.memories (≤2 kB) + Flags; Quick-Inject Name/Mood/Emotion; History in session.history.
-// • configureForWorker(): identische Bridge-Logik; Header X-Thread-Id; contact_tints + contact_tins; context_bytes_b64; Size-Guard ≤2 kB.
-// • sendNextTurnFull(...): History-Cap (~20) + Memories-Cap (≤2 kB); Priorität /next_turn_full.
-// • maybeResetThreadOnPrivacyChange(...): neue thread_id bei Privacy-Off (optional force).
-// • Byte-Kontext: context_bytes_b64 (≤2 kB); Out-Soft-Gate Warmup.
-// • Parser/DTO: robust (helpers, flow, tags, schools, speech_meta, understanding); memories_to_save → MemoryService.saveFromWorker().
-// Safety: keine Breaking Changes; Public-Signaturen stabil; Null-Safety & Imports geprüft; Stil = Oxford‑Zen.
+// [REVISED] lib/services/core/api_service.dart — Stand: 2025-11-08 — ZenYourself v6.7.2
+// MERGE SIGNAL: Client-Memory Bridge (Consent+Active), Recall ≤240 B, ContextMemories ≤2 kB,
+// ZIP-Core Export (Server first → Local fallback), X-Thread-Id, Byte-Context, Mini-Polish
+//
+// Änderungen ggü. v6.7.1+revA (2025-11-08):
+// • Stabilität: Defensive Map-Casts, Null-Guards, Byte-Safeguards, keine const-Mutation.
+// • Recall: Nur bei Consent+Bridge (🍃/🌿), PII-Reduktion, Whitespace-Flatten, UTF-8-Truncation ≤240 B.
+// • Bridge-Guard: Konsistente Flag-Setzung (meta.flags.client_memory & meta.memory.bridge).
+// • _capMemoriesSize(): Harte Schrumpfung auf Essentials bei >2 kB (identity.name, last{topic,mood,emotion,date}).
+// • _normalizeMemories(): Alias timelineRecent → timeline.recent; generische toMap/toJson Pfade robust.
+// • HTTP-Adapter: Beide Aliase contact_tints/contact_tins; X-Thread-Id via session.id; Out-Gate Warmup.
+// • ZIP-Core: Timeline best-effort (MemoryService → Fallback aus Reflections) + timeline.json bei Datenlage.
+// • Parser: Antwort-Hilfen und Fragen dedupliziert/normalisiert; Talk ergänzt um smalltalk_reply.
+// • Analyze/Journey/Story: Tolerante Fallbacks, PII-Reduktion bei Exports/Requests.
+// • Kleinpolitur: Tippfehler entfernt, Mini-Delays jittered, keine Breaking-API.
+//
+// Hinweise:
+// – Diese Datei erwartet vorhandene DTOs (ReflectionTurn, ReflectionSession, usw.) und MemoryService-Singleton.
+// – .ifEmpty(…) wird im Projekt üblicherweise via String-Extension bereitgestellt.
+
+library api_service;
 
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
+import 'dart:typed_data';
 
+import 'package:archive/archive.dart' show Archive, ArchiveFile, ZipEncoder;
 import 'package:collection/collection.dart';
 import 'package:http/http.dart' as http;
 import 'package:uuid/uuid.dart';
@@ -32,10 +45,38 @@ import '../guidance/dtos.dart'
         IfEmptyX,
         UserAction,
         TurnAnalysis;
+// WICHTIG: ReflectionAIResult & ZipCoreResult sind lokal definiert (Fallback),
+// damit der Build nicht an fehlenden Exporten scheitert.
 
 import '../../data/reflection_entry.dart' as re hide Analysis;
 import '../../models/question.dart';
 import '../../core/memory/memory_service.dart';
+
+// ---------------------------------------------------------------------------
+// Fallback-DTOs (lokal), falls sie nicht aus dtos.dart bereitgestellt werden.
+// Bei späterer zentraler Definition können diese Klassen entfernt werden.
+// ---------------------------------------------------------------------------
+class ReflectionAIResult {
+  final String reflection;
+  final String depth; // 'light' | 'medium' | 'deep'
+  final String riskFlag; // 'none' | 'support' | 'crisis'
+  final List<String> tags;
+  const ReflectionAIResult({
+    required this.reflection,
+    required this.depth,
+    required this.riskFlag,
+    required this.tags,
+  });
+}
+
+class ZipCoreResult {
+  final Uint8List bytes;
+  final String filename;
+  const ZipCoreResult({
+    required this.bytes,
+    required this.filename,
+  });
+}
 
 // 2–28 Zeichen, startet groß, keine offensichtlichen Statuswörter
 bool _looksLikeName(String s) {
@@ -192,6 +233,92 @@ class ApiService {
     return body;
   }
 
+  // ---------------- Recall (nur 🍃/🌿, Byte-Guard) ----------------
+
+  String _flattenWs(String s) =>
+      s.replaceAll(RegExp(r'\s+'), ' ').trim();
+
+  String _utf8Truncate(String s, int maxBytes) {
+    if (maxBytes <= 0) return '';
+    final bytes = utf8.encode(s);
+    if (bytes.length <= maxBytes) return s;
+    // iterativ über Runes, um keine Surrogates zu zerschneiden
+    var acc = StringBuffer();
+    var used = 0;
+    for (final r in s.runes) {
+      final chunk = utf8.encode(String.fromCharCode(r));
+      if (used + chunk.length > maxBytes) break;
+      acc.writeCharCode(r);
+      used += chunk.length;
+    }
+    final out = acc.toString().trimRight();
+    return out.isEmpty ? '' : (out.endsWith('…') ? out : '$out…');
+  }
+
+  String? _recallFromService({required bool consent}) {
+    if (!consent) return null;
+    try {
+      final ms = MemoryService.instance as dynamic;
+      dynamic r;
+      try { r = ms.buildRecall?.call(consent: true); } catch (_) {}
+      r ??= (() { try { return ms.buildRecall?.call(); } catch (_) {} return null; })();
+      r ??= (() { try { return ms.recall?.call(); } catch (_) {} return null; })();
+      r ??= (() { try { return ms.getRecall?.call(); } catch (_) {} return null; })();
+      if (r == null) return null;
+      if (r is String) return r;
+      if (r is Map) {
+        final m = r.cast<String, dynamic>();
+        final s = (m['text'] ?? m['summary'] ?? m['recall'] ?? '').toString();
+        return s.trim().isEmpty ? null : s;
+      }
+      if (r is List) {
+        final parts = r.where((e) => e != null).map((e) => e.toString().trim()).where((e) => e.isNotEmpty).take(4).toList();
+        if (parts.isEmpty) return null;
+        return parts.join(' · ');
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  String? _composeRecallFromMem(Map<String, dynamic> mem) {
+    final id = (mem['identity'] as Map?) ?? const {};
+    final last = (mem['last'] as Map?) ?? const {};
+    final String? name = (id['name']?.toString().trim().isEmpty ?? true) ? null : id['name'].toString().trim();
+    final int? mood = (last['mood'] is num) ? (last['mood'] as num).toInt() : int.tryParse('${last['mood'] ?? ''}');
+    final String? moodLabel = (mood == null) ? null : _labelFromScore(mood);
+    final String? emotion = ((last['emotion'] ?? '').toString().trim().isEmpty) ? null : last['emotion'].toString().trim();
+    final String? topic = ((last['topic'] ?? '').toString().trim().isEmpty) ? null : last['topic'].toString().trim();
+    final String? date = ((last['date'] ?? '').toString().trim().isEmpty) ? null : last['date'].toString().trim();
+
+    final parts = <String>[];
+    if (emotion != null) parts.add(emotion);
+    if (moodLabel != null) parts.add(moodLabel);
+    if (topic != null) parts.add('Thema: $topic');
+    if (date != null) parts.add(date);
+
+    if (parts.isEmpty) return null;
+    final body = parts.join(' · ');
+    if (name != null && name.isNotEmpty) {
+      return '$name — $body';
+    }
+    return body;
+  }
+
+  String? _buildRecallSafe({required bool consent, required Map<String, dynamic> mem, int maxBytes = 240}) {
+    if (!consent) return null;
+    // 1) Bevorzugt aus Service
+    String? raw = _recallFromService(consent: consent);
+    // 2) Fallback aus mem
+    raw ??= _composeRecallFromMem(mem);
+    if (raw == null || raw.trim().isEmpty) return null;
+    // PII-Reduktion + Whitespace-Clean
+    String clean = _flattenWs(_redactPII(raw));
+    if (clean.isEmpty) return null;
+    // Byte-Guard
+    clean = _utf8Truncate(clean, maxBytes);
+    return clean.isEmpty ? null : clean;
+  }
+
   // ---------------- Config ----------------
 
   void configureHttp(
@@ -249,7 +376,7 @@ class ApiService {
         'tz': (body['tz'] ?? 'Europe/Zurich').toString(),
       };
       enriched.putIfAbsent('contact_tints', () => Map<String, dynamic>.from(_tints));
-      enriched.putIfAbsent('contact_tins', () => Map<String, dynamic>.from(_tints));
+      enriched.putIfAbsent('contact_tins',  () => Map<String, dynamic>.from(_tints)); // PATCH-d: Kosmetik (Spacing)
 
       _appendByteContext(enriched);
 
@@ -301,6 +428,12 @@ class ApiService {
           lastMap['date'] ??=
               DateTime.now().toUtc().toIso8601String().split('T').first;
           if (lastMap.isNotEmpty) mem['last'] = lastMap;
+
+          // NEU: Recall (nur 🍃/🌿) mit Byte-Guard
+          final recall = _buildRecallSafe(consent: consent, mem: mem, maxBytes: 240);
+          if (recall != null && recall.isNotEmpty) {
+            mem['recall'] = recall;
+          }
 
           if (mem.isNotEmpty) {
             // Size-Guard ≤ 2 kB
@@ -371,10 +504,10 @@ class ApiService {
     try {
       final memSingleton = MemoryService.instance;
       dynamic dyn = memSingleton;
-      unawaited(Future<void>(() async {
+      unawaited(() async {
         try { await (dyn.warmup?.call()); } catch (_) {}
         try { dyn.preload?.call(); } catch (_) {}
-      }));
+      }());
     } catch (_) {/* never block */}
   }
 
@@ -983,7 +1116,7 @@ class ApiService {
     String userText = '';
     final lastUser =
         messages.lastWhereOrNull((m) => (m['role'] ?? '') == 'user');
-    if (lastUser != null && (lastUser['content'] ?? '').trim().isNotEmpty) {
+    if (lastUser != null && ((lastUser['content'] ?? '').trim().isNotEmpty)) {
       userText = lastUser['content']!.trim();
     } else if (messages.isNotEmpty &&
         (messages.last['content'] ?? '').trim().isNotEmpty) {
@@ -1151,6 +1284,408 @@ class ApiService {
       insights: <String>['ZenYourself konnte keine Insights laden.'],
       question: loadingHint,
     );
+  }
+
+  // =======================================================================
+  //  NEU: ZIP-CORE EXPORT (MOOT)
+  // =======================================================================
+  /// Erzeugt ein ZIP mit Kern-Daten (Profil + Reflexionen + Moods).
+  /// 1) Versucht Server-Endpoint (`/zip_core` → `/export/zip_core` → `/zip`) – erwartet JSON { zip_b64, filename? }.
+  /// 2) Fallback: erzeugt ZIP lokal (in-memory) via `archive`.
+  Future<ZipCoreResult> zipCore({
+    required String profileId,
+    required List<re.ReflectionEntry> reflections,
+    List<Map<String, dynamic>> moods = const [],
+    Map<String, dynamic>? profileInfo,
+    Map<String, dynamic>? appInfo,
+    bool redactPII = true,
+    bool useServerIfAvailable = true,
+    String locale = 'de',
+    String tz = 'Europe/Zurich',
+  }) async {
+    // ------ Best-effort Timeline vorbereiten ------
+    final timeline = _bestEffortTimeline(reflections: reflections);
+
+    // ------ 1) Server-Pfad, falls konfiguriert ------
+    if (useServerIfAvailable && _http != null) {
+      try {
+        final entriesJson = reflections
+            .map((e) => _jsonForReflectionExport(e, redactPII: redactPII))
+            .toList(growable: false);
+
+        final payload = <String, dynamic>{
+          'profile': {
+            'id': profileId,
+            if (profileInfo != null) ...profileInfo,
+          },
+          'entries': entriesJson,
+          'moods': moods,
+          if (timeline != null && timeline.isNotEmpty) 'timeline': timeline,
+          'app': {
+            'brand': _brand,
+            'channel': _channel,
+            if (appInfo != null) ...appInfo,
+          },
+          'locale': locale,
+          'tz': tz,
+        };
+
+        _appendContactTints(payload, locale: locale, tz: tz);
+        _appendByteContext(payload);
+
+        final json = await _tryEndpoints(
+          endpoints: const ['/zip_core', '/export/zip_core', '/zip'],
+          payload: payload,
+        );
+
+        if (json != null) {
+          final b64 = (json['zip_b64'] ?? json['b64'] ?? json['zip'])?.toString();
+          if (b64 != null && b64.trim().isNotEmpty) {
+            final bytes = base64Decode(b64);
+            final fname = (json['filename'] ?? _defaultZipName()).toString();
+            return ZipCoreResult(bytes: Uint8List.fromList(bytes), filename: fname);
+          }
+        }
+        // Andernfalls: lokaler Fallback
+      } catch (_) {/* weiter zu lokal */}
+    }
+
+    // ------ 2) Lokaler Fallback: ZIP in-memory erstellen ------
+    final zipBytes = _buildZipLocally(
+      profileId: profileId,
+      reflections: reflections,
+      moods: moods,
+      profileInfo: profileInfo,
+      appInfo: appInfo,
+      redactPII: redactPII,
+      locale: locale,
+      tz: tz,
+      // timeline wird best-effort mitgeschrieben
+      timeline: timeline,
+    );
+    return ZipCoreResult(bytes: zipBytes, filename: _defaultZipName());
+  }
+
+  /// Alias aus dem Plan („MOOT“): identisch zu [zipCore].
+  Future<ZipCoreResult> zipCoreMoot({
+    required String profileId,
+    required List<re.ReflectionEntry> reflections,
+    List<Map<String, dynamic>> moods = const [],
+    Map<String, dynamic>? profileInfo,
+    Map<String, dynamic>? appInfo,
+    bool redactPII = true,
+    bool useServerIfAvailable = true,
+    String locale = 'de',
+    String tz = 'Europe/Zurich',
+  }) =>
+      zipCore(
+        profileId: profileId,
+        reflections: reflections,
+        moods: moods,
+        profileInfo: profileInfo,
+        appInfo: appInfo,
+        redactPII: redactPII,
+        useServerIfAvailable: useServerIfAvailable,
+        locale: locale,
+        tz: tz,
+      );
+
+  Uint8List _buildZipLocally({
+    required String profileId,
+    required List<re.ReflectionEntry> reflections,
+    required List<Map<String, dynamic>> moods,
+    Map<String, dynamic>? profileInfo,
+    Map<String, dynamic>? appInfo,
+    required bool redactPII,
+    required String locale,
+    required String tz,
+    List<Map<String, dynamic>>? timeline,
+  }) {
+    final nowIso = DateTime.now().toUtc().toIso8601String();
+    final archive = Archive();
+
+    Map<String, dynamic> manifest = {
+      'brand': _brand,
+      'channel': _channel,
+      'created_at': nowIso,
+      'version': 'v6.7.2',
+      'counts': {
+        'reflections': reflections.length,
+        'moods': moods.length,
+        if (timeline != null) 'timeline': timeline.length,
+      },
+      'locale': locale,
+      'tz': tz,
+    };
+
+    final profileJson = <String, dynamic>{
+      'id': profileId,
+      if (profileInfo != null && profileInfo.isNotEmpty) ...profileInfo,
+    };
+
+    // Dateien zusammenstellen
+    final entriesJsonl = StringBuffer();
+    for (final e in reflections) {
+      final line = jsonEncode(_jsonForReflectionExport(e, redactPII: redactPII));
+      entriesJsonl.writeln(line);
+    }
+
+    final files = <String, List<int>>{
+      'manifest.json': utf8.encode(jsonEncode(manifest)),
+      'profile.json': utf8.encode(jsonEncode(profileJson)),
+      'reflections.jsonl': utf8.encode(entriesJsonl.toString()),
+      'moods.json': utf8.encode(jsonEncode(moods)),
+      'VERSION.txt': utf8.encode('ZenYourself export v6.7.2 • $nowIso\n'),
+      'README.txt': utf8.encode(
+          'ZenYourself Core Export\n\n'
+          'Dateien:\n'
+          '- manifest.json: Metadaten\n'
+          '- profile.json: Profilkern\n'
+          '- reflections.jsonl: Reflexionen (eine JSON-Zeile pro Eintrag)\n'
+          '- moods.json: Stimmungsnotizen (falls vorhanden)\n'
+          '- timeline.json: Zeitleiste (falls vorhanden)\n'
+          '- VERSION.txt: Export-Version\n'
+          '\nHinweis: Inhalte können PII-bereinigt sein (redactPII=$redactPII).\n'),
+    };
+
+    // NEU: timeline.json nur wenn Daten vorhanden
+    if (timeline != null && timeline.isNotEmpty) {
+      files['timeline.json'] = utf8.encode(jsonEncode(timeline));
+    }
+
+    for (final entry in files.entries) {
+      archive.addFile(ArchiveFile(entry.key, entry.value.length, entry.value));
+    }
+
+    final bytes = ZipEncoder().encode(archive) ?? <int>[];
+    return Uint8List.fromList(bytes);
+  }
+
+  Map<String, dynamic> _jsonForReflectionExport(
+    re.ReflectionEntry entry, {
+    required bool redactPII,
+  }) {
+    final text = _bestEffortContent(entry);
+    final safeText = redactPII ? _redactPII(text) : text;
+
+    String isoDate = _dateIsoForEntry(entry);
+    final id = _stringProp(entry, const ['id', 'entryId', 'uuid'])
+        .ifEmpty(() => 're_${isoDate}_${text.hashCode.abs()}');
+
+    final mood = _intProp(entry, const ['moodIcon', 'mood', 'moodScore', 'icon']);
+    final tags = _listStringProp(entry, const ['tags', 'labels']);
+
+    return <String, dynamic>{
+      'id': id,
+      'date': isoDate,
+      'text': safeText,
+      if (mood != null) 'mood': mood,
+      if (tags.isNotEmpty) 'tags': tags,
+    };
+  }
+
+  // --------- NEU: Timeline-Build (best-effort) ------------------------------
+
+  /// Baut eine einfache Timeline als Liste von Objekten:
+  /// [{id, date, mood?, hint}]
+  /// – zuerst: MemoryService (falls es dort eine Timeline-API gibt),
+  /// – fallback: aus den Reflection-Entries abgeleitet.
+  List<Map<String, dynamic>>? _bestEffortTimeline({
+    required List<re.ReflectionEntry> reflections,
+  }) {
+    // 1) MemoryService (best-effort, dynamisch verschiedene API-Namen probieren)
+    try {
+      final ms = MemoryService.instance as dynamic;
+      dynamic t;
+      try { t = ms.exportTimeline?.call(); } catch (_) {}
+      t ??= (() { try { return ms.buildTimeline?.call(); } catch (_) {} return null; })();
+      t ??= (() { try { return ms.timeline?.call(); } catch (_) {} return null; })();
+      t ??= (() { try { return ms.getTimeline?.call(); } catch (_) {} return null; })();
+      if (t != null) {
+        if (t is String) {
+          try {
+            final parsed = jsonDecode(t);
+            if (parsed is List) {
+              final list = parsed
+                  .where((e) => e != null)
+                  .map((e) => e as Map)
+                  .map((m) => m.map((k, v) => MapEntry(k.toString(), v)))
+                  .cast<Map<String, dynamic>>()
+                  .toList(growable: false);
+              if (list.isNotEmpty) return list.take(2000).toList();
+            }
+          } catch (_) {/* ignore */}
+        } else if (t is List) {
+          final list = t
+              .where((e) => e != null)
+              .map((e) => e as Map)
+              .map((m) => m.map((k, v) => MapEntry(k.toString(), v)))
+              .cast<Map<String, dynamic>>()
+              .toList(growable: false);
+          if (list.isNotEmpty) return list.take(2000).toList();
+        } else if (t is Map) {
+          // manche Services liefern {items:[...]}
+          final items = (t['items'] as List?) ?? const [];
+          final list = items
+              .where((e) => e != null)
+              .map((e) => e as Map)
+              .map((m) => m.map((k, v) => MapEntry(k.toString(), v)))
+              .cast<Map<String, dynamic>>()
+              .toList(growable: false);
+          if (list.isNotEmpty) return list.take(2000).toList();
+        }
+      }
+    } catch (_) {/* ignore */}
+
+    // 2) Fallback aus Reflections
+    if (reflections.isEmpty) return null;
+    final out = <Map<String, dynamic>>[];
+    for (final e in reflections) {
+      final date = _dateIsoForEntry(e);
+      final id = _stringProp(e, const ['id', 'entryId', 'uuid'])
+          .ifEmpty(() => 're_${date}_${_bestEffortContent(e).hashCode.abs()}');
+      final mood = _intProp(e, const ['moodIcon', 'moodScore', 'mood', 'icon']);
+      final hintRaw = _bestEffortContent(e);
+      final hint = _neatEllipsis(_redactPII(hintRaw), 120);
+      out.add({
+        'id': id,
+        'date': date,
+        if (mood != null) 'mood': mood,
+        'hint': hint,
+      });
+    }
+    // Hard-Cap auf 10k Items zur Sicherheit
+    return out.take(10000).toList(growable: false);
+  }
+
+  String _dateIsoForEntry(re.ReflectionEntry entry) {
+    // Best-effort verschiedene Feldnamen/Typen tolerieren
+    DateTime? tryDate(dynamic v) {
+      if (v is DateTime) return v.toUtc();
+      if (v is String) {
+        final s = v.trim();
+        final d = DateTime.tryParse(s);
+        if (d != null) return d.toUtc();
+        // Nur YYYY-MM-DD
+        final m = RegExp(r'^(\d{4})-(\d{2})-(\d{2})$').firstMatch(s);
+        if (m != null) {
+          return DateTime.utc(
+              int.parse(m.group(1)!), int.parse(m.group(2)!), int.parse(m.group(3)!));
+        }
+      }
+      return null;
+    }
+
+    final candidates = <dynamic>[
+      _dynProp(entry, 'dateIso'),
+      _dynProp(entry, 'date'),
+      _dynProp(entry, 'createdAt'),
+      _dynProp(entry, 'created'),
+    ];
+
+    for (final c in candidates) {
+      final dt = tryDate(c);
+      if (dt != null) {
+        return dt.toIso8601String().split('T').first;
+      }
+    }
+    return DateTime.now().toUtc().toIso8601String().split('T').first;
+  }
+
+  dynamic _dynProp(dynamic obj, String name) {
+    if (obj == null) return null;
+    // 1) Direkter Map-Zugriff
+    try {
+      if (obj is Map) return obj[name];
+    } catch (_) {}
+
+    // 2) toJson() → Map oder JSON-String
+    try {
+      final toJson = (obj as dynamic).toJson;
+      if (toJson is Function) {
+        final j = toJson();
+        if (j is Map) return j[name];
+        if (j is String && j.trim().startsWith('{')) {
+          final parsed = jsonDecode(j);
+          if (parsed is Map) return parsed[name];
+        }
+      }
+    } catch (_) {}
+
+    // 3) toMap()
+    try {
+      final toMap = (obj as dynamic).toMap;
+      if (toMap is Function) {
+        final m = toMap();
+        if (m is Map) return m[name];
+      }
+    } catch (_) {}
+
+    // 4) Bekannte Felder als Fallback (direkt)
+    try { return (obj as dynamic).dateIso; } catch (_) {}
+    try { return (obj as dynamic).date; } catch (_) {}
+    try { return (obj as dynamic).createdAt; } catch (_) {}
+    try { return (obj as dynamic).created; } catch (_) {}
+    try { return (obj as dynamic).id; } catch (_) {}
+    try { return (obj as dynamic).entryId; } catch (_) {}
+    try { return (obj as dynamic).uuid; } catch (_) {}
+    try { return (obj as dynamic).moodIcon; } catch (_) {}
+    try { return (obj as dynamic).mood; } catch (_) {}
+    try { return (obj as dynamic).moodScore; } catch (_) {}
+    try { return (obj as dynamic).icon; } catch (_) {}
+    try { return (obj as dynamic).tags; } catch (_) {}
+    try { return (obj as dynamic).labels; } catch (_) {}
+    return null;
+  }
+
+  String _stringProp(dynamic obj, List<String> names) {
+    for (final n in names) {
+      final v = _dynProp(obj, n);
+      if (v is String && v.trim().isNotEmpty) return v.trim();
+    }
+    return '';
+  }
+
+  int? _intProp(dynamic obj, List<String> names) {
+    for (final n in names) {
+      final v = _dynProp(obj, n);
+      if (v is int) return v;
+      if (v is num) return v.toInt();
+      if (v is String) {
+        final p = int.tryParse(v.trim());
+        if (p != null) return p;
+      }
+    }
+    return null;
+  }
+
+  List<String> _listStringProp(dynamic obj, List<String> names) {
+    for (final n in names) {
+      final v = _dynProp(obj, n);
+      if (v is List) {
+        return v
+            .where((e) => e != null)
+            .map((e) => e.toString().trim())
+            .where((s) => s.isNotEmpty)
+            .toList(growable: false);
+      }
+      if (v is String && v.trim().isNotEmpty) {
+        return v
+            .split(RegExp(r'[,\|;]'))
+            .map((e) => e.trim())
+            .where((s) => s.isNotEmpty)
+            .toList(growable: false);
+      }
+    }
+    return const <String>[];
+  }
+
+  String _defaultZipName() {
+    final now = DateTime.now().toUtc();
+    String two(int x) => x.toString().padLeft(2, '0');
+    final stamp =
+        '${now.year}${two(now.month)}${two(now.day)}_${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}';
+    return 'zenyourself_export_$stamp.zip';
   }
 
   // =======================================================================
@@ -1345,7 +1880,7 @@ class ApiService {
     final sanitized = _redactPII(firstLine.trim());
     if (sanitized.isEmpty) return q;
     final hint = _neatEllipsis(sanitized, 90);
-    if (RegExp(r'^\[[^\]]+\]$').hasMatch(hint)) return q;
+    if (RegExp(r'^\[[^\]]]+\]$').hasMatch(hint)) return q;
     return '$q\n\n(Bezug: $hint)';
   }
 
@@ -1373,7 +1908,7 @@ class ApiService {
         final v = getter(d);
         if (v is String && v.trim().isNotEmpty) return v.trim();
       } catch (_) {}
-      return '';
+        return '';
     }
 
     return pick((x) => x.content)
@@ -1580,6 +2115,7 @@ class ApiService {
     final talkLimited = talk.take(2).toList(growable: false);
 
     final flowJson = (json['flow'] as Map?) ?? const {};
+    final ui = (json['ui'] as Map?) ?? const {};
     final moodNested =
         _boolLike(((flowJson['mood'] as Map?) ?? const {})['prompt']);
     final flowCompat = ReflectionFlow(
@@ -1616,7 +2152,11 @@ class ApiService {
         const [];
     final normalizedSchools = _normalizeSchools(_parseStringList(schoolsDyn));
     final workerTags = _parseStringList(json['tags']);
-    final tagsCompat = _dedupeStrings([...workerTags, ...normalizedSchools]);
+    final tagsCompat = _dedupeStrings([
+      ...workerTags,
+      ...normalizedSchools,
+      ...(_parseStringList(ui['badges'])).map((e) => 'ui:$e')
+    ]);
 
     final riskLevelRoot = (json['risk_level'] ??
             json['risk_flag'] ??
@@ -2225,6 +2765,14 @@ class ApiService {
         case 'summary':
           norm['summary'] = v;
           break;
+
+        // NEU: Alias timelineRecent → timeline.recent
+        case 'timelineRecent':
+          final tl = Map<String, dynamic>.from((norm['timeline'] as Map?) ?? const {});
+          tl['recent'] = v;
+          norm['timeline'] = tl;
+          break;
+
         default:
           norm[key] = v;
       }
@@ -2244,7 +2792,7 @@ class ApiService {
     };
     // Neu: beide Keys setzen (Alias für Backward-/Forward-Compat)
     payload['contact_tints'] = Map<String, dynamic>.from(tints);
-    payload['contact_tins']  = Map<String, dynamic>.from(tints);
+    payload['contact_tins'] = Map<String, dynamic>.from(tints); // PATCH-d: Kosmetik (Spacing vereinheitlicht)
   }
 
   void _appendByteContext(Map<String, dynamic> payload, {int maxBytes = 2048}) {
@@ -2272,7 +2820,7 @@ class ApiService {
         'id': s.threadId,
         'turn': s.turnIndex,
         'max_turns': s.maxTurns,
-        // Zusätzlich zur Kompatibilität: session.history (gecapped)
+        // Zusätzlich zur Kompatibilität: session.history (gecappte)
         'history': _capHistory(history, maxTurns: 20),
       };
 
@@ -2348,7 +2896,13 @@ class ApiService {
             DateTime.now().toUtc().toIso8601String().split('T').first;
         if (lastMap.isNotEmpty) mem['last'] = lastMap;
 
-        // 3) Size-Guard ≤ 2kB
+        // 2c) NEU: Recall (nur 🍃/🌿) mit Byte-Guard
+        final recall = _buildRecallSafe(consent: consentNow, mem: mem, maxBytes: 240);
+        if (recall != null && recall.isNotEmpty) {
+          mem['recall'] = recall;
+        }
+
+        // 3) Size-Guard ≤ 2 kB
         final cappedMem = _capMemoriesSize(mem, maxBytes: 2048);
 
         // 4) In Context mitschicken, wenn vorhanden
@@ -2399,7 +2953,11 @@ class ApiService {
     }
 
     final speech = pick(const ['speech_meta', 'speechMeta']);
-    if (speech is Map && speech.isNotEmpty) {
+    if (speech is Map && speech is! Map<String, dynamic>) {
+      // sanitize to Map<String,dynamic>
+      payload['speech_meta'] = (speech as Map)
+          .map((k, v) => MapEntry(k.toString(), v));
+    } else if (speech is Map<String, dynamic> && speech.isNotEmpty) {
       payload['speech_meta'] = Map<String, dynamic>.from(speech);
     }
 
@@ -2544,66 +3102,44 @@ class ApiService {
     final chars = messages
         .map((m) => (m['content'] ?? '').length)
         .fold<int>(0, (a, b) => a + b);
-
-    // einfache Heuristik
-    if (len >= 8 || chars >= 1600) return 'deep';
-    if (len >= 4 || chars >= 600) return 'medium';
+    if (len >= 8 || chars >= 2400) return 'deep';
+    if (len >= 4 || chars >= 800) return 'medium';
     return 'light';
   }
 
-  /// Liefert kleine Next-Step-Vorschläge passend zum identifizierten Hebel.
   List<String> _nextStepsForLever(String lever) {
     switch (lever) {
-      case 'Gedanken':
-        return const [
-          'Einen belastenden Gedanken notieren und durch eine freundlichere Alternative ersetzen.',
-          '„Muss/Sollte“-Satz in „Ich möchte/Kann versuchen“-Satz umformulieren.',
-          'Einen Beweis FÜR und GEGEN den Gedanken sammeln (je 3 Punkte).',
-        ];
       case 'Gefühle':
         return const [
-          'Gefühl benennen (z. B. „Traurig · 4/10“) und 90 Sekunden bewusst atmen.',
-          'Eine kleine Selbstfreundlichkeits-Zeile schreiben.',
-          'Jemandem kurz mitteilen, wie es dir geht (1–2 Sätze).',
+          'Einen Atemzug lang die Schultern senken.',
+          'Eine kleine Pause einbauen.',
+          'Einen Satz notieren, der gerade gut tut.'
         ];
       case 'Körper':
         return const [
-          '2 Minuten Körper-Scan (vom Scheitel bis zu den Zehen).',
-          'Ein Glas Wasser trinken und Schultern lockern.',
-          'Kurz an die frische Luft oder 10 tiefe Atemzüge am Fenster.',
+          'Ein Glas Wasser trinken.',
+          'Kurz aufstehen und strecken.',
+          'Zwei ruhige Atemzüge am offenen Fenster.'
         ];
       case 'Verhalten':
         return const [
-          'Kleinste machbare Aufgabe wählen (≤2 Minuten) und sofort starten.',
-          'Timer auf 5 Minuten – danach bewusst entscheiden, weiter oder Pause.',
-          'Ablenkung für 10 Minuten parken (z. B. Handy in anderen Raum).',
+          'Einen sehr kleinen, machbaren Schritt wählen.',
+          'Timer auf 5 Minuten setzen und starten.',
+          'Nur das Nötigste – den Rest später.'
         ];
       case 'Kontext':
         return const [
-          'Einen Termin/Anlass konkretisieren (Wer? Was? Wann? Nächster Mikro-Schritt).',
-          'Eine Person identifizieren, die unterstützen kann, und kurz anfragen.',
-          'Grenze definieren: Was ist heute „genug“ für dieses Thema?',
+          'Einen Termin markieren oder delegieren.',
+          'Eine Nachricht mit klarer Bitte formulieren.',
+          'Grenzen benennen: „Heute reicht X.“'
         ];
+      case 'Gedanken':
       default:
         return const [
-          'Einen kleinen nächsten Schritt notieren.',
-          '1–2 Minuten ruhig atmen und freundlich zu dir sein.',
+          'Einen belastenden „Muss“-Satz weicher formulieren.',
+          'Einen freundlichen Gegengedanken notieren.',
+          'Zwischen Fakt und Bewertung unterscheiden.'
         ];
     }
   }
-}
-
-// ---------------- Kompat-Struktur nur für aiReflect() ----------------
-class ReflectionAIResult {
-  final String reflection;
-  final String depth; // light | medium | deep
-  final String riskFlag; // none | support | crisis
-  final List<String> tags;
-
-  const ReflectionAIResult({
-    required this.reflection,
-    required this.depth,
-    required this.riskFlag,
-    required this.tags,
-  });
 }

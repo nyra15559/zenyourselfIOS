@@ -1,26 +1,10 @@
-// [BASELINE] lib/shared/zen_style.dart (Stand: 31.10.)
-// P2-S8.1-DONE — Rand-Fix (Vignette ohne schwarze Kanten)
-// lib/shared/zen_style.dart
-//
+// [MERGE SIGNAL] lib/shared/zen_style.dart — v8.6 (2025-11-09)
 // ZenYourself — Oxford-Zen Design System (Tokens · Themes · Backdrop · Glass)
-// v8.5 — 2025-10-31 · B1/G1/G2 Updates: Badge(Outline), SkillCard, IconSizes, Paddings,
-//        A11y-Kontrast + Tap-Min 44, Bullet-List (ruhige Mikrotypografie)
-//
 // -----------------------------------------------------------------------------
-// • Kompatible Alpha/Channel-Helper:
-//    – .withValue(alpha: x)  → Projekt-Standard (singular)
-//    – .withValues({alpha,red,green,blue}) → Shim für ältere SDKs (falls nicht vorhanden)
-// • Panda-/Reflection-Typografie (ruhig, konsistent) + Mikrotypografie-Widgets
-// • Chart-Farben, Radii/Spacing/Shadows
-// • Themes (Light/Dark), Backdrops & Glas-Primitives
-// • NEU: ZenIconSizes, ZenPaddings, ZenA11y, ZenBadge.outline, ZenSkillCard,
-//        ZenBulletList (Bullet-Spacing), Tap-Min 44 für IconButtons
-//
-// P2-S8.1 — RAND-FIX („schwarzer Rand“):
-// 1) Vignette als Ring-Gradient mit tileMode: TileMode.decal und
-//    [transparent, schwarz(alpha), transparent] → kein Schwarz am Rand.
-// 2) Presets: Vignette-Intensität reduziert (Start/Menu/Journal .06, Reflection .08).
-// -----------------------------------------------------------------------------
+// v8.6 Updates:
+// • Flutter M3 compile-fix: MaterialStateProperty/MaterialState statt WidgetState*
+// • Vignette-Ring mit tileMode: TileMode.decal (keine schwarzen Kanten)
+// • Keine Breaking Changes; API/Token-Namen bleiben stabil
 
 import 'dart:ui' as ui show ImageFilter;
 import 'package:flutter/material.dart';
@@ -477,19 +461,19 @@ ThemeData _buildTheme({required Brightness brightness}) {
   // Buttons
   final elevated = ElevatedButtonThemeData(
     style: ButtonStyle(
-      backgroundColor: WidgetStateProperty.resolveWith((states) {
-        if (states.contains(WidgetState.disabled)) return ZenColors.ctaDisabled;
-        if (states.contains(WidgetState.pressed)) return ZenColors.ctaPressed;
-        if (states.contains(WidgetState.hovered)) return ZenColors.ctaHover;
+      backgroundColor: MaterialStateProperty.resolveWith((states) {
+        if (states.contains(MaterialState.disabled)) return ZenColors.ctaDisabled;
+        if (states.contains(MaterialState.pressed)) return ZenColors.ctaPressed;
+        if (states.contains(MaterialState.hovered)) return ZenColors.ctaHover;
         return ZenColors.cta;
       }),
-      foregroundColor: const WidgetStatePropertyAll(Colors.white),
-      padding: const WidgetStatePropertyAll(
+      foregroundColor: const MaterialStatePropertyAll(Colors.white),
+      padding: const MaterialStatePropertyAll(
         EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       ),
-      minimumSize: const WidgetStatePropertyAll(Size(0, 52)),
-      elevation: const WidgetStatePropertyAll(1.5),
-      shape: const WidgetStatePropertyAll(
+      minimumSize: const MaterialStatePropertyAll(Size(0, 52)),
+      elevation: const MaterialStatePropertyAll(1.5),
+      shape: const MaterialStatePropertyAll(
         RoundedRectangleBorder(borderRadius: BorderRadius.all(ZenRadii.l)),
       ),
       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -604,39 +588,39 @@ ThemeData _buildTheme({required Brightness brightness}) {
 
   // Scrollbar
   final scrollbar = ScrollbarThemeData(
-    thickness: const WidgetStatePropertyAll(4.0),
+    thickness: const MaterialStatePropertyAll(4.0),
     radius: const Radius.circular(6),
-    thumbVisibility: const WidgetStatePropertyAll(false),
-    thumbColor: WidgetStatePropertyAll(
+    thumbVisibility: const MaterialStatePropertyAll(false),
+    thumbColor: MaterialStatePropertyAll(
       (isDark ? ZenColors.jade : ZenColors.ink).withValue(alpha: .25),
     ),
   );
 
   // Toggles
   final switchTheme = SwitchThemeData(
-    trackColor: WidgetStateProperty.resolveWith((s) {
-      if (s.contains(WidgetState.selected)) {
+    trackColor: MaterialStateProperty.resolveWith((s) {
+      if (s.contains(MaterialState.selected)) {
         return ZenColors.jade.withValue(alpha: .45);
       }
       return (isDark ? outlineDark : ZenColors.outline).withValue(alpha: .6);
     }),
-    thumbColor: WidgetStateProperty.resolveWith((s) {
-      if (s.contains(WidgetState.selected)) return ZenColors.jade;
+    thumbColor: MaterialStateProperty.resolveWith((s) {
+      if (s.contains(MaterialState.selected)) return ZenColors.jade;
       return isDark ? inkDark : ZenColors.surface;
     }),
   );
 
   final checkboxTheme = CheckboxThemeData(
-    fillColor: WidgetStateProperty.resolveWith((s) {
-      if (s.contains(WidgetState.selected)) return ZenColors.jade;
+    fillColor: MaterialStateProperty.resolveWith((s) {
+      if (s.contains(MaterialState.selected)) return ZenColors.jade;
       return isDark ? outlineDark : ZenColors.outline;
     }),
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
   );
 
   final radioTheme = RadioThemeData(
-    fillColor: WidgetStateProperty.resolveWith((s) {
-      if (s.contains(WidgetState.selected)) return ZenColors.jade;
+    fillColor: MaterialStateProperty.resolveWith((s) {
+      if (s.contains(MaterialState.selected)) return ZenColors.jade;
       return isDark ? outlineDark : ZenColors.outline;
     }),
   );
@@ -1028,7 +1012,7 @@ class ZenBackdrop extends StatelessWidget {
             gradient: RadialGradient(
               center: Alignment.center,
               radius: 1.15,
-              tileMode: TileMode.decal,
+              tileMode: TileMode.decal, // wichtig: keine schwarzen Kanten
               colors: [
                 Colors.transparent,
                 Colors.black.withValue(alpha: vignette),

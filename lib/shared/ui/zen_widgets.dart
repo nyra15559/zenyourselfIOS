@@ -1,7 +1,7 @@
-// [BASELINE] lib/shared/ui/zen_widgets.dart (Stand: 31.10.)
+// [BASELINE] lib/shared/ui/zen_widgets.dart (Stand: 2025-11-08)
 // lib/shared/ui/zen_widgets.dart
 //
-// Oxford–Zen UI Widgets (v6.96 · 2025-10-31)
+// Oxford–Zen UI Widgets (v6.97 · 2025-11-08)
 // ---------------------------------------------------------------------------
 // WICHTIG – Vereinheitlichung v6.1 (ohne neue Dateien):
 // • Glas: Blur σ=18, bg White @0.20, border White @0.22, Shadow (0,8,20,0.10), Radius 20
@@ -22,6 +22,12 @@
 //         Touch= Bouncing, Mouse/Trackpad-Drag aktiviert).
 // • S5.2: ZenAppScaffold wendet ZenScrollBehavior global auf Body an.
 // • Fix: alle .withValue(...) → .withValues(alpha: ...).
+//
+// v6.97 – Änderungen (Timeline Mini):
+// • NEU: ZenTimelineDot (kompakter Statuspunkt, optional Mood-Tint, selected-Ring).
+// • NEU: ZenTimelineRow (Datum + gekürztes Topic ≤24, optional Mood-Label/Color,
+//        A11y-Semantics: "<YYYY-MM-DD>: <Topic>, Stimmung: <Label>").
+// • Keine zusätzlichen Abhängigkeiten; kompatibel mit bestehendem Farbsystem.
 //
 // Abhängigkeiten (pubspec):
 //   lottie: ^3.3.1
@@ -1988,6 +1994,214 @@ class ZenMetricTile extends StatelessWidget {
             style: tt.bodySmall?.copyWith(color: Colors.black54),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// ======================================================================
+/// TIMELINE — kompakter Punkt & Zeile (Topic ≤ 24, Mood-Tint, A11y)
+/// ======================================================================
+
+/// Kleiner runder Punkt für Timeline/Listen.
+/// Wenn [selected] → Ring/Betonung, ansonsten gefüllter Punkt.
+/// [moodColor] übersteuert ggf. aus [moodLabel] abgeleitete Farbe.
+class ZenTimelineDot extends StatelessWidget {
+  final double size;
+  final bool selected;
+  final String? moodLabel; // z. B. 'Glücklich' | 'Ruhig' | 'Traurig' | ...
+  final Color? moodColor;
+
+  const ZenTimelineDot({
+    super.key,
+    this.size = 10,
+    this.selected = false,
+    this.moodLabel,
+    this.moodColor,
+  });
+
+  Color _tint() {
+    if (moodColor != null) return moodColor!;
+    switch ((moodLabel ?? '').toLowerCase()) {
+      case 'glücklich':
+      case 'gut':
+      case 'sehr gut':
+        return ZenColors.jade;
+      case 'ruhig':
+      case 'neutral':
+        return ZenColors.sage;
+      case 'traurig':
+        return Colors.blueAccent;
+      case 'gestresst':
+      case 'wütend':
+        return Colors.orangeAccent;
+      default:
+        return ZenColors.jadeMid;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = _tint();
+    final d = size.clamp(6.0, 16.0);
+
+    return Container(
+      width: d,
+      height: d,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: selected ? Colors.white : c.withValues(alpha: .95),
+        border: Border.all(
+          color: selected ? c : c.withValues(alpha: .85),
+          width: selected ? 2 : 1.2,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: c.withValues(alpha: .22),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Eine kompakte Zeile für die Timeline-Liste.
+/// Zeigt Datum + gekürztes Topic (≤24 Zeichen) + optional Mood-Indikator.
+/// A11y: Semantics-Label „<YYYY-MM-DD>: <Topic>, Stimmung: <Label>“.
+class ZenTimelineRow extends StatelessWidget {
+  final DateTime date;
+  final String topic;
+  final String? moodLabel;
+  final Color? moodColor;
+  final bool selected;
+  final VoidCallback? onTap;
+
+  /// Optional zusätzliche Widgets am Ende (z. B. Chevron, Menu)
+  final Widget? trailing;
+
+  const ZenTimelineRow({
+    super.key,
+    required this.date,
+    required this.topic,
+    this.moodLabel,
+    this.moodColor,
+    this.selected = false,
+    this.onTap,
+    this.trailing,
+  });
+
+  static String _two(int n) => n < 10 ? '0$n' : '$n';
+
+  static String _fmtDate(DateTime d) =>
+      '${d.year}-${_two(d.month)}-${_two(d.day)}';
+
+  static String _truncate(String s, {int max = 24}) {
+    final t = s.trim();
+    if (t.length <= max) return t;
+    // Vermeide zu hartes Abschneiden inmitten eines Grapheme-Clusters: simple safe cut
+    return t.substring(0, max).trimRight() + '…';
+    // (Für volle i18n-Grapheme-Unterstützung könnte später characters.dart genutzt werden.)
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dateStr = _fmtDate(date);
+    final shortTopic = _truncate(topic, max: 24);
+    final a11y = moodLabel == null || moodLabel!.trim().isEmpty
+        ? '$dateStr: $shortTopic'
+        : '$dateStr: $shortTopic, Stimmung: ${moodLabel!.trim()}';
+
+    final basePad = const EdgeInsets.symmetric(vertical: 10, horizontal: 12);
+    final bg = selected
+        ? ZenColors.sage.withValues(alpha: .10)
+        : Colors.transparent;
+    final borderCol = ZenColors.outline.withValues(alpha: .50);
+
+    final row = Row(
+      children: [
+        ZenTimelineDot(
+          size: selected ? 12 : 10,
+          selected: selected,
+          moodLabel: moodLabel,
+          moodColor: moodColor,
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: ExcludeSemantics(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Datum
+                Text(
+                  dateStr,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: ZenColors.inkStrong.withValues(alpha: .55),
+                        height: 1.1,
+                      ),
+                ),
+                const SizedBox(height: 2),
+                // Topic (gekürzt)
+                Text(
+                  shortTopic,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: ZenColors.inkStrong,
+                      ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (moodLabel != null && moodLabel!.trim().isNotEmpty) ...[
+          const SizedBox(width: 8),
+          ExcludeSemantics(
+            child: Text(
+              moodLabel!.trim(),
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: ZenColors.jadeMid,
+                    fontWeight: FontWeight.w700,
+                  ),
+            ),
+          ),
+        ],
+        if (trailing != null) ...[
+          const SizedBox(width: 8),
+          trailing!,
+        ],
+      ],
+    );
+
+    final content = Semantics(
+      button: onTap != null,
+      selected: selected,
+      label: a11y,
+      child: Padding(
+        padding: basePad,
+        child: row,
+      ),
+    );
+
+    final inner = Container(
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: const BorderRadius.all(ZenRadii.m),
+        border: Border.all(color: borderCol, width: 1),
+      ),
+      child: content,
+    );
+
+    if (onTap == null) return inner;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: const BorderRadius.all(ZenRadii.m),
+        onTap: onTap,
+        child: inner,
       ),
     );
   }

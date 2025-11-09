@@ -1,23 +1,15 @@
-// [BASELINE] lib/services/guidance/dtos.dart (Stand: 2025-11-07, v7.1.2+compat.1)
+// [PATCHED] lib/services/guidance/dtos.dart (Stand: 2025-11-09, v7.1.6+insight.2+timeline.1)
 // DTOs & Value-Types für Guidance-Service (standalone, ohne Api-Abhängigkeit)
 // ────────────────────────────────────────────────────────────────────────────
-// • Keine externen Abhängigkeiten
-// • Defensive Defaults (tolerante fromMaybe-Factories)
-// • Snake_case-Shims für UI-/API-Kompatibilität
-// • V7 A1/E1/E2: Neue Typen (SpeechMeta, SkillCard, SkillBlock, Facets),
-//   Enums (ToneType, Stage), Aliasse & Aufräumen
-// • Rückwärtskompatibel zu v6.x: vorhandene Felder bleiben les-/serialisierbar
-// • S4.1: smalltalk_reply als eigenes Feld (lesen/schreiben)
-// • P3-S11.1-DONE: Persona-Sanitizer – Panda-Welt ohne See (nur Bambus/Licht/Laternen/Tee)
-// • NEU (2025-11-04):
-//   – HistoryTurn {role, text}
-//   – NextTurnFullRequest {sessionId, history[], userText, context.memories?, meta.flags.client_memory?}
-//   – Response-Felder verifiziert: answer_helpers, flow.mood_prompt, risk_level, closure{...}, talk[]
-// • UPDATE (2025-11-07, v7.1.2+compat.1):
-//   – Compat: NextTurnFullRequest.contextMemories erlaubt Map<String,dynamic> ODER List<dynamic>;
-//     toJson() serialisiert beides nach {context:{memories:…}}.
-//   – SpeechMeta.fromMaybe: leere topic/safety → null statt "" (sauberere Serialisierung).
+// MERGE SIGNAL — v7.1.6 (insight.2+timeline.1)
+// • Compile-Fix: Keine static Member in Extensions. Parser als Top-Level-Funktionen:
+//   parseToneType(), parseStage(), parseActionType(). Aufrufer angepasst.
+// • Sonst unverändert: Snake/camel-Aliasse, TimelineMarker & InsightFact, Persona-Sanitizer.
+//
+// Rückwärtskompatibel zu v6.x & v7.1.x — keine Breaking Changes.
 // ────────────────────────────────────────────────────────────────────────────
+
+library guidance_dtos;
 
 // ────────────────────────────────────────────────────────────────────────────
 // Enums – Tone & Stage
@@ -37,19 +29,19 @@ extension ToneTypeWire on ToneType {
       case ToneType.unknown: return 'unknown';
     }
   }
-  static ToneType parse(dynamic v) {
-    final s = v?.toString().toLowerCase().trim() ?? '';
-    switch (s) {
-      case 'neutral': return ToneType.neutral;
-      case 'calm': return ToneType.calm;
-      case 'hope': return ToneType.hope;
-      case 'gentle': return ToneType.gentle;
-      case 'insight': return ToneType.insight;
-      case 'ritual': return ToneType.ritual;
-      case 'light': return ToneType.light;
-      case 'crisis': return ToneType.crisis;
-      default: return ToneType.unknown;
-    }
+}
+ToneType parseToneType(dynamic v) {
+  final s = v?.toString().toLowerCase().trim() ?? '';
+  switch (s) {
+    case 'neutral': return ToneType.neutral;
+    case 'calm':    return ToneType.calm;
+    case 'hope':    return ToneType.hope;
+    case 'gentle':  return ToneType.gentle;
+    case 'insight': return ToneType.insight;
+    case 'ritual':  return ToneType.ritual;
+    case 'light':   return ToneType.light;
+    case 'crisis':  return ToneType.crisis;
+    default:        return ToneType.unknown;
   }
 }
 
@@ -67,21 +59,21 @@ extension StageWire on Stage {
       case Stage.unknown:     return 'unknown';
     }
   }
-  static Stage parse(dynamic v) {
-    final s = v?.toString().toLowerCase().trim() ?? '';
-    switch (s) {
-      case 'intro': return Stage.intro;
-      case 'clarify': return Stage.clarify;
-      case 'hypothesize':
-      case 'hypothesis': return Stage.hypothesize;
-      case 'deepen': return Stage.deepen;
-      case 'bridge': return Stage.bridge;
-      case 'closure':
-      case 'close': return Stage.closure;
-      case 'redirect':
-      case 'topic_shift': return Stage.redirect;
-      default: return Stage.unknown;
-    }
+}
+Stage parseStage(dynamic v) {
+  final s = v?.toString().toLowerCase().trim() ?? '';
+  switch (s) {
+    case 'intro':        return Stage.intro;
+    case 'clarify':      return Stage.clarify;
+    case 'hypothesize':
+    case 'hypothesis':   return Stage.hypothesize;
+    case 'deepen':       return Stage.deepen;
+    case 'bridge':       return Stage.bridge;
+    case 'closure':
+    case 'close':        return Stage.closure;
+    case 'redirect':
+    case 'topic_shift':  return Stage.redirect;
+    default:             return Stage.unknown;
   }
 }
 
@@ -115,6 +107,7 @@ class HistoryTurn {
     return null;
   }
 }
+
 
 // ────────────────────────────────────────────────────────────────────────────
 /* V7.1 (+compat): NextTurnFullRequest — Request-Envelope für /next_turn_full */
@@ -179,6 +172,7 @@ class NextTurnFullRequest {
   }
 }
 
+
 // ────────────────────────────────────────────────────────────────────────────
 // V7 A1: SpeechMeta – Meta-Infos über Tonalität, Thema, Safety, Vertrauen
 // ────────────────────────────────────────────────────────────────────────────
@@ -215,13 +209,14 @@ class SpeechMeta {
       return s.isEmpty ? null : s;
     }
     return SpeechMeta(
-      tone: ToneTypeWire.parse(m['tone']),
+      tone: parseToneType(m['tone']),
       topic: nz(m['topic']),
       safety: nz(m['safety']),
       confidence: asDouble(m['confidence']),
     );
   }
 }
+
 
 // ────────────────────────────────────────────────────────────────────────────
 // V7 A1: Facets – Facet-Queue & aktives Facet
@@ -253,6 +248,7 @@ class Facets {
     return null;
   }
 }
+
 
 // ────────────────────────────────────────────────────────────────────────────
 // V7 A1: SkillCard & SkillBlock – Kartenbasierte Skills mit Stage
@@ -286,7 +282,7 @@ class SkillCard {
     final id = (m['id'] ?? m['key'] ?? '').toString().trim();
     final title = (m['title'] ?? m['headline'] ?? '').toString().trim();
     final body = (m['body'] ?? m['text'] ?? '').toString().trim();
-    final stage = StageWire.parse(m['stage']);
+    final stage = parseStage(m['stage']);
     final helpers = _orderedDedup(_strings([m['helpers'], m['chips'], m['answers']])).take(3).toList();
     if (id.isEmpty && title.isEmpty && body.isEmpty) return null;
     return SkillCard(
@@ -316,7 +312,7 @@ class SkillBlock {
     if (v is! Map) return null;
     final m = Map<String, dynamic>.from(v);
     final kind = (m['kind'] ?? m['type'] ?? 'skill').toString().trim();
-    final stage = StageWire.parse(m['stage']);
+    final stage = parseStage(m['stage']);
     final listDyn = (m['cards'] is List) ? (m['cards'] as List) : (m['card'] is Map ? [m['card']] : const []);
     final cards = <SkillCard>[];
     for (final e in listDyn) {
@@ -326,6 +322,7 @@ class SkillBlock {
     return SkillBlock(kind: kind.ifEmpty(() => 'skill'), stage: stage, cards: cards);
   }
 }
+
 
 // ────────────────────────────────────────────────────────────────────────────
 // Legacy/Analysis (beibehalten für Backcompat)
@@ -346,6 +343,7 @@ class AnalyzeResult {
   }
 }
 
+
 // ────────────────────────────────────────────────────────────────────────────
 // ActionType & UserAction (mit Enum-Backcompat)
 // ────────────────────────────────────────────────────────────────────────────
@@ -362,23 +360,23 @@ extension ActionTypeWire on ActionType {
       case ActionType.unknown:        return 'unknown';
     }
   }
-  static ActionType parse(dynamic v) {
-    final s = v?.toString().toLowerCase().trim() ?? '';
-    switch (s) {
-      case 'reflection_link':
-      case 'reflectionlink': return ActionType.reflectionLink;
-      case 'journal_link':
-      case 'journallink':    return ActionType.journalLink;
-      case 'story_link':
-      case 'storylink':      return ActionType.storyLink;
-      case 'save':           return ActionType.save;
-      case 'skip':           return ActionType.skip;
-      case 'change_topic':
-      case 'change-topic':
-      case 'changetopic':
-      case 'change':         return ActionType.changeTopic;
-      default:               return ActionType.unknown;
-    }
+}
+ActionType parseActionType(dynamic v) {
+  final s = v?.toString().toLowerCase().trim() ?? '';
+  switch (s) {
+    case 'reflection_link':
+    case 'reflectionlink': return ActionType.reflectionLink;
+    case 'journal_link':
+    case 'journallink':    return ActionType.journalLink;
+    case 'story_link':
+    case 'storylink':      return ActionType.storyLink;
+    case 'save':           return ActionType.save;
+    case 'skip':           return ActionType.skip;
+    case 'change_topic':
+    case 'change-topic':
+    case 'changetopic':
+    case 'change':         return ActionType.changeTopic;
+    default:               return ActionType.unknown;
   }
 }
 
@@ -400,7 +398,7 @@ class UserAction {
     final m = Map<String, dynamic>.from(v);
     final rawType = (m['type'] ?? m['action'] ?? m['action_type'] ?? '').toString().trim();
     if (rawType.isEmpty) return null;
-    final enumType = ActionTypeWire.parse(m['action_type'] ?? m['type'] ?? m['action']);
+    final enumType = parseActionType(m['action_type'] ?? m['type'] ?? m['action']);
     final note = (m['note'] ?? m['text'] ?? m['message'])?.toString();
     return UserAction(
       type: rawType,
@@ -409,6 +407,7 @@ class UserAction {
     );
   }
 }
+
 
 // ────────────────────────────────────────────────────────────────────────────
 // TurnAnalysis & ClosureData
@@ -496,6 +495,7 @@ class ClosureData {
   }
 }
 
+
 // ────────────────────────────────────────────────────────────────────────────
 // ReflectionTurn – Kernantwort inkl. V7-Feldern
 // ────────────────────────────────────────────────────────────────────────────
@@ -523,6 +523,9 @@ class ReflectionTurn {
 
   final bool? metaClientMemory;
   final List<dynamic> contextMemories;
+
+  // ── NEU (v7.1.3): understanding.tags separat verfügbar
+  final List<String> understandingTags;
 
   // ── V7 A1: neue Felder
   final SpeechMeta? speechMeta;
@@ -555,6 +558,8 @@ class ReflectionTurn {
     this.understandingTopicShift,
     this.metaClientMemory,
     this.contextMemories = const <dynamic>[],
+    // v7.1.3
+    this.understandingTags = const <String>[],
     // V7
     this.speechMeta,
     this.skill,
@@ -614,8 +619,15 @@ class ReflectionTurn {
       // S4.1
       if ((smalltalkReply ?? '').trim().isNotEmpty) 'smalltalk_reply': smalltalkReply!.trim(),
     };
-    if ((understandingTopicShift ?? '').trim().isNotEmpty) {
-      map['understanding'] = {'topic_shift': understandingTopicShift!.trim()};
+
+    // understanding.{topic_shift,tags} zurückschreiben, wenn vorhanden
+    final hasShift = (understandingTopicShift ?? '').trim().isNotEmpty;
+    final hasUTags = understandingTags.isNotEmpty;
+    if (hasShift || hasUTags) {
+      final u = <String, dynamic>{};
+      if (hasShift) u['topic_shift'] = understandingTopicShift!.trim();
+      if (hasUTags) u['tags'] = understandingTags;
+      map['understanding'] = u;
     }
     return map;
   }
@@ -628,6 +640,7 @@ class ReflectionTurn {
     final primary = asMap(m['primary']);
     final flowMap = asMap(m['flow']);
     final uiMap   = asMap(m['ui']);
+    final understandingMap = asMap(m['understanding']) ?? const <String, dynamic>{};
 
     final outputText = (m['output_text'] ?? m['outputText'] ?? m['question'] ?? m['primary_question']
           ?? _pickString(primary, const ['output_text', 'text', 'question'])
@@ -653,12 +666,15 @@ class ReflectionTurn {
     final smalltalk = parseSmalltalk();
     final smalltalkSan = (smalltalk == null) ? null : _sanitizePersona(smalltalk);
 
-    // talk ohne Doppelung aus smalltalk_reply
+    // talk ohne Doppelung aus smalltalk_reply, Persona-Sanitizer anwenden
     final talk = _sanitizePersonaList(_strings([
       m['talk'], primary?['talk'], flowMap?['talk'],
     ]).where((t) => t.trim().isNotEmpty).toList());
 
-    final tags = _strings([m['tags'], primary?['tags'], flowMap?['tags']]);
+    // understanding.tags optional dazumergen (Quelle für Marker)
+    final uTags = _orderedDedup(_strings([understandingMap['tags']]));
+    final tagsTop = _strings([m['tags'], primary?['tags'], flowMap?['tags']]);
+    final tags = _orderedDedup(<String>[...tagsTop, ...uTags]);
 
     final helpersRaw = _strings([
       m['answer_helpers'], m['answer_scaffolds'], m['answer_templates'],
@@ -709,7 +725,7 @@ class ReflectionTurn {
     );
 
     String? understandingTopicShift() {
-      final u = asMap(m['understanding']) ?? const <String, dynamic>{};
+      final u = understandingMap;
       final s = (u['topic_shift'] ?? u['topicShift'] ?? u['shift'])?.toString().trim();
       return (s == null || s.isEmpty) ? null : s;
     }
@@ -762,6 +778,8 @@ class ReflectionTurn {
       understandingTopicShift: understandingTopicShift(),
       metaClientMemory: metaClientMemory(),
       contextMemories: cmem,
+      // v7.1.3
+      understandingTags: uTags,
       // V7
       speechMeta: speechMeta,
       skill: skill,
@@ -775,8 +793,7 @@ class ReflectionTurn {
   }
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// ReflectionFlow / Session
+
 // ────────────────────────────────────────────────────────────────────────────
 class ReflectionFlow {
   final bool recommendEnd;
@@ -886,6 +903,7 @@ class ReflectionSession {
     return ReflectionSession(threadId: id, turnIndex: turn, maxTurns: max);
   }
 }
+
 
 // ────────────────────────────────────────────────────────────────────────────
 // Weitere Value-Types (unverändert)
@@ -1003,12 +1021,14 @@ class MiniChallenge {
   }
 }
 
+
 // ────────────────────────────────────────────────────────────────────────────
 // Kleine String-Extension
 // ────────────────────────────────────────────────────────────────────────────
 extension IfEmptyX on String {
   String ifEmpty(String Function() alt) => isEmpty ? alt() : this;
 }
+
 
 // ────────────────────────────────────────────────────────────────────────────
 // Interne, wiederverwendbare Parse-Helfer (keine Abhängigkeiten)
@@ -1070,6 +1090,7 @@ bool? _parseBoolOrNull(dynamic v) {
   return null;
 }
 
+
 // ────────────────────────────────────────────────────────────────────────────
 // P3-S11.1 — Persona-Sanitizer: Panda-Welt ohne See (nur Bambus/Licht/Laternen/Tee)
 // Greift ausschließlich bei Panda-Persona-Texten (smalltalk_reply, talk).
@@ -1097,3 +1118,234 @@ String _sanitizePersona(String s) {
 
 List<String> _sanitizePersonaList(List<String> v) =>
     v.map(_sanitizePersona).where((e) => e.trim().isNotEmpty).toList();
+
+
+// ────────────────────────────────────────────────────────────────────────────
+/* OPTIONAL: TimelineMarker (Mini-DTO) — v7.1.4+timeline.1 (2025-11-08)
+ * Zweck: Einheitliche, leichte Struktur für Timeline-Punkte (Client-seitig).
+ * Felder sind defensiv & tolerant (siehe fromMaybe). */
+// ────────────────────────────────────────────────────────────────────────────
+class TimelineMarker {
+  /// ISO-Datum (YYYY-MM-DD). Falls in fromMaybe ein ISO-Datetime reinkommt,
+  /// wird auf YYYY-MM-DD gekürzt.
+  final String dateIso;
+
+  /// Kurzer Topic/Text (UI kürzt bei Bedarf; Hilfsfunktion topicShort()).
+  final String? topic;
+
+  /// Optionales Stimmungsetikett (z. B. „Ruhig“, „Gestresst“).
+  final String? moodLabel;
+
+  /// Freie Tags (z. B. ['reflection','name','sleep']).
+  final List<String> tags;
+
+  /// Quelle (frei, z. B. 'reflection' | 'journal' | 'story').
+  final String? source;
+
+  /// Einzeilige Zusammenfassung (optional).
+  final String? summary;
+
+  const TimelineMarker({
+    required this.dateIso,
+    this.topic,
+    this.moodLabel,
+    this.tags = const <String>[],
+    this.source,
+    this.summary,
+  });
+
+  /// JSON-Serialisierung (leichtgewichtig)
+  Map<String, dynamic> toJson() => {
+        'date': dateIso,
+        if ((topic ?? '').trim().isNotEmpty) 'topic': topic!.trim(),
+        if ((moodLabel ?? '').trim().isNotEmpty) 'mood_label': moodLabel!.trim(),
+        if (tags.isNotEmpty) 'tags': tags,
+        if ((source ?? '').trim().isNotEmpty) 'source': source!.trim(),
+        if ((summary ?? '').trim().isNotEmpty) 'summary': summary!.trim(),
+      };
+
+  /// Tolerantes Parsing:
+  /// akzeptiert {date|dateIso|ts|timestamp}, kürzt ISO-Datetime auf YYYY-MM-DD,
+  /// liest topic/title/text, mood_label/mood, tags/list, source, summary.
+  static TimelineMarker? fromMaybe(dynamic v) {
+    if (v is! Map) return null;
+    final m = Map<String, dynamic>.from(v);
+
+    String _pickDate(dynamic x) {
+      final raw = (x ?? '').toString().trim();
+      if (raw.isEmpty) return '';
+      // Kürzen, falls ISO-Datetime übergeben wurde (YYYY-MM-DDTHH:mm:ssZ)
+      if (raw.length >= 10 && RegExp(r'^\d{4}-\d{2}-\d{2}').hasMatch(raw)) {
+        return raw.substring(0, 10);
+      }
+      return raw;
+    }
+
+    String _getDate() {
+      final cands = [
+        m['date'],
+        m['dateIso'],
+        m['date_iso'],
+        m['ts'],
+        m['timestamp'],
+      ];
+      for (final c in cands) {
+        final d = _pickDate(c);
+        if (d.isNotEmpty) return d;
+      }
+      return '';
+    }
+
+    String? _nz(dynamic x) {
+      final s = x?.toString().trim() ?? '';
+      return s.isEmpty ? null : s;
+    }
+
+    final dateIso = _getDate();
+    if (dateIso.isEmpty) return null;
+
+    final topic = _nz(m['topic'] ?? m['title'] ?? m['text']);
+    final mood = _nz(m['mood_label'] ?? m['mood']);
+    final source = _nz(m['source']);
+    final summary = _nz(m['summary'] ?? m['one_liner'] ?? m['caption']);
+
+    final tags = _orderedDedup(_strings([m['tags'], m['labels'], m['list']]));
+
+    return TimelineMarker(
+      dateIso: dateIso,
+      topic: topic,
+      moodLabel: mood,
+      tags: tags,
+      source: source,
+      summary: summary,
+    );
+  }
+
+  /// UI-Helfer: Thema kompakt (Default 24 Zeichen, Ellipse)
+  String topicShort([int max = 24]) {
+    final t = (topic ?? '').trim();
+    if (t.length <= max) return t;
+    if (max <= 1) return '…';
+    return '${t.substring(0, max - 1)}…';
+  }
+
+  /// A11y-Label für Screen-Reader („<Datum>: <Topic>, Stimmung: <Label>“)
+  String a11yLabel() {
+    final t = (topic ?? 'Notiz').trim();
+    final m = (moodLabel ?? '').trim();
+    return m.isEmpty ? '$dateIso: $t' : '$dateIso: $t, Stimmung: $m';
+  }
+}
+
+
+// ────────────────────────────────────────────────────────────────────────────
+/* OPTIONAL: InsightFact (Mini-DTO) — v7.1.4+insight.1 (2025-11-08)
+ * Zweck: Einheitliche, leichte Struktur für Aha-Fakten („Atomic Facts“).
+ * Felder (tolerant): topic, fact/value/text, since (YYYY-MM-DD), confidence (0..1),
+ * tags[], source?, id?  – rein clientseitig für UI/Storage/Exports; Server optional. */
+// ────────────────────────────────────────────────────────────────────────────
+class InsightFact {
+  /// Stabiles (optional) – wenn nicht vorhanden, kann UI einen Hash bilden.
+  final String? id;
+
+  /// Thema/Kategorie des Fakts (z. B. „Schlaf“, „Rücken“, „Wasser tut gut“).
+  final String? topic;
+
+  /// Der eigentliche Aha-Fakt – kurze, klare Formulierung.
+  final String fact;
+
+  /// ISO-Datum (YYYY-MM-DD), wann erkannt/gespeichert.
+  final String? since;
+
+  /// Vertrauensgrad 0..1 (optional).
+  final double? confidence;
+
+  /// Freie Tags (z. B. ['insight','selfcare']).
+  final List<String> tags;
+
+  /// Quelle/Herkunft (frei, z. B. 'reflection' | 'journal' | 'import').
+  final String? source;
+
+  const InsightFact({
+    this.id,
+    this.topic,
+    required this.fact,
+    this.since,
+    this.confidence,
+    this.tags = const <String>[],
+    this.source,
+  });
+
+  Map<String, dynamic> toJson() => {
+        if ((id ?? '').trim().isNotEmpty) 'id': id!.trim(),
+        if ((topic ?? '').trim().isNotEmpty) 'topic': topic!.trim(),
+        'fact': fact,
+        if ((since ?? '').trim().isNotEmpty) 'since': since!.trim(),
+        if (confidence != null) 'confidence': confidence,
+        if (tags.isNotEmpty) 'tags': tags,
+        if ((source ?? '').trim().isNotEmpty) 'source': source!.trim(),
+      };
+
+  static InsightFact? fromMaybe(dynamic v) {
+    if (v is! Map) return null;
+    final m = Map<String, dynamic>.from(v);
+
+    String _isoDate(dynamic x) {
+      final raw = (x ?? '').toString().trim();
+      if (raw.isEmpty) return '';
+      // Falls ISO-Datetime → auf YYYY-MM-DD kürzen
+      if (raw.length >= 10 && RegExp(r'^\d{4}-\d{2}-\d{2}').hasMatch(raw)) {
+        return raw.substring(0, 10);
+      }
+      // einfache Fallbacks (z. B. '2025/11/08' oder '08.11.2025' nicht konvertieren)
+      return raw;
+    }
+
+    double? _asDouble(dynamic x) {
+      if (x is num) return x.toDouble();
+      if (x is String) return double.tryParse(x.trim());
+      return null;
+    }
+
+    String? _nz(dynamic x) {
+      final s = x?.toString().trim() ?? '';
+      return s.isEmpty ? null : s;
+    }
+
+    final id = _nz(m['id'] ?? m['key'] ?? m['uid']);
+    final topic = _nz(m['topic'] ?? m['category']);
+    final fact = _nz(m['fact'] ?? m['value'] ?? m['text'] ?? m['statement']) ?? '';
+    final since = _nz(_isoDate(m['since'] ?? m['date'] ?? m['dateIso'] ?? m['date_iso'] ?? m['ts'] ?? m['timestamp']));
+    final confidence = _asDouble(m['confidence'] ?? m['score']);
+    final source = _nz(m['source'] ?? m['origin']);
+    final tags = _orderedDedup(_strings([m['tags'], m['labels']]));
+
+    if (fact.isEmpty) return null;
+
+    return InsightFact(
+      id: id,
+      topic: topic,
+      fact: fact,
+      since: (since?.isEmpty ?? true) ? null : since,
+      confidence: confidence,
+      tags: tags,
+      source: source,
+    );
+  }
+
+  /// Hilfsparser für Listen- oder Einzelstrukturen.
+  static List<InsightFact> listFromMaybe(dynamic v) {
+    final out = <InsightFact>[];
+    if (v == null) return out;
+    if (v is List) {
+      for (final e in v) {
+        final f = InsightFact.fromMaybe(e);
+        if (f != null) out.add(f);
+      }
+      return out;
+    }
+    final single = InsightFact.fromMaybe(v);
+    if (single != null) out.add(single);
+    return out;
+  }
+}

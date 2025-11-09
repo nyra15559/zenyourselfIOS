@@ -1,21 +1,32 @@
-// lib/features/story/story_screen.dart
+// [MERGE SIGNAL] lib/features/story/story_screen.dart (Stand: 2025-11-08, v6.7.3)
+// Kutsche 6 — Story (Bedeutung & Narrativ)
+// --------------------------------------------------------------------------------
+// v6.7.3 Patchnotes
+// • Compile-Safety: GuidanceService.story(...) ohne unbekannten named param
+//   (useServerIfAvailable) aufgerufen.
+// • Compile-Safety: Für plain Color (Colors.black) .withOpacity(...) statt .withValue(...).
+// • Sonst unverändert: Server→Lokal-Fallback, Progress-Gate (≥5 Reflexionen),
+//   Journal-Save, TTS, Kopieren, TXT/PDF-Export, defensive Guards, Haptik.
+// • Oxford-Zen UI, keine Therapieaussagen.
 //
-// StoryScreen — Zen v6.54 (Oxford polish · StartScreen-Matching · Top-Anchor)
-// Update: 2025-09-15
-// -----------------------------------------------------------------------------
-// • Hero-Panda wie im StartScreen (160/200 px), identische Typo-Abstände.
-// • NEU: Top-Anchor statt Zentrierung → Panda steht im oberen Drittel
-//   (viewport-abhängig: ~12% Höhe, mit Min/Max-Klammern).
-// • Anordnung: Panda → Titel → Tagline → Gate-Karte (wie StartScreen).
-// • Keine Breaking Changes (Public API unverändert).
-// • A11y/Robustheit: Semantics, mounted-Guards, defensive errorBuilder.
-//
+// Kompatibilität:
+// – GuidanceService.story(...) → StoryResult { id, title, body } (services/guidance/dtos.dart)
+// – JournalEntriesProvider.addStory(...)
+// – LocalStorageService (init/loadSetting/saveSetting)
+// – TTS: services/tts_service.dart (TtsService.instance)
+// – Zen UI: ZenBackdrop, ZenAppBar, ZenGlassCard, ZenToast, Tokens (zs/zw)
+// – Memory: core/memory/memory_service.dart → (dyn).buildContextMemories?(), loadGreetingName?()
 
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
+
+// PDF (on-device)
+import 'package:pdf/widgets.dart' as pw;
+import 'package:pdf/pdf.dart';
+
 import '../../services/guidance/dtos.dart';
 
 // Zen-Design (Tokens)
@@ -31,6 +42,7 @@ import '../../models/journal_entry.dart' as jm;
 // Services
 import '../../services/guidance_service.dart';
 import '../../services/local_storage.dart';
+import '../../core/memory/memory_service.dart';
 
 // TTS
 import '../../services/tts_service.dart' as tts;
@@ -38,13 +50,15 @@ import '../../services/tts_service.dart' as tts;
 // Für CTA "Reflektieren"
 import '../reflection/reflection_screen.dart';
 
+// Lokal-Builder (Fallback)
+import 'story_builder.dart' show StoryBuilder;
+
 const String kStoryPandaAsset = 'assets/story_panda_final.png';
 
 // Feintuning für die vertikale Verankerung des Heros.
-// Passe factor/min/max bei Bedarf minimal an.
-const double _kHeroTopAnchorFactor = 0.01; // 12% der Höhe
-const double _kHeroTopAnchorMin = -10; // min. 36 px
-const double _kHeroTopAnchorMax = 60; // max. 120 px
+const double _kHeroTopAnchorFactor = 0.12;
+const double _kHeroTopAnchorMin = 36;
+const double _kHeroTopAnchorMax = 120;
 
 class StoryScreen extends StatefulWidget {
   const StoryScreen({super.key});
@@ -176,16 +190,31 @@ class _StoryScreenState extends State<StoryScreen>
 
       await _feelDelay(420);
 
-      final story = await GuidanceService.instance.story(
-        entryIds: recent.map((e) => e.id).toList(),
-        topics: topics,
-        useServerIfAvailable: true,
-      );
+      // 1) Server-basiert (wenn verfügbar)
+      StoryResult? story;
+      try {
+        story = await GuidanceService.instance.story(
+          entryIds: recent.map((e) => e.id).toList(),
+          topics: topics,
+        );
+      } catch (_) {
+        // still – wir fallen lokal zurück
+      }
+
+      // 2) Lokaler Fallback mit StoryBuilder + MemoryService (Kutschen 1–5)
+      final bool needsFallback = story == null ||
+          ((story.title.trim().isEmpty) && (story.body.trim().isEmpty));
+
+      if (needsFallback) {
+        final memories = await _loadCuratedMemoriesOrMinimal(prov, topics);
+        final local = StoryBuilder.buildFromMemories(memories, locale: 'de');
+        story = local;
+      }
 
       if (!mounted) return;
 
       final ok =
-          ((story.title.trim().isNotEmpty) || (story.body.trim().isNotEmpty));
+          ((story!.title.trim().isNotEmpty) || (story.body.trim().isNotEmpty));
       if (!ok) {
         throw Exception('Story-Service ohne Inhalt geantwortet.');
       }
@@ -195,7 +224,8 @@ class _StoryScreenState extends State<StoryScreen>
         _loading = false;
       });
 
-      zw.ZenToast.show(context, 'Geschichte erstellt');
+      zw.ZenToast.show(context,
+          needsFallback ? 'Lokale Kurzgeschichte erstellt' : 'Geschichte erstellt');
       HapticFeedback.selectionClick();
     } catch (e) {
       if (!mounted) return;
@@ -204,6 +234,39 @@ class _StoryScreenState extends State<StoryScreen>
         _error = _friendlyError(e);
       });
     }
+  }
+
+  /// Versucht zuerst kuratierte Memories aus dem MemoryService zu laden,
+  /// fällt sonst auf ein minimales Memory-Objekt zurück (Identity/Timeline/Themen).
+  Future<Map<String, dynamic>> _loadCuratedMemoriesOrMinimal(
+    JournalEntriesProvider prov,
+    List<String> topics,
+  ) async {
+    // a) Kuratiert vom MemoryService (wenn vorhanden)
+    try {
+      final dyn = MemoryService.instance as dynamic;
+      final mm = await (dyn.buildContextMemories?.call());
+      if (mm is Map<String, dynamic>) return mm;
+    } catch (_) {
+      // still
+    }
+
+    // b) Fallback minimal: Identity (freundlicher Name), Timeline (aus Topics)
+    String? name;
+    try {
+      final dyn = MemoryService.instance as dynamic;
+      name = await (dyn.loadGreetingName?.call());
+    } catch (_) {}
+
+    return <String, dynamic>{
+      'identity': {
+        if ((name ?? '').trim().isNotEmpty) 'name': name!.trim(),
+      },
+      'timeline': {
+        'items': topics.map((t) => {'topic': t}).toList(),
+      },
+      // mood/insights/recall fehlen bewusst – StoryBuilder ist tolerant.
+    };
   }
 
   Future<List<String>> _deriveTopics(List<jm.JournalEntry> entries) async {
@@ -677,7 +740,7 @@ class _CapsuleProgress extends StatelessWidget {
                 boxShadow: filled[i]
                     ? [
                         BoxShadow(
-                          color: Colors.black.withValue(alpha: .06),
+                          color: Colors.black.withOpacity(0.06),
                           blurRadius: 6,
                           offset: const Offset(0, 2),
                         ),
@@ -700,7 +763,7 @@ class _LoadingOverlay extends StatelessWidget {
     return Positioned.fill(
       child: IgnorePointer(
         child: Container(
-          color: Colors.black.withValue(alpha: .06),
+          color: Colors.black.withOpacity(0.06),
           alignment: Alignment.center,
           child: const zw.ZenGlassCard(
             borderRadius: BorderRadius.all(zs.ZenRadii.l),
@@ -808,6 +871,17 @@ class _StoryCard extends StatelessWidget {
                     : (onToggleSpeak ?? () {}),
               ),
               _StoryAction(
+                icon: Icons.picture_as_pdf_rounded,
+                label: 'PDF exportieren',
+                onTap: () async {
+                  final path = await _saveAsPdf(title, body);
+                  if (context.mounted) {
+                    zw.ZenToast.show(context, 'Gespeichert: $path');
+                  }
+                  HapticFeedback.lightImpact();
+                },
+              ),
+              _StoryAction(
                 icon: Icons.copy_rounded,
                 label: 'Kopieren',
                 onTap: () async {
@@ -859,6 +933,47 @@ class _StoryCard extends StatelessWidget {
     final safe = _sanitizeFileName(title);
     final file = File('${dir.path}/$safe.txt');
     await file.writeAsString('$title\n\n$text');
+    return file.path;
+  }
+
+  Future<String> _saveAsPdf(String title, String text) async {
+    final doc = pw.Document();
+    final pageTheme = pw.PageTheme(
+      pageFormat: PdfPageFormat.a4,
+      margin: const pw.EdgeInsets.symmetric(horizontal: 36, vertical: 40),
+    );
+
+    doc.addPage(
+      pw.MultiPage(
+        pageTheme: pageTheme,
+        build: (ctx) => [
+          pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              if (title.trim().isNotEmpty)
+                pw.Text(
+                  title.trim(),
+                  style: pw.TextStyle(
+                    fontSize: 20,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+              if (title.trim().isNotEmpty) pw.SizedBox(height: 10),
+              pw.Text(
+                text.trim(),
+                style: const pw.TextStyle(fontSize: 12.5, height: 1.35),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+
+    final bytes = await doc.save();
+    final dir = await getApplicationDocumentsDirectory();
+    final safe = _sanitizeFileName(title);
+    final file = File('${dir.path}/$safe.pdf');
+    await file.writeAsBytes(bytes, flush: true);
     return file.path;
   }
 

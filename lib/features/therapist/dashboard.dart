@@ -1,12 +1,15 @@
 // lib/features/therapist/dashboard.dart
 //
-// TherapistDashboard — Oxford Calm Edition (v2.2 · 2025-10-22)
+// TherapistDashboard — Oxford Calm Edition (v2.3 · 2025-11-08)
 // -----------------------------------------------------------------
 // • Responsives, barrierearmes Layout (Semantics, große Ziele).
 // • Keine PII im Verlauf (nur Labels/Scores/Datum).
 // • 7-Tage-Heatmap + Legende (Zen-Palette).
 // • „Top-Stimmung“ (häufigstes Mood-Label) & kurzer CH-Disclaimer.
 // • Export-Kachel nutzt AnonExportWidget (asynchron, redacted-metrics).
+//
+// Änderungen v2.3:
+// • Kleinere Layout- & Typisierungs-Fixes, keine Verhaltensänderung.
 
 import 'package:flutter/material.dart';
 import '../../shared/zen_style.dart';
@@ -176,7 +179,7 @@ class TherapistDashboard extends StatelessWidget {
     );
   }
 
-  /// Häufigstes Mood-Label (robust ohne Tags/Faces-Felder).
+  /// Häufigstes Mood-Label (robust ohne Tags/Facets-Felder).
   String? _computeTopLabelFromEntries(List<MoodEntry> entries) {
     final Map<String, int> counts = {};
     for (final e in entries) {

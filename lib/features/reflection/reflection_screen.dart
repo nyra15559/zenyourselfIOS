@@ -1,16 +1,17 @@
-// [BASELINE] lib/features/reflection/reflection_screen.dart (Stand: 07.11.2025, v6.7.3)
-// MERGE SIGNAL: Reflection v6.7.3 — next_turn_full/closure_full, Client-Memory-Handshake,
-// Only worker answer_helpers (max 3), Mood/Closure-Gates,
-// CH-Safety, STT, sofortiges User-Echo & Auto-Scroll (kein Leerbildschirm)
-// Hinweis: KEIN In-Session-Consent-Hint mehr (Einstellung nur im Privacy-/Settings-Screen)
-//
-// Kompatibilitäten:
-// • MemoryService: recall()/learnNameFromText()/saveUserTurn()/savePandaTurn()/saveFromWorker()
-// • ApiService: mood(entryId, icon, note)
-// • GuidanceService: startSessionFull(...), nextTurnFull(...), closureFull(...)
-// • DTOs: ../../services/guidance/dtos.dart
-//
-// Design: Oxford-Zen; Full-bleed Backdrop (kein schwarzer Rahmen)
+// [BASELINE] lib/features/reflection/reflection_screen.dart (Stand: 08.11.2025, v6.7.11)
+// MERGE SIGNAL: Reflection v6.7.11 — K2 Mood (Dual-Scale, Consent-Gate 🍃/🌿) + UIEvent fix
+// Patch v6.7.11:
+// • Ergänzt Switch-Case für `UIEventKind.openDualMoodPicker` (öffnet Dual-Mood-Sheet & speichert gemäß 🍃/🌿 Regeln).
+// • Fix: timestamp → `toIso8601String()` (vorher iso8601String).
+// • Kleinere Robustheits-Guards (mounted-Checks) beim asynchronen Picker-Callback.
+// Patch v6.7.9:
+// • Kleinere Robustheits-Guards (ListScroll, mounted) & sanfteres Auto-Scroll nach Inserts.
+// • Dual-Mood (Kopf/Körper) bleibt *nur* bei flow.mood_prompt && !closure aktiv; kein Save-Flow-Trigger.
+// • Lokales Mood-Speichern nur bei 🍃/🌿; Server-Post (ApiService.mood) nur bei 🌿.
+// • Worker-only answer_helpers (max 3), keine lokalen Fallback-Chips (Starter-Chips bleiben).
+// • Sofortiges User-Echo, keine Leerbildschirm-Phase, STT angebunden (WhisperService).
+// • CH-Safety: Hotline-Karte bei risk mild/high; No-Quote-Mirror/Closure steuert Worker.
+// Hinweis: KEIN In-Session-Consent-Hint (Einstellung im Privacy-/Settings-Screen)
 
 library reflection_screen;
 
@@ -40,7 +41,7 @@ import '../../shared/ui/zen_widgets.dart'
         ZenOutlineButton,
         ZenChipGhost;
 
-// Panda-Moods
+// Panda-Moods (bestehender einfacher Picker bleibt importiert, Dual-Skala implementieren wir selbst)
 import '../../models/panda_mood.dart';
 import '../../widgets/panda_mood_picker.dart';
 
@@ -83,7 +84,6 @@ const Duration _netTimeout = Duration(seconds: 18);
 const double _inputReserve = 104;
 
 // ---------------- Optionaler Hook + Navigation --------------------------------
-// Wichtig: In Funktions-Typen keine Default-Werte erlaubt → isReflection ohne Default/nullable
 typedef AddToGedankenbuch = void Function(
   String text,
   String mood, {
@@ -93,6 +93,23 @@ typedef AddToGedankenbuch = void Function(
 
 // ---------------- Interner UI-State ------------------------------------------
 enum _ChipMode { starter, answer, none }
+
+// ---- NEW: Dual-Mood Helper ---------------------------------------------------
+class _DualMood {
+  final int mental; // 0..4
+  final int physical; // 0..4
+  final String mentalLabel;
+  final String physicalLabel;
+  const _DualMood({
+    required this.mental,
+    required this.physical,
+    required this.mentalLabel,
+    required this.physicalLabel,
+  });
+
+  int get avg => ((mental + physical) / 2.0).round().clamp(0, 4);
+  String get combinedLabel => 'Kopf: $mentalLabel / Körper: $physicalLabel';
+}
 
 // ---------------- Screen ------------------------------------------------------
 class ReflectionScreen extends StatefulWidget {
@@ -172,7 +189,10 @@ class _ReflectionScreenState extends State<ReflectionScreen>
   bool _hasShownIntro = false; // Guards: nur 1× pro Sitzung
   bool _showIntro = false;
   String _introText =
-      'Schön, dass du da bist. Schreib mir in 1–2 Sätzen, wie es dir heute geht.';
+      'Schön, dass du wieder da bist. Schreib mir in 1–2 Sätzen, wie es dir heute geht.';
+
+  // ---- NEW: pro Runde die Dual-Mood-Werte halten, ohne Models anzufassen ----
+  final Map<String, _DualMood> _dualMoodsByRoundId = {};
 
   // Prefetch Recall (best effort)
   Future<void> _prefetchRecall() async {
@@ -241,7 +261,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       },
       'ui': {
         'screen': 'reflection',
-        'version': '3.26.1',
+        'version': '3.26.2',
         'platform': kIsWeb ? 'web' : 'flutter',
         'is_desktop': _isDesktop,
         'chip_mode': _chipMode.name,
@@ -327,6 +347,49 @@ class _ReflectionScreenState extends State<ReflectionScreen>
         case UIEventKind.scrollToEnd:
           _scrollToBottom();
           break;
+        case UIEventKind.openDualMoodPicker:
+          // Öffnet den Dual-Mood-Picker deterministisch (ohne Closure-Phase),
+          // speichert lokal bei 🍃/🌿 und postet an den Server nur bei 🌿.
+          final r = _current;
+          if (r == null || r.hasMood) break;
+          _promptDualMoodOnce(
+            context,
+            title: 'Wie fühlst du dich gerade? (Kopf & Körper)',
+          ).then((chosen) async {
+            if (!mounted || chosen == null) return;
+            setState(() {
+              r.moodScore = chosen.avg;
+              r.moodLabel = chosen.combinedLabel;
+              _dualMoodsByRoundId[r.id] = chosen;
+              _didPromptMood = true;
+            });
+
+            // Lokal speichern (🍃/🌿)
+            unawaited(() async {
+              try {
+                if (_isLocalStoreAllowed()) {
+                  final dyn = MemoryService.instance as dynamic;
+                  await dyn.saveMoodEntry?.call(
+                    DateTime.now().toUtc(),
+                    chosen.mental,
+                    chosen.physical,
+                  );
+                }
+              } catch (_) {}
+            }());
+
+            // Server posten (nur 🌿)
+            if (_isSharingEnabled()) {
+              try {
+                await ApiService.instance.mood(
+                  entryId: r.id,
+                  icon: chosen.avg,
+                  note: null,
+                );
+              } catch (_) {}
+            }
+          });
+          break;
       }
     });
     _ctrlListener = () {
@@ -395,7 +458,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       final dyn = MemoryService.instance as dynamic;
       // bevorzugt: freundlicher Anzeigename, nur wenn Nutzer zugestimmt hat
       name = await (dyn.loadGreetingName?.call());
-      consent = (dyn.shareEnabled == true);
+      consent = (dyn.shareEnabled == true) || (dyn.memoryActive == true);
     } catch (_) {
       // still
     }
@@ -652,7 +715,8 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       );
 
       // Controller: history + typing/bridge für Start synchronisieren
-      unawaited(_ctrl.start(userText, fromVoice: mode == 'voice', context: context));
+      unawaited(
+          _ctrl.start(userText, fromVoice: mode == 'voice', context: context));
 
       try {
         // 1) Neuer Endpunkt
@@ -737,13 +801,14 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       _scrollToBottom();
       _focusInput();
 
-      if (flagMoodPrompt) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted) return;
-          _maybeAskMood(context,
-              round: round, moodPrompt: true, afterClosure: false);
-        });
-      }
+      // NEW: Mood-Prompt nur hier (nicht im Save-Flow) und nur wenn vom Worker signalisiert.
+      unawaited(_maybeAskMood(
+        context,
+        round: round,
+        moodPrompt: flagMoodPrompt,
+        afterClosure: false,
+      ));
+
       if (flagRecommendEnd) {
         unawaited(_requestClosureFromWorker(round: round, userAnswer: ''));
       }
@@ -873,7 +938,9 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       if (flagMoodPrompt || flagRecommendEnd) round.allowClosure = true;
 
       final hasHelpers = step.followups.isNotEmpty;
-      _chipMode = (step.expectsAnswer && !(flagMoodPrompt || flagRecommendEnd) && hasHelpers)
+      _chipMode = (step.expectsAnswer &&
+              !(flagMoodPrompt || flagRecommendEnd) &&
+              hasHelpers)
           ? _ChipMode.answer
           : _ChipMode.none;
     });
@@ -901,20 +968,20 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     _scrollToBottom();
     _focusInput();
 
-    if (flagMoodPrompt) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        _maybeAskMood(context,
-            round: round, moodPrompt: true, afterClosure: false);
-      });
-    }
+    // NEW: Mood-Prompt nur hier (nicht im Save-Flow) und nur wenn vom Worker signalisiert.
+    unawaited(_maybeAskMood(
+      context,
+      round: round,
+      moodPrompt: flagMoodPrompt,
+      afterClosure: false,
+    ));
 
     if (flagRecommendEnd) {
       unawaited(
           _requestClosureFromWorker(round: round, userAnswer: userAnswer));
     }
 
-    setState(() => loading = false);
+    if (mounted) setState(() => loading = false);
   }
 
   void _handleTurnError(ReflectionRound round) {
@@ -973,7 +1040,36 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     );
   }
 
-  // ---------------- SAVE→MOOD: deterministischer Flow ------------------------
+  // ---------------- SAVE→MOOD: deterministischer Dual-Flow -------------------
+
+  bool _isSharingEnabled() {
+    try {
+      final dyn = MemoryService.instance as dynamic;
+      return dyn.shareEnabled == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // NEW: Gate für lokales Speichern (🍃/🌿), 🕊️ → false
+  bool _isLocalStoreAllowed() {
+    try {
+      final dyn = MemoryService.instance as dynamic;
+      // Voll (🌿) impliziert lokal okay:
+      if (dyn.shareEnabled == true) return true;
+      // Explizite lokale Schalter (verschiedene Implementationen abdecken):
+      if (dyn.localEnabled == true) return true;
+      if (dyn.memoryActive == true) return true;
+      if (dyn.storeEnabled == true) return true;
+      final level = (dyn.level is num)
+          ? (dyn.level as num).toInt()
+          : (dyn.memoryLevel is num)
+              ? (dyn.memoryLevel as num).toInt()
+              : null;
+      if (level != null && level >= 1) return true; // 🍃/🌿
+    } catch (_) {}
+    return false; // 🕊️
+  }
 
   Future<void> _onPressSaveRound(ReflectionRound r) async {
     if (r.entryId != null) {
@@ -985,33 +1081,8 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       return;
     }
 
-    if (!r.hasMood) {
-      if (_isMoodOpen) return;
-      _isMoodOpen = true;
-      final chosen = await showPandaMoodPicker(
-        context,
-        title: 'Wie fühlst du dich gerade?',
-      );
-      _isMoodOpen = false;
-      if (chosen == null) return;
-      _didPromptMood = true;
-
-      final score = _scoreForMoodLocal(chosen);
-      final label = chosen.labelDe;
-      setState(() {
-        r.moodScore = score;
-        r.moodLabel = label;
-      });
-
-      try {
-        await ApiService.instance.mood(
-          entryId: r.id,
-          icon: score,
-          note: null,
-        );
-      } catch (_) {/* ignore */}
-    }
-
+    // WICHTIG:
+    // KEINE Mood-Abfrage im Save-Flow. Mood nur, wenn der Worker flow.mood_prompt signalisiert.
     await _saveRoundCore(r);
   }
 
@@ -1030,10 +1101,16 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     final String title =
         _autoTitleForRound(r, fallback: _autoSessionName(r.userInput));
 
+    // Zusätzliche Mood-Tags (Dual)
+    final dual = _dualMoodsByRoundId[r.id];
     final tags = <String>[
       'reflection',
       if ((r.moodLabel ?? '').trim().isNotEmpty) 'mood:${r.moodLabel!.trim()}',
       if (r.moodScore != null) 'moodScore:${r.moodScore}',
+      if (dual != null) ...[
+        'moodMental:${dual.mental}',
+        'moodPhysical:${dual.physical}',
+      ],
       'input:${r.mode}',
     ];
 
@@ -1116,7 +1193,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
               session: _session,
               answer: userAnswer,
               locale: 'de',
-              tz: 'Europe/Zurich',
             )
             .timeout(_netTimeout);
       } on NoSuchMethodError {
@@ -1139,18 +1215,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
 
     setState(() => loading = false);
 
-    if (closure.isEmpty) {
-      setState(() {
-        round.allowClosure = true;
-      });
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        _maybeAskMood(context,
-            round: round, moodPrompt: true, afterClosure: true);
-      });
-      return;
-    }
-
+    // Wir zeigen *keinen* Mood-Picker in der Closure-Phase.
     setState(() {
       round.moodIntro = _capChars(closure, kMirrorMaxChars);
       round.allowClosure = true;
@@ -1163,12 +1228,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     });
     _fadeSlideCtrl.forward(from: 0);
     _scrollToBottom();
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      _maybeAskMood(context,
-          round: round, moodPrompt: true, afterClosure: true);
-    });
   }
 
   // --- Coercion helpers -------------------------------------------------------
@@ -1574,12 +1633,43 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                                             ? () => _deleteRound(_rounds[index])
                                             : null,
                                         onSelectMood: (score, label) async {
+                                          // Dieser Callback wird bei der *einfachen* Mood-Auswahl genutzt.
+                                          // Wir mappen ihn auf unseren Dual-Flow: set + save.
+                                          final dual = _DualMood(
+                                            mental: score,
+                                            physical: score,
+                                            mentalLabel: label,
+                                            physicalLabel: label,
+                                          );
+                                          _dualMoodsByRoundId[_rounds[index].id] =
+                                              dual;
                                           setState(() {
-                                            _rounds[index].moodScore = score;
-                                            _rounds[index].moodLabel = label;
+                                            _rounds[index].moodScore =
+                                                dual.avg;
+                                            _rounds[index].moodLabel =
+                                                dual.combinedLabel;
                                             _didPromptMood = true;
                                           });
-                                          await _saveRoundCore(_rounds[index]);
+
+                                          // **Lokal speichern** nur wenn 🍃/🌿 aktiv
+                                          unawaited(() async {
+                                            try {
+                                              if (_isLocalStoreAllowed()) {
+                                                final dyn =
+                                                    MemoryService.instance
+                                                        as dynamic;
+                                                await dyn.saveMoodEntry?.call(
+                                                  // v6.7.7: DateTime statt ISO-String
+                                                  DateTime.now().toUtc(),
+                                                  dual.mental,
+                                                  dual.physical,
+                                                );
+                                              }
+                                            } catch (_) {}
+                                          }());
+
+                                          await _saveRoundCore(
+                                              _rounds[index]);
                                         },
                                         safetyText: hasRisk
                                             ? _emergencyHint(context)
@@ -2024,46 +2114,182 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     return mapped.round().clamp(0, 4);
   }
 
+  // NEW: Dual-Skala Bottom-Sheet (Kopf/Körper)
+  Future<_DualMood?> _showDualMoodSheet(
+    BuildContext context, {
+    required String title,
+  }) async {
+    int mental = 2;
+    int physical = 2;
+
+    String labelFor(int v) {
+      switch (v) {
+        case 0:
+          return 'sehr schlecht';
+        case 1:
+          return 'eher schlecht';
+        case 2:
+          return 'neutral';
+        case 3:
+          return 'eher gut';
+        case 4:
+          return 'sehr gut';
+      }
+      return 'neutral';
+    }
+
+    return await showModalBottomSheet<_DualMood>(
+      context: context,
+      backgroundColor: Colors.white,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        final mq = MediaQuery.of(ctx);
+        final bottom = mq.viewInsets.bottom;
+        return SafeArea(
+          top: false,
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(16, 14, 16, 12 + bottom),
+            child: StatefulBuilder(
+              builder: (ctx, setState) {
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      textAlign: TextAlign.center,
+                      style: Theme.of(ctx).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 14),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text('Kopf',
+                          style: Theme.of(ctx)
+                              .textTheme
+                              .labelLarge
+                              ?.copyWith(fontWeight: FontWeight.w600)),
+                    ),
+                    Slider(
+                      value: mental.toDouble(),
+                      min: 0,
+                      max: 4,
+                      divisions: 4,
+                      label: labelFor(mental),
+                      onChanged: (v) => setState(() => mental = v.round()),
+                    ),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text('Körper',
+                          style: Theme.of(ctx)
+                              .textTheme
+                              .labelLarge
+                              ?.copyWith(fontWeight: FontWeight.w600)),
+                    ),
+                    Slider(
+                      value: physical.toDouble(),
+                      min: 0,
+                      max: 4,
+                      divisions: 4,
+                      label: labelFor(physical),
+                      onChanged: (v) => setState(() => physical = v.round()),
+                    ),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ZenPrimaryButton(
+                        label: 'Speichern',
+                        onPressed: () {
+                          Navigator.of(ctx).pop(_DualMood(
+                            mental: mental,
+                            physical: physical,
+                            mentalLabel: labelFor(mental),
+                            physicalLabel: labelFor(physical),
+                          ));
+                        },
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // NEW (deterministisch): Mood nur bei flow.mood_prompt && !closure anzeigen
+  Future<_DualMood?> _promptDualMoodOnce(
+    BuildContext context, {
+    required String title,
+  }) async {
+    if (_isMoodOpen) return null; // Guard gegen Doppelöffnen
+    _isMoodOpen = true;
+    try {
+      return await _showDualMoodSheet(context, title: title);
+    } finally {
+      _isMoodOpen = false;
+    }
+  }
+
+  // NEW (v6.7.6): Mood nur bei flow.mood_prompt && !closure anzeigen
   Future<void> _maybeAskMood(
     BuildContext context, {
     required ReflectionRound round,
     required bool moodPrompt,
     bool afterClosure = false,
   }) async {
-    if (!moodPrompt) return;
-    if (!mounted) return;
-    if (round.hasMood) return;
-    if (_didPromptMood || _isMoodOpen) return;
+    // Guards
+    if (!moodPrompt) return; // nur wenn der Worker es wünscht
+    if (afterClosure) return; // nie in der Closure-Phase
+    if (round.hasMood) return; // bereits vorhanden
 
-    _isMoodOpen = true;
-    final title = afterClosure
-        ? 'Wie fühlst du dich jetzt?'
-        : 'Wie fühlst du dich gerade?';
+    final hasRisk = round.steps.isNotEmpty ? round.steps.last.risk : false;
+    final title = hasRisk
+        ? 'Wenn du magst: Wie fühlst du dich? (Kopf & Körper)'
+        : 'Wie fühlst du dich gerade? (Kopf & Körper)';
 
-    final chosen = await showPandaMoodPicker(
-      context,
-      title: title,
-    );
-    _isMoodOpen = false;
+    final chosen = await _promptDualMoodOnce(context, title: title);
     if (chosen == null) return;
 
-    final score = _scoreForMoodLocal(chosen);
-    final label = chosen.labelDe;
+    _didPromptMood = true;
 
-    if (!mounted) return;
+    // UI-Status setzen
     setState(() {
-      round.moodScore = score;
-      round.moodLabel = label;
-      _didPromptMood = true;
+      round.moodScore = chosen.avg;
+      round.moodLabel = chosen.combinedLabel;
+      _dualMoodsByRoundId[round.id] = chosen;
     });
 
-    try {
-      await ApiService.instance.mood(
-        entryId: round.id,
-        icon: score,
-        note: null,
-      );
-    } catch (_) {/* ignore */}
+    // **Lokal speichern** nur wenn 🍃/🌿 aktiv
+    unawaited(() async {
+      try {
+        if (_isLocalStoreAllowed()) {
+          final dyn = MemoryService.instance as dynamic;
+          await dyn.saveMoodEntry?.call(
+            // v6.7.7: DateTime statt ISO-String
+            DateTime.now().toUtc(),
+            chosen.mental,
+            chosen.physical,
+          );
+        }
+      } catch (_) {}
+    }());
+
+    // **Server posten** nur wenn Teilen erlaubt (🌿)
+    if (_isSharingEnabled()) {
+      try {
+        await ApiService.instance.mood(
+          entryId: round.id,
+          icon: chosen.avg,
+          note: null,
+        );
+      } catch (_) {
+        // still
+      }
+    }
   }
 
   void _appendThankYouAfterSave(ReflectionRound r) {

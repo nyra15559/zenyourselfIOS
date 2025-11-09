@@ -1,8 +1,13 @@
-// [BASELINE] lib/core/memory/memory_entry.dart — v6.4.2 (31.10.2025)
+// [BASELINE] lib/core/memory/memory_entry.dart — v6.6.0 (2025-11-08)
+// MERGE SIGNAL: kompatibel zu v6.4.x; erweitert um tags/canon + robustere Parser
 //
 // MemoryEntry & MemoryFact — DTOs fürs lokale Kontext-Gedächtnis (snake_case, defensiv)
 // -------------------------------------------------------------------------------------
-// Rückwärtskompatibel zu v6.3.x (Entry); neu: MemoryFact/FactType mit type=insight.
+// Rückwärtskompatibel zu v6.3.x/6.4.x. Neues in v6.6.0 (non-breaking):
+// • MemoryFact erweitert um: tags[List<String>] und canon[String].
+// • fromMap() toleranter: Aliasse active_facet/topic_pin, score/insight_score/confidence.
+// • toMap() bleibt snake_case-kompatibel; DateTimes immer ISO-UTC.
+// • Kleinere Robustheits-Verbesserungen (Parsing/Bounds).
 //
 // Entry Kompatibilität (v1 → v2):
 // • sessionId                ⇆  id / session_id
@@ -104,8 +109,7 @@ class MemoryEntry {
     final rawInsight = m['insightScore'] ?? m['insight_score'];
     if (rawInsight is Map) {
       try {
-        insightScore =
-            InsightScore.fromMap(Map<String, dynamic>.from(rawInsight));
+        insightScore = InsightScore.fromMap(Map<String, dynamic>.from(rawInsight));
       } catch (_) {/* ignore */}
     } else if (rawInsight is num) {
       insightScore = InsightScore(rawInsight.toDouble());
@@ -243,6 +247,8 @@ class MemoryFact {
   final double? score;       // Stärke/Confidence/Insight 0..1
   final String? activeFacet; // aktives Facettenlabel (Bridge/Pin)
   final String? topicPin;    // Topic-Pin/Schlüsselwort
+  final String? canon;       // kanonische/vereinheitlichte Form
+  final List<String>? tags;  // max ~5, kurze Marker
   final DateTime createdAt;
 
   const MemoryFact({
@@ -255,6 +261,8 @@ class MemoryFact {
     this.score,
     this.activeFacet,
     this.topicPin,
+    this.canon,
+    this.tags,
   });
 
   MemoryFact copyWith({
@@ -266,6 +274,8 @@ class MemoryFact {
     double? score,
     String? activeFacet,
     String? topicPin,
+    String? canon,
+    List<String>? tags,
     DateTime? createdAt,
   }) {
     return MemoryFact(
@@ -277,12 +287,14 @@ class MemoryFact {
       score: score ?? this.score,
       activeFacet: activeFacet ?? this.activeFacet,
       topicPin: topicPin ?? this.topicPin,
+      canon: canon ?? this.canon,
+      tags: tags ?? this.tags,
       createdAt: createdAt ?? this.createdAt,
     );
   }
 
   static DateTime _dt(dynamic x) {
-    final s = (x ?? '').toString();
+    final s = (x ?? '').toString().trim();
     final dt = DateTime.tryParse(s);
     return (dt ?? DateTime.now()).toUtc();
   }
@@ -292,6 +304,29 @@ class MemoryFact {
     if (x is num) return x.toDouble();
     final d = double.tryParse(x.toString().replaceAll(',', '.'));
     return d;
+  }
+
+  static List<String>? _asTags(dynamic v) {
+    if (v == null) return null;
+    final out = <String>[];
+    if (v is List) {
+      for (final it in v) {
+        final s = (it ?? '').toString().trim();
+        if (s.isNotEmpty && !out.contains(s)) out.add(s);
+        if (out.length >= 5) break;
+      }
+    } else if (v is String) {
+      final s = v.trim();
+      if (s.isNotEmpty) {
+        final parts = s.split(RegExp(r'\s*,\s*'));
+        for (final p in parts) {
+          final t = p.trim();
+          if (t.isNotEmpty && !out.contains(t)) out.add(t);
+          if (out.length >= 5) break;
+        }
+      }
+    }
+    return out.isEmpty ? null : out;
   }
 
   factory MemoryFact.fromMap(Map<String, dynamic> m) {
@@ -312,8 +347,14 @@ class MemoryFact {
 
     final score =
         _asDouble(m['score'] ?? m['insight_score'] ?? m['confidence']);
-    final af = (m['active_facet'] ?? m['facet'] ?? '').toString().trim();
-    final pin = (m['topic_pin'] ?? m['pin'] ?? '').toString().trim();
+    final af = (m['active_facet'] ?? m['activeFacet'] ?? m['facet'] ?? '')
+        .toString()
+        .trim();
+    final pin =
+        (m['topic_pin'] ?? m['topicPin'] ?? m['pin'] ?? '').toString().trim();
+    final canon = (m['canon'] ?? '').toString().trim();
+    final tags = _asTags(m['tags']);
+
     final ts = _dt(m['created_at'] ?? m['ts']);
 
     return MemoryFact(
@@ -325,6 +366,8 @@ class MemoryFact {
       score: score,
       activeFacet: af.isEmpty ? null : af,
       topicPin: pin.isEmpty ? null : pin,
+      canon: canon.isEmpty ? null : canon,
+      tags: tags,
       createdAt: ts,
     );
   }
@@ -339,6 +382,8 @@ class MemoryFact {
         if (activeFacet != null && activeFacet!.isNotEmpty)
           'active_facet': activeFacet,
         if (topicPin != null && topicPin!.isNotEmpty) 'topic_pin': topicPin,
+        if (canon != null && canon!.isNotEmpty) 'canon': canon,
+        if (tags != null && tags!.isNotEmpty) 'tags': List<String>.from(tags!),
         'created_at': createdAt.toUtc().toIso8601String(),
       };
 
@@ -358,6 +403,8 @@ class MemoryFact {
         other.score == score &&
         other.activeFacet == activeFacet &&
         other.topicPin == topicPin &&
+        listEquals(other.tags, tags) &&
+        other.canon == canon &&
         other.createdAt == createdAt;
   }
 
@@ -371,10 +418,12 @@ class MemoryFact {
         score,
         activeFacet,
         topicPin,
+        canon,
+        Object.hashAll(tags ?? const <String>[]),
         createdAt,
       );
 
   @override
   String toString() =>
-      'MemoryFact(${_factTypeToWire(type)} id:$id topic:$topic facet:$activeFacet pin:$topicPin)';
+      'MemoryFact(${_factTypeToWire(type)} id:$id topic:$topic facet:$activeFacet pin:$topicPin canon:$canon tags:${tags?.length ?? 0})';
 }

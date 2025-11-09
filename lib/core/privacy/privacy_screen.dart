@@ -1,36 +1,40 @@
-// [BASELINE] lib/core/privacy/privacy_screen.dart (Stand: 29.10.)
-// P2-S9.1-DONE — Gear tappbar (AppBar.actions) + Backdrop IgnorePointer
-//
-// ZenYourself — Privacy Screen (calm, props-only UI, 2025)
+// [MERGE SIGNAL] lib/core/privacy/privacy_screen.dart (v1.6 · 2025-11-09)
+// ZenYourself — Privacy Screen (calm, props-only UI)
 // -----------------------------------------------------------------------------
 // • Reine UI-Schicht: rendert Transparenz/Einwilligungen ohne Business-Logik.
-// • Nutzt Zen-Design-Tokens (Radii, Spacing, ruhige Farben, Glass).
-// • Ruhige Typografie (ZenTypography/ZEN Reflection Text).
-// • "withValues(alpha: …)" überall für Konsistenz.
-// • Backdrop mit sanftem Glow/Haze (ruhig, AA-konform).
+// • Gear tappbar (AppBar.actions), Backdrop per IgnorePointer → keine Tap-Blocker.
+// • Optional-Props für Trial/Status/Upgrade ergänzt (kompatibel zum Orchestrator).
+// • Ruhige Oxford-Zen-Typografie & Glass Cards.
 //
-// Hinweise (S9.1):
-// • Zahnrad (Settings) liegt jetzt in AppBar.actions (oberste Z-Order, 44px Tap-Min).
-// • Backdrop ist per IgnorePointer deaktiviert → keine Hit-Test-Blocker mehr.
-//
+// Hinweise:
+// – Save-Button triggert props.onSave(PrivacySettings).
+// – "Mit Namen ansprechen" ist nur aktiv, wenn currentName gesetzt ist.
+// – Wenn memoryConsent==true und memoryActive==false → Upgrade-CTA (falls onUpgrade gesetzt).
 
 import 'package:flutter/material.dart';
 import '../../shared/zen_style.dart';
 
 class PrivacyScreenProps {
   // Datenschutz-Basics
-  final bool shareDiagnostics; // Absturz-/Diagnose-Infos teilen
-  final bool shareUsage; // anonyme Nutzungsanalyse
-  final bool enableCloudBackup; // Cloud-Backup von Metadaten
-  final bool localOnly; // Inhalte nur lokal (keine Cloud-Inhalte)
+  final bool shareDiagnostics;       // Absturz-/Diagnose-Infos teilen
+  final bool shareUsage;             // anonyme Nutzungsanalyse
+  final bool enableCloudBackup;      // optionales Cloud-Backup von Metadaten
+  final bool localOnly;              // Inhalte nur lokal (keine Cloud-Inhalte)
 
   // Erinnerung & Name
-  final bool memoryConsent; // Panda darf sich erinnern (on-device)
-  final bool greetByName; // Panda darf dich mit Namen ansprechen
-  final String? currentName; // aktueller gespeicherter Name (optional)
+  final bool memoryConsent;          // Panda darf sich erinnern (on-device)
+  final bool greetByName;            // Panda darf dich mit Namen ansprechen
+  final String? currentName;         // gespeicherter Name (optional)
 
+  // Policy-Meta
   final String policyVersion;
   final DateTime? lastUpdated;
+
+  // Optional: Trial/Status/Upgrade (für Anzeige)
+  final bool? memoryActive;          // ob Kontext-Bridge aktuell aktiv ist (Trial/Premium)
+  final DateTime? memoryExpiryAt;    // optionales Trial-Ende
+  final String? memoryStatusNote;    // vorformulierte Status-Zeile
+  final VoidCallback? onUpgrade;     // Upgrade-Action (wenn Trial abgelaufen)
 
   // Actions/Callbacks
   final VoidCallback? onOpenPolicy;
@@ -53,13 +57,22 @@ class PrivacyScreenProps {
     this.shareUsage = false,
     this.enableCloudBackup = false,
     this.localOnly = true,
+
     // Memory & Name
     this.memoryConsent = false,
     this.greetByName = false,
     this.currentName,
-    // Meta
+
+    // Policy
     this.policyVersion = 'v1.0',
     this.lastUpdated,
+
+    // Trial/Status/Upgrade (optional)
+    this.memoryActive,
+    this.memoryExpiryAt,
+    this.memoryStatusNote,
+    this.onUpgrade,
+
     // Actions
     this.onOpenPolicy,
     this.onSave,
@@ -68,6 +81,7 @@ class PrivacyScreenProps {
     this.onForgetName,
     this.onEditName,
     this.onForgetMemories,
+
     // Optional Titles
     this.title,
     this.subtitle,
@@ -80,7 +94,7 @@ class PrivacySettings {
   final bool enableCloudBackup;
   final bool localOnly;
 
-  // NEU: Memory & Name
+  // Memory & Name
   final bool memoryConsent;
   final bool greetByName;
 
@@ -125,8 +139,9 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
   @override
   Widget build(BuildContext context) {
     final tt = Theme.of(context).textTheme;
-    final pad = context.screenPad;
+    final pad = const EdgeInsets.symmetric(horizontal: 16);
 
+    // Meta
     final lastUpdate = widget.props.lastUpdated;
     final lastStr = lastUpdate == null
         ? null
@@ -135,7 +150,16 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
     final hasName = (widget.props.currentName != null &&
         widget.props.currentName!.trim().isNotEmpty);
 
-    // Ruhiger Hintergrund
+    // Trial/Status-Text
+    final statusNote = widget.props.memoryStatusNote ??
+        (() {
+          final active = widget.props.memoryActive;
+          if (!_memoryConsent) return 'Kontext-Teilen: AUS';
+          if (active == true) return 'Kontext-Teilen: AN';
+          if (active == false) return 'Kontext-Teilen: AUS (Trial abgelaufen)';
+          return 'Kontext-Teilen: –';
+        })();
+
     return Scaffold(
       extendBodyBehindAppBar: true,
       appBar: ZenAppBar(
@@ -152,7 +176,7 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
       body: Stack(
         children: [
           // Sanfter Backdrop — IGNORE POINTER (wichtig für Tap-Durchlass!)
-          IgnorePointer(ignoring: true, child: ZenBackdropPresets.menu()),
+          const IgnorePointer(ignoring: true, child: ZenBackdropPresets.menu()),
 
           SafeArea(
             child: Padding(
@@ -220,8 +244,7 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
                                     'Keine automatische Cloud-Speicherung.',
                                 icon: Icons.shield_rounded,
                                 value: _localOnly,
-                                onChanged: (v) =>
-                                    setState(() => _localOnly = v),
+                                onChanged: (v) => setState(() => _localOnly = v),
                               ),
                               _ToggleItem(
                                 title: 'Diagnose senden',
@@ -231,7 +254,7 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
                                 icon: Icons.health_and_safety_rounded,
                                 value: _shareDiagnostics,
                                 onChanged: _localOnly
-                                    ? null // visuell dimmen: deaktiviert wenn lokal-only
+                                    ? null // deaktiviert bei strikt lokal
                                     : (v) =>
                                         setState(() => _shareDiagnostics = v),
                                 dimWhenDisabled: _localOnly,
@@ -251,7 +274,7 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
                               _ToggleItem(
                                 title: 'Cloud-Backup (nur Metadaten)',
                                 subtitle:
-                                    'Optionales Backup von Metadaten (z. B. Stimmung/Datum) '
+                                    'Optionales Backup von Metadaten (z. B. Stimmung/Datum) — '
                                     'ohne Reflexionsinhalte.',
                                 icon: Icons.cloud_sync_rounded,
                                 value: _enableCloudBackup,
@@ -276,6 +299,21 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
                             bottomOpacity: .10,
                             child: Column(
                               children: [
+                                // Statuszeile (Trial/Active) – dezent
+                                Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: Opacity(
+                                    opacity: .82,
+                                    child: Text(
+                                      statusNote,
+                                      style: tt.bodySmall?.copyWith(
+                                        color: ZenColors.jadeMid,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
                                 _ToggleRow(
                                   item: _ToggleItem(
                                     title: 'Erinnerungen erlauben (on-device)',
@@ -298,8 +336,7 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
                                     icon: Icons.badge_rounded,
                                     value: _greetByName && hasName,
                                     onChanged: hasName
-                                        ? (v) =>
-                                            setState(() => _greetByName = v)
+                                        ? (v) => setState(() => _greetByName = v)
                                         : null,
                                     dimWhenDisabled: !hasName,
                                   ),
@@ -329,12 +366,26 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
                                     'Hinweis: Erinnerungen werden nur lokal gespeichert (Ghost-Mode). '
                                     'Panda nennt gespeicherte Inhalte nie proaktiv — nur wenn du das Thema wieder aufgreifst.',
                                     style: tt.bodySmall?.copyWith(
-                                      color:
-                                          ZenColors.ink.withValue(alpha: .80),
+                                      color: ZenColors.ink.withValue(alpha: .80),
                                     ),
                                     textAlign: TextAlign.left,
                                   ),
                                 ),
+
+                                // Optionaler Upgrade-Hinweis, wenn Trial abgelaufen
+                                if (_memoryConsent &&
+                                    (widget.props.memoryActive == false) &&
+                                    widget.props.onUpgrade != null) ...[
+                                  const SizedBox(height: 12),
+                                  Align(
+                                    alignment: Alignment.centerRight,
+                                    child: OutlinedButton.icon(
+                                      onPressed: widget.props.onUpgrade,
+                                      icon: const Icon(Icons.star_rounded),
+                                      label: const Text('Upgrade aktivieren'),
+                                    ),
+                                  ),
+                                ],
                               ],
                             ),
                           ),
@@ -359,8 +410,7 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
                                 const SizedBox(width: 10),
                                 Expanded(
                                   child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
+                                    crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
                                       Text(
                                         'Datenschutzerklärung',
@@ -376,8 +426,7 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
                                           'Version ${widget.props.policyVersion}',
                                         ].join(' • '),
                                         style: tt.bodyMedium?.copyWith(
-                                          color: ZenColors.ink
-                                              .withValue(alpha: .75),
+                                          color: ZenColors.ink.withValue(alpha: .75),
                                         ),
                                       ),
                                       const SizedBox(height: 8),
@@ -386,29 +435,24 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
                                         runSpacing: 8,
                                         children: [
                                           TextButton.icon(
-                                            onPressed:
-                                                widget.props.onOpenPolicy,
+                                            onPressed: widget.props.onOpenPolicy,
                                             icon: const Icon(
                                                 Icons.open_in_new_rounded),
-                                            label:
-                                                const Text('Erklärung lesen'),
+                                            label: const Text('Erklärung lesen'),
                                           ),
                                           if (widget.props.onExport != null)
                                             OutlinedButton.icon(
                                               onPressed: widget.props.onExport,
                                               icon: const Icon(
                                                   Icons.file_download_rounded),
-                                              label: const Text(
-                                                  'Daten exportieren'),
+                                              label: const Text('Daten exportieren'),
                                             ),
                                           if (widget.props.onDeleteAll != null)
                                             OutlinedButton.icon(
-                                              onPressed:
-                                                  widget.props.onDeleteAll,
+                                              onPressed: widget.props.onDeleteAll,
                                               icon: const Icon(
                                                   Icons.delete_outline_rounded),
-                                              label: const Text(
-                                                  'Alle Daten löschen'),
+                                              label: const Text('Alle Daten löschen'),
                                             ),
                                         ],
                                       ),
@@ -677,9 +721,7 @@ class _ToggleCard extends StatelessWidget {
       topOpacity: .20,
       bottomOpacity: .10,
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-      child: Column(
-        children: children,
-      ),
+      child: Column(children: children),
     );
   }
 }
@@ -718,8 +760,7 @@ class _ToggleRow extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const ExcludeSemantics(
-            child:
-                Icon(Icons.info_outline, size: 0), // Placeholder for alignment
+            child: Icon(Icons.info_outline, size: 0), // Alignment-Placeholder
           ),
           ExcludeSemantics(
             child: Icon(item.icon, size: 18, color: ZenColors.ink),
@@ -750,10 +791,7 @@ class _ToggleRow extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 10),
-          Switch(
-            value: item.value,
-            onChanged: item.onChanged,
-          ),
+          Switch(value: item.value, onChanged: item.onChanged),
         ],
       ),
     );

@@ -1,9 +1,10 @@
 // ignore_for_file: unused_element
-// [BASELINE] lib/services/guidance_service.dart (Stand: 2025-11-07, v6.4.16)
+
+// [MERGE] lib/services/guidance_service.dart (Stand: 2025-11-09, v6.4.16)
 // ZenYourself — Guidance / Coaching Service
 // -----------------------------------------------------------------------------
 // v6.4.16 (Compile-Fix Regex-Literal + Unicode-Name-Erkennung robust)
-// • _extractDeclaredName: Raw-String jetzt doppelt-quotiert (r"…") damit ' und ’
+// • _extractDeclaredName: Raw-String jetzt doppelt-quotiert (r"…"), damit ' und ’
 //   innerhalb der Zeichenklasse nicht den String beenden.
 // • Zeichenklasse auf ['’] vereinheitlicht (ohne Escape), keine Logikänderung.
 // • Rest unverändert.
@@ -14,22 +15,16 @@
 //   nicht nur consent. So kann der Server „aktiv/passiv“ sauber unterscheiden.
 // • _prepareMemories(..) respektiert weiter strikt Consent; zusätzlich kurzer
 //   Fast-Exit, wenn Memory-Bridge inaktiv ist (kein Merge von incoming).
-// • Kleinere Cleanups, keine Breaking Changes.
 //
 // v6.4.14 (Consent-Flag Hardening + Bridge Meta)
 // • meta.flags.client_memory wird jetzt **immer** gesetzt (true/false) – nicht
 //   nur bei Consent=true. Server kann damit das Client-Memory eindeutig erkennen.
 // • meta.memory.bridge wird zusätzlich (true/false) mitgegeben (sanfter Hinweis).
-// • _prepareMemories(..): ruft maybeRespectAnonFromText(..) vor Name-Extraction,
-//   baut Memories nur bei Consent; injected Name bleibt lokal/quellwahr.
-// • Alle Full-Turn-Methoden setzen memoryConsent konsistent und reichen Flags
-//   in beiden API-Pfaden (dynamic + typed Fallback) durch.
 //
 // v6.4.13 (Compile-Fix: ApiService ohne `meta` in typed Calls)
 // • In allen *typed* Fallback-Aufrufen von ApiService.* das benannte Argument
 //   `meta:` entfernt (die aktuelle ApiService-Signatur kennt das noch nicht).
 // • Dynamische Aufrufe (via `as dynamic`) behalten `meta:` bei, wenn verfügbar.
-// • Keine Logikänderung an Client-Memory-Bridge, Name-Injection, History-Mapping.
 //
 // v6.4.12 (Async-Fix for Client-Memory Bridge):
 // • _prepareMemories(...) auf async → Future<Map<String,dynamic>?>
@@ -40,7 +35,6 @@
 // • Bei Consent: meta.flags.client_memory = true in JEDEM Call.
 // • Name-Injection: erkennt „ich heiße/ich heisse/mein Name ist/ich bin …“
 //   und ergänzt context.memories.identity.name (nur bei Consent).
-// • Kleine Memories: Wenn keine übergeben → MemoryService.buildContextMemories.
 //
 // v6.4.10 (Context-Carryover / Next-Turn-Fassade):
 // • Fassade nextTurnFull(...): bevorzugt ApiService.sendNextTurnFull(...)
@@ -56,7 +50,8 @@ library guidance_service;
 import 'dart:async';
 import 'package:flutter/foundation.dart' show debugPrint, kDebugMode;
 
-import '../services/core/api_service.dart';
+// WICHTIG: Pfad korrigiert (wir liegen selbst in lib/services/)
+import 'core/api_service.dart';
 import 'guidance/dtos.dart';
 import '../core/memory/memory_service.dart' as mem;
 
@@ -111,7 +106,7 @@ class GuidanceService {
   Future<bool> health() => ApiService.instance.healthCheck();
 
   // ===========================================================================
-  // 1) Typed API — Proxys auf ApiService.*
+  // 1) TYPED API — Proxys auf ApiService.*
   // ===========================================================================
 
   Future<ReflectionTurn> startSessionFull({
@@ -228,7 +223,7 @@ class GuidanceService {
     );
   }
 
-  /// Neue Fassade für den Full-Turn über /next_turn_full.
+  /// Neue Fassade für den Full-Turn über /next_turn_full (bevorzugt).
   Future<ReflectionTurn> nextTurnFull({
     required ReflectionSession session,
     required String text,
@@ -470,7 +465,9 @@ class GuidanceService {
         audioUrl: r.audioUrl,
       );
     } catch (_) {
-      final title = 'Ein stiller Blick';
+      final title = titleHint?.trim().isNotEmpty == true
+          ? titleHint!.trim()
+          : 'Ein stiller Blick';
       final body =
           'Innehalten ohne Druck. Ein kleiner realer Schritt wird sichtbar. Zeit hat keine Eile.';
       return StoryResult(
@@ -754,9 +751,15 @@ class GuidanceService {
       final topics = asList((hint as dynamic).topics);
 
       final out = <String, dynamic>{};
-      if (facets != null && facets.isNotEmpty) out['recent_facets'] = facets;
-      if (tags != null && tags.isNotEmpty) out['recent_tags'] = tags;
-      if (topics != null && topics.isNotEmpty) out['last_themes'] = topics;
+      if (facets != null && facets is List && facets.isNotEmpty) {
+        out['recent_facets'] = facets.cast<String>();
+      }
+      if (tags != null && tags is List && tags.isNotEmpty) {
+        out['recent_tags'] = tags.cast<String>();
+      }
+      if (topics != null && topics is List && topics.isNotEmpty) {
+        out['last_themes'] = topics.cast<String>();
+      }
       return out.isEmpty ? null : out;
     } catch (_) {
       return null;
@@ -877,6 +880,7 @@ class GuidanceService {
       'thread_id': threadId,
     };
 
+    // Smart Mirror ohne Frage
     final mirror = (t.mirror ?? '').trim();
     if (mirror.isNotEmpty && !mirror.endsWith('?')) {
       final cleaned = _cleanMirror(mirror);
@@ -885,6 +889,7 @@ class GuidanceService {
       }
     }
 
+    // Leitfrage nur, wenn gerade kein Mood-Prompt ansteht
     final ask = (t.primaryQuestion ?? '').trim();
     final shouldPromptMood =
         (map['flow']['mood_prompt'] == true) || (map['flow']['recommend_end'] == true);
@@ -892,6 +897,7 @@ class GuidanceService {
       map['question'] = ask.endsWith('?') ? ask : '$ask?';
     }
 
+    // Answer-Helpers (bereinigt)
     final ah = _sanitizeAnswerHelpers(t.answerHelpers);
     if (ah.isNotEmpty) {
       map['answer_helpers'] = ah;
@@ -911,9 +917,24 @@ class GuidanceService {
     final hs = (t.helperSuggestion ?? '').trim();
     if (hs.isNotEmpty) map['helper_suggestion'] = hs;
 
-    if (t.analysis != null) map['analysis'] = t.analysis!.toJson();
-    if (t.topicSuggestions.isNotEmpty) {
-      map['topic_suggestions'] = t.topicSuggestions;
+    if (t.analysis != null) {
+      final a = t.analysis!.toJson();
+      map['analysis'] = a;
+      // Topic-Shift (falls vorhanden) als flaches Flag für UI-Hinweise
+      final ts = (a['topic_shift'] == true) ||
+          (a['topicShift'] == true) ||
+          (a['topicChange'] == true);
+      if (ts) map['topic_shift'] = true;
+      // Insight-Score bevorzugt aus Analysis
+      if (a['insight_score'] is num) {
+        map['insight_score'] = (a['insight_score'] as num).toDouble();
+      }
+    } else {
+      // Falls Analysis fehlt, ggf. aus Flow holen
+      final dynamic maybeInsightInFlow = flowJson['insight_score'];
+      if (maybeInsightInFlow is num) {
+        map['insight_score'] = maybeInsightInFlow;
+      }
     }
 
     final sturn = (sessMap['turn_index'] ?? sessMap['turn'] ?? 0).toString();
@@ -931,14 +952,6 @@ class GuidanceService {
         'reset_suggestion': shouldPromptMood,
       },
     };
-
-    final double? insightFromAnalysis = t.analysis?.insightScore;
-    final dynamic maybeInsightInFlow = flowJson['insight_score'];
-    if (insightFromAnalysis != null) {
-      map['insight_score'] = insightFromAnalysis;
-    } else if (maybeInsightInFlow is num) {
-      map['insight_score'] = maybeInsightInFlow;
-    }
 
     return map;
   }
@@ -1123,6 +1136,7 @@ class GuidanceService {
   String? _extractDeclaredName(String text) {
     final t = text.trim();
     final patterns = <RegExp>[
+      // Raw-String als r"…", doppelte Anführungszeichen, damit ' und ’ im Charset ok sind.
       RegExp(
         r"\b(?:ich\s+hei(?:s|ß|ss|se)e?|mein\s+name\s+ist|ich\s+bin)\s+([A-ZÄÖÜ][a-zäöüß\-’']+(?:\s+[A-ZÄÖÜ][a-zäöüß\-’']+){0,2}|[a-zäöüß\-’']+(?:\s+[a-zäöüß\-’']+){0,2})\b",
         caseSensitive: false,

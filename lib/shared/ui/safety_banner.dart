@@ -1,13 +1,13 @@
-// lib/shared/ui/safety_banner.dart
-//
+// [MERGE SIGNAL] lib/shared/ui/safety_banner.dart — v1.3 (2025-11-09)
 // SafetyBanner — Oxford-Zen (CH-Disclaimer + Buttons, Risk-aware)
 // -----------------------------------------------------------------------------
 // • Zeigt bei RiskLevel.mild/high einen ruhigen Hinweis mit Hotlines-CTA.
 // • Buttons: „Hotlines öffnen“ (Bottom-Sheet) und „144 anrufen“ (Soforthilfe).
-// • Farben & Typo via ZenColors/Theme, A11y-Semantics inkl. „Heute“-neutral.
+// • Farben & Typo via ZenColors/Theme, A11y-Semantics inkl. neutralem Wording.
 // • Verwendet showSwissHotlinesBottomSheet() aus widgets/hotline_widget.dart
-//   und Launching.openTel('144') für die Notruf-Schaltfläche.
-//
+//   und Launching.openTel('144') (Soforthilfe-Schaltfläche).
+// • Backwards-compatible: optionale onOpenHotlines/onCall144 überschreiben Standardaktionen.
+
 import 'package:flutter/material.dart';
 import '../zen_style.dart' as zs;
 import '../../widgets/hotline_widget.dart' show showSwissHotlinesBottomSheet;
@@ -20,10 +20,16 @@ class SafetyBanner extends StatelessWidget {
   final RiskLevel level;
   final EdgeInsetsGeometry padding;
 
+  /// Optional: eigene Aktionen injizieren (ansonsten Standardaktionen nutzen).
+  final VoidCallback? onOpenHotlines;
+  final VoidCallback? onCall144;
+
   const SafetyBanner({
     super.key,
     required this.level,
     this.padding = const EdgeInsets.all(12),
+    this.onOpenHotlines,
+    this.onCall144,
   });
 
   @override
@@ -38,14 +44,17 @@ class SafetyBanner extends StatelessWidget {
         : 'Danke fürs Teilen. Wenn du magst, findest du hier anonyme Hilfe und Unterstützung.';
 
     // Ruhige Farben aus Theme/Zenschema
-    final bg = Theme.of(context)
-        .colorScheme
-        .surfaceContainerHigh
-        .withValue(alpha: .80);
-    final border =
-        Theme.of(context).colorScheme.outlineVariant.withValue(alpha: .30);
+    // Hinweis: surfaceContainerHigh ist Material 3; bei älteren SDKs kannst du
+    // alternativ mit Theme.of(context).colorScheme.surface arbeiten.
+    final cs = Theme.of(context).colorScheme;
+    final bg = (cs.surfaceContainerHigh).withValue(alpha: .80);
+    final border = (cs.outlineVariant).withValue(alpha: .30);
     const iconColor = zs.ZenColors.deepSage;
     final textColor = zs.ZenColors.inkStrong.withValue(alpha: .96);
+
+    final openHotlines =
+        onOpenHotlines ?? () => showSwissHotlinesBottomSheet(context);
+    final call144 = onCall144 ?? () => Launching.openTel('144');
 
     return Semantics(
       container: true,
@@ -81,7 +90,7 @@ class SafetyBanner extends StatelessWidget {
               children: [
                 // Primäre Aktion: Hotlines öffnen (Bottom-Sheet)
                 OutlinedButton(
-                  onPressed: () => showSwissHotlinesBottomSheet(context),
+                  onPressed: openHotlines,
                   style: OutlinedButton.styleFrom(
                     minimumSize: const Size(0, 40),
                     shape: const RoundedRectangleBorder(
@@ -91,10 +100,11 @@ class SafetyBanner extends StatelessWidget {
                   ),
                   child: const Text('Hotlines öffnen'),
                 ),
+
                 // Sekundär (High Risk: Soforthilfe 144)
                 if (isHigh)
                   ElevatedButton.icon(
-                    onPressed: () => Launching.openTel('144'),
+                    onPressed: call144,
                     icon: const Icon(Icons.call_rounded, size: 18),
                     label: const Text('144 anrufen'),
                     style: ElevatedButton.styleFrom(

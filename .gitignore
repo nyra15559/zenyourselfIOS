@@ -58,3 +58,9 @@ ios_distribution_private_key.pub
 **/google-services.json
 **/GoogleService-Info.plist
 .env
+
+# Ignore large archives
+zenyourself-*.zip
+*.apk
+*.aab
+build/

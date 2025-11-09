@@ -1,8 +1,11 @@
-//[BASELINE] lib/core/privacy/privacy_texts.dart (Stand: 29.10.)
-//
-// Ruhige, klare Texte (CH) für Ghost-Mode, Teilen, Name & Export-Disclaimer.
-// Rückwärts-kompatibel: *Body*/Blurb-Aliasse vorhanden.
-// Vorgaben: neutraler Ton, keine „Cloud“-Hinweise.
+// [MERGE SIGNAL] lib/core/privacy/privacy_texts.dart (v1.3 · 2025-11-09)
+// ZenYourself — Privacy Texts (CH, neutral, ohne „Cloud“-Hinweise)
+// -----------------------------------------------------------------------------
+// • Zentrale, ruhige Texte für Datenschutz/Consent-UI (Ghost-Mode, Name, Export).
+// • Rückwärts-Kompatibilität: *Body*-Aliasse zu *Blurb* bleiben erhalten.
+// • Trial/Status/Upgrade-Microcopy ergänzt.
+// • Keine technischen Begriffe wie „Cloud“ in den Texten.
+// -----------------------------------------------------------------------------
 
 class PrivacyTexts {
   // ---------------------------------------------------------------------------
@@ -17,7 +20,7 @@ class PrivacyTexts {
   static const String ghostBody = ghostBlurb;
 
   // ---------------------------------------------------------------------------
-  // Optionales Teilen (Therapeut·in)
+  // Optionales Teilen (Therapeut·in / Begleitung) – rein optional
   // ---------------------------------------------------------------------------
   static const String shareTitle = 'Mit Therapeut·in teilen (Opt-in)';
   static const String shareBlurb =
@@ -48,7 +51,7 @@ class PrivacyTexts {
   static const String nameDeletedToast = 'Name gelöscht.';
 
   // ---------------------------------------------------------------------------
-  // Erinnerungen/Consent
+  // Erinnerungen / Consent (on-device)
   // ---------------------------------------------------------------------------
   static const String memoryConsentTitle = 'Erinnerungen erlauben (on-device)';
   static const String memoryConsentBlurb =
@@ -61,33 +64,32 @@ class PrivacyTexts {
       'Panda nennt gespeicherte Inhalte nie proaktiv — nur wenn du das Thema wieder aufgreifst.';
 
   // ---------------------------------------------------------------------------
-  // Löschen / Zurücksetzen
+  // Löschen / Zurücksetzen (lokal)
   // ---------------------------------------------------------------------------
   static const String deleteTitle = 'Gedächtnis löschen';
   static const String deleteBlurb =
       'Löscht alle lokal gespeicherten Themen und Einsichten sofort. '
       'Das hat keine Auswirkungen auf dein Gedankenbuch.';
-  // Alias
   static const String deleteBody = deleteBlurb;
 
   static const String resetFacetsTitle = 'Facetten zurücksetzen';
   static const String resetFacetsBlurb =
-      'Setzt die intern gezählten Facetten und Häufigkeiten zurück. '
+      'Setzt intern gezählte Facetten und Häufigkeiten zurück. '
       'Deine Einträge bleiben erhalten.';
-  // Alias
   static const String resetFacetsBody = resetFacetsBlurb;
 
-  // Optional: Bestätigungsdialoge
+  // Bestätigungsdialoge
   static const String confirmDeleteTitle = 'Gedächtnis wirklich löschen?';
   static const String confirmDeleteBody =
       'Alle lokal gespeicherten Themen und Einsichten werden entfernt. '
       'Dieser Vorgang kann nicht rückgängig gemacht werden.';
+
   static const String confirmResetTitle = 'Facetten wirklich zurücksetzen?';
   static const String confirmResetBody =
       'Gezählte Häufigkeiten werden zurückgesetzt. Deine Einträge bleiben bestehen.';
 
   // ---------------------------------------------------------------------------
-  // Diagnostik & Nutzung (neutral, ohne Cloud-Bezug)
+  // Diagnostik & Nutzung (neutral, ohne Technik-Jargon)
   // ---------------------------------------------------------------------------
   static const String diagnosticsTitle = 'Diagnose senden';
   static const String diagnosticsBlurb =
@@ -96,8 +98,26 @@ class PrivacyTexts {
 
   static const String usageTitle = 'Anonyme Nutzung teilen';
   static const String usageBlurb =
-      'Aggregierte Nutzungswerte (z. B. App-Starts) helfen uns, die App zu verbessern. '
+      'Aggregierte Nutzungswerte (z. B. App-Starts) helfen, die App zu verbessern. '
       'Es werden keine personenbezogenen Inhalte übertragen.';
+
+  // ---------------------------------------------------------------------------
+  // Trial / Status / Upgrade (Anzeige-Texte)
+  // ---------------------------------------------------------------------------
+  static const String statusOff = 'Kontext-Teilen: AUS';
+  static const String statusOn = 'Kontext-Teilen: AN';
+  static const String statusTrial = 'Kontext-Teilen: AN (Trial)';
+  static const String statusExpired = 'Kontext-Teilen: AUS (Trial abgelaufen)';
+
+  /// Formatiert eine kurze Restlaufzeit für den Trial, z. B. „noch 1 Tag“ / „noch 3 Tage“.
+  static String trialDaysLeft(int days) =>
+      'noch $days Tag${days == 1 ? '' : 'e'}';
+
+  static const String upgradeTitle = 'Upgrade aktivieren';
+  static const String upgradeBlurb =
+      'Damit Panda dein Kontext-Gedächtnis dauerhaft nutzen darf, '
+      'kannst du ein Upgrade aktivieren. Du entscheidest jederzeit.';
+  static const String upgradeCta = 'Upgrade';
 
   // ---------------------------------------------------------------------------
   // Export-Disclaimer (CH)
@@ -114,7 +134,7 @@ class PrivacyTexts {
       'ZenYourself ist keine medizinische Leistung und ersetzt keine Therapie.';
 
   // ---------------------------------------------------------------------------
-  // Buttons / Labels (optional zentralisiert)
+  // Buttons / Labels
   // ---------------------------------------------------------------------------
   static const String btnSave = 'Speichern';
   static const String btnDeleteAll = 'Alle Daten löschen';
@@ -122,9 +142,12 @@ class PrivacyTexts {
   static const String btnEditName = 'Namen ändern';
   static const String btnForgetName = 'Name löschen';
   static const String btnForgetMemories = 'Erinnerungen löschen';
+  static const String btnUpgrade = 'Upgrade aktivieren';
+  static const String btnOpenPolicy = 'Erklärung lesen';
 
-  // Snackbars
-  static const String savedToast = 'Einstellungen gespeichert';
+  // Snackbars / Toaster
+  static const String savedToast = 'Einstellungen gespeichert.';
   static const String exportReadyToast = 'Export erstellt.';
   static const String wipedToast = 'Daten gelöscht.';
+  static const String actionCanceledToast = 'Abgebrochen.';
 }

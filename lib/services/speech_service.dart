@@ -1,30 +1,26 @@
-// lib/services/speech_service.dart
-//
-// SpeechService — Oxford Safety Edition v2.6 (auto-sim on web/desktop)
-// Aktualisiert: 2025-10-22
-// -----------------------------------------------------------------------
-// Drop-in-Kompatibilität zur v2.3/2.4-API:
+// [MERGE SIGNAL] lib/services/speech_service.dart — v2.6.2 (2025-11-09)
+// SpeechService — Oxford Safety Edition (auto-sim on web/desktop)
+// -----------------------------------------------------------------------------
+// Drop-in-Kompatibilität zu v2.3/2.4/2.5:
 //   - Klasse: SpeechService (ChangeNotifier)
 //   - Properties: isRecording, isPaused, isActive, transcript$, partial$,
 //                 level$, elapsed$, elapsedSeconds$, totalSeconds
 //   - Methoden: start/stop/pause/resume/toggle/reset/dispose
 //   - attachTranscriber(...) & attachWhisper(...)
 // Änderungen ggü. v2.5:
-//   • WICHTIG (gemäß Projektvorgaben): Auf Web & Desktop wird der
-//     Simulationspfad automatisch aktiviert, wenn keine Engine angebunden ist
-//     oder Engine-Start fehlschlägt. (Mobile bleibt unverändert.)
-//   • simulate-Parameter überschreibt das Verhalten (true erzwingt, false verbietet).
-//
-// Hinweis:
-//   Für echte Erkennung musst du eine Engine andocken:
-//     _speech.attachWhisper(WhisperService(simulate: false));
-//   und beim Start (z. B. im UI) optional: _speech.start(locale: 'de-DE').
-//
+//   • AUTOMATIK: Auf Web & Desktop wird Simulation aktiviert, wenn keine Engine
+//     vorhanden ist oder Start fehlschlägt (Mobile bleibt unverändert).
+//   • simulate-Parameter: true erzwingt, false verbietet Simulation.
+// Stabilität:
+//   • Permissions freundlich (permission_handler, aber nie build-blockend).
+//   • Defensive Streams/Timer-Cleanups, deduplizierte Final-Events.
+// -----------------------------------------------------------------------------
+
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:permission_handler/permission_handler.dart' as ph;
 
-// Transcriber-Typen aus whisper_service.dart
+// Transcriber-Typen aus whisper_service.dart (deine Engine-Schnittstelle).
 import './whisper_service.dart' as stt;
 
 // Re-Export, damit Konsumenten nur diese Datei importieren müssen.
@@ -142,7 +138,7 @@ class SpeechService with ChangeNotifier {
   /// Startet Aufnahme & (falls Engine vorhanden) die Transkription.
   /// simulate:
   ///   - true  → Simulation erzwingen (überall)
-  ///   - false → Simulation unterbinden (auch Web/Desktop)
+  ///   - false → Simulation verbieten (auch Web/Desktop)
   ///   - null  → Standard: Web/Desktop auto-sim, Mobile kein auto-sim
   Future<void> start(
       {bool? simulate, Duration? maxDuration, String? locale}) async {
@@ -150,7 +146,7 @@ class SpeechService with ChangeNotifier {
     if (_state == SpeechState.stopping) return; // mitten im Stop → ignoriere
     if (isRecording || isPaused) return; // idempotent
 
-    // Mic-Permission
+    // Mic-Permission (freundlich & nie fatal)
     final hasMic = await _checkMicrophonePermission();
     if (!hasMic) {
       _fail('Mikrofonberechtigung verweigert');

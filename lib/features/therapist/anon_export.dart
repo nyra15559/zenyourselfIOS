@@ -1,6 +1,6 @@
 // lib/features/therapist/anon_export.dart
 //
-// AnonExportWidget — Oxford Calm & Privacy Edition (v2.2 · 2025-10-22)
+// AnonExportWidget — Oxford Calm & Privacy Edition (v2.3 · 2025-11-08)
 // ---------------------------------------------------------------------
 // • Export: CSV (Mood) / JSON (voll) / JSON (redacted) — nie UI-blockierend.
 // • Redaction: entfernt Freitexte/Audio; Metrics basieren IMMER auf redacted.
@@ -8,6 +8,12 @@
 // • Analytics-Hooks: export_started / export_succeeded / export_failed.
 // • Memorystore: speichert „letzter Export“ (Zeit/Kanal/Top-Facet/Pfad).
 // • Schweizer Disclaimer im UI (PrivacyTexts.chDisclaimerShort).
+//
+// Änderungen v2.3:
+// • SegmentedButton-Style auf MaterialStateProperty (stabil über Flutter-Versionen).
+// • compute()-Argumente & Rückgaben streng typisiert (Map/List< Map<String,Object?> >).
+// • Kleinere Lints/Kommentare; Web-Guard belässt Verhalten unverändert.
+// • CSV-Builder generics fix (List<dynamic> → List<Map<String,Object?>>).
 //
 // Abhängigkeiten: path_provider, shared_preferences (bereits im Projekt vorhanden).
 
@@ -125,7 +131,6 @@ class AnonExportWidget extends StatefulWidget {
 
     // Freundlicher Hinweis (soft): „PDF direkt nicht verfügbar“
     // → Nutzer*in kann JSON/CSV exportieren oder später PDF nutzen.
-    // keine harte Abhängigkeit, kein Blocker.
     // ignore: use_build_context_synchronously
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
@@ -165,8 +170,7 @@ class _AnonExportWidgetState extends State<AnonExportWidget> {
 
   Future<void> _prefillLastExportPath() async {
     try {
-      final last =
-          await _Memorystore.loadLastExport(); // nutzt die Methode → kein Lint
+      final last = await _Memorystore.loadLastExport();
       if (!mounted) return;
       setState(() {
         _lastPath = last['path'];
@@ -347,8 +351,9 @@ class _AnonExportWidgetState extends State<AnonExportWidget> {
       });
 
       // Vorbereitungen: serialisierbare Maps für compute
-      final moodMaps = widget.moodEntries.map((e) => e.toJson()).toList();
-      final reflMaps = (_includeReflections
+      final List<Map<String, Object?>> moodMaps =
+          widget.moodEntries.map((e) => e.toJson()).toList();
+      final List<Map<String, Object?>> reflMaps = (_includeReflections
               ? (widget.reflectionEntries ?? const <ReflectionEntry>[])
               : const <ReflectionEntry>[])
           .map((e) => e.toJson())
@@ -421,7 +426,7 @@ class _AnonExportWidgetState extends State<AnonExportWidget> {
 
   // ---------- Helpers ----------
 
-  /// Zeitstempel-Dateiname, z. B. zenyourself_mood_2025{mm}{dd}_hhmmss.csv
+  /// Zeitstempel-Dateiname, z. B. zenyourself_mood_20251108_142501.csv
   String _timestamped(String base, String ext) {
     final now = DateTime.now();
     final y = now.year.toString().padLeft(4, '0');
@@ -504,7 +509,6 @@ class _MetricsInline extends StatelessWidget {
 String _csvEscape(String v) => '"${v.replaceAll('"', '""')}"';
 
 String _buildCsvString(List<dynamic> moodMapsDyn) {
-  // FIX: generics/typing (vorher >>> Tippfehler)
   final moods = List<Map<String, Object?>>.from(moodMapsDyn);
   final b = StringBuffer();
   b.writeln('Timestamp,DayTag,MoodScore,MoodLabel,Note,Extra');
@@ -707,10 +711,11 @@ class _ExportSelector extends StatelessWidget {
         if (s.isNotEmpty) onChanged(s.first);
       },
       style: ButtonStyle(
-        backgroundColor: WidgetStateProperty.resolveWith(
+        backgroundColor: MaterialStateProperty.resolveWith(
           (states) => ZenColors.surface,
         ),
-        foregroundColor: const WidgetStatePropertyAll(ZenColors.inkStrong),
+        foregroundColor:
+            const MaterialStatePropertyAll<Color>(ZenColors.inkStrong),
       ),
     );
   }

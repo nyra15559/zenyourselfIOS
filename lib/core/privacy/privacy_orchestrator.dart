@@ -1,33 +1,27 @@
-// [BASELINE] lib/core/privacy/privacy_orchestrator.dart (v1.3, 2025-11-04)
+// [MERGE SIGNAL] lib/core/privacy/privacy_orchestrator.dart (v1.5 · 2025-11-09)
 // ZenYourself — Privacy Orchestrator (Glue UI ↔ MemoryService)
 // -----------------------------------------------------------------------------
-// Aufgaben (konkret):
-// • Gating für context.memories: Nur wenn BOTH true → memory_consent && memory_active.
-// • Trial-Expiry: 7-Tage-Fenster ab erstem Einschalten. Danach memory_active=false,
+// Aufgaben:
+// • 3-Stufen-Toggle 🕊️/🍃/🌿 & Consent (shareEnabled) steuern.
+// • Gating-Regel: SEND_CONTEXT := memory_consent && memory_active
+//   → Nur dann setzt ApiService meta.flags.client_memory:true & context.memories.
+// • Trial-Expiry: 7 Tage ab erstem Einschalten von Consent; danach memory_active=false
 //   bis Premium/Upgrade (hier nur Platzhalter-Hook).
-// • UI-Glue: liest/stellt Consent (shareEnabled), Greet-by-Name & Name ein.
+// • UI-Glue: liest/stellt Consent (shareEnabled), Greet-by-Name & Name.
 //
-// Technische Hinweise:
-// • ApiService liest je Turn: MemoryService.shareEnabled (== memory_consent).
-// • Zusätzlich wird memory_active über diesen Orchestrator verwaltet (Expiry-Check).
-// • Für Abwärtskompatibilität nutzt der Code defensive dynamic-Calls auf MemoryService,
-//   damit er mit älteren MemoryService-Versionen lauffähig bleibt. Existieren Methoden
-//   nicht, fallen wir auf lokale Berechnung/Keys zurück (über MemoryService optionale
-//   KV-APIs).
+// Pfade/Kompatibilität:
+// • MemoryService liegt im Core:  import '../memory/memory_service.dart' as mem;
+// • PrivacyScreen-UI liegt unter Features: '../../features/settings/privacy_screen.dart'
+// • Defensiv via dynamic-Calls (Backward-Compat zu v6.4+).
 //
-// Public-Gating-Regel (für ApiService):
-//   SEND_CONTEXT := memory_consent && memory_active
-//   → ApiService setzt meta.flags.client_memory:true & context.memories nur dann.
-//
-// Daten-/Key-Konvention (lokal; über MemoryService-KV gespeichert):
-//   privacy.memory_active           : bool
-//   privacy.memory_trial_started_at : ISO-UTC String
-//   privacy.memory_expiry_at        : ISO-UTC String (trialStart + 7 Tage)
-//
-// -----------------------------------------------------------------------------
+// ignore_for_file: avoid_dynamic_calls
 
 import 'package:flutter/material.dart';
-import 'privacy_screen.dart';
+
+// UI-Komponente + Settings-Types
+import '../../features/settings/privacy_screen.dart';
+
+// Kanonischer MemoryService-Pfad (Core)
 import '../memory/memory_service.dart' as mem;
 
 class PrivacyOrchestrator extends StatefulWidget {
@@ -40,11 +34,11 @@ class PrivacyOrchestrator extends StatefulWidget {
 class _PrivacyOrchestratorState extends State<PrivacyOrchestrator> {
   bool _loading = true;
 
-  // Quellen der Wahrheit (aus MemoryService):
-  bool _memoryConsent = false; // -> MemoryService.shareEnabled (consent)
-  bool _memoryActive = true;   // -> Trial- / Premium-Gate
-  bool _greetByName = false;   // true == Name darf aktiv verwendet werden
-  String? _currentName;        // nur gesetzt, wenn greetByName == true
+  // Quellen (aus MemoryService):
+  bool _memoryConsent = false; // memory_consent → shareEnabled
+  bool _memoryActive = true;   // Trial/Premium Gate (clientseitig)
+  bool _greetByName = false;   // Begrüßung mit Name erlaubt?
+  String? _currentName;        // nur wenn greetByName == true sinnvoll
 
   // Trial/Expiry
   DateTime? _trialStartedAtUtc;
@@ -53,14 +47,10 @@ class _PrivacyOrchestratorState extends State<PrivacyOrchestrator> {
 
   mem.MemoryService get _svc => mem.MemoryService.instance;
 
-  // KV-Schlüssel (über MemoryService-Optionals)
-  static const String _kMemActive = 'privacy.memory_active';
-  static const String _kTrialStarted = 'privacy.memory_trial_started_at';
-  static const String _kExpiryAt = 'privacy.memory_expiry_at';
-
-  // ---------------------------------------------------------------------------
-  // Lifecycle
-  // ---------------------------------------------------------------------------
+  // KV-Schlüssel
+  static const String _kMemActive     = 'privacy.memory_active';
+  static const String _kTrialStarted  = 'privacy.memory_trial_started_at';
+  static const String _kExpiryAt      = 'privacy.memory_expiry_at';
 
   @override
   void initState() {
@@ -69,14 +59,12 @@ class _PrivacyOrchestratorState extends State<PrivacyOrchestrator> {
   }
 
   Future<void> _load() async {
-    // 1) Consent lesen (Instanz, kein statischer Zugriff)
+    // 1) Consent lesen
     _memoryConsent = _svc.shareEnabled;
 
-    // 2) Name/Gruß laden – stabil zu v6.5 MemoryService
+    // 2) Name/Gruß laden – robust zu v6.5 (Record) und Legacy (String?)
     try {
       final res = await _svc.loadGreetingName();
-      // v6.5: returns ({String? name, bool greetByName})
-      // ältere: String?
       if (res is ({String? name, bool greetByName})) {
         _greetByName = res.greetByName;
         _currentName = (res.name ?? '').trim().isEmpty ? null : res.name!.trim();
@@ -92,27 +80,23 @@ class _PrivacyOrchestratorState extends State<PrivacyOrchestrator> {
       _currentName = null;
     }
 
-    // 3) Trial/Active/Expiry laden (defensiv via MemoryService optionale KV-APIs)
+    // 3) Trial/Active/Expiry laden (defensive dynamic-Calls)
     await _loadActiveAndExpiry();
 
-    // 4) Expires jetzt prüfen → _memoryActive ggf. false, _daysLeft kalkulieren
+    // 4) Expires jetzt prüfen
     _checkAndApplyExpiry();
 
     if (!mounted) return;
     setState(() => _loading = false);
   }
 
-  // ---------------------------------------------------------------------------
-  // Memory Active + Trial/Expiry Laden/Speichern (defensive dynamic-Calls)
-  // ---------------------------------------------------------------------------
+  // ---- Memory Active + Trial/Expiry Laden/Speichern -------------------------
 
   Future<void> _loadActiveAndExpiry() async {
-    // Defaults
     _memoryActive = true;
     _trialStartedAtUtc = null;
     _expiryAtUtc = null;
 
-    // Versuche, ob MemoryService eigene Accessors bereitstellt
     try {
       final dyn = _svc as dynamic;
 
@@ -120,15 +104,13 @@ class _PrivacyOrchestratorState extends State<PrivacyOrchestrator> {
       try {
         final v = await dyn.getMemoryActive?.call();
         if (v is bool) _memoryActive = v;
-      } catch (_) {
-        // noop
-      }
+      } catch (_) {/* noop */}
 
       // trial started
       try {
         final s = await dyn.getOptString?.call(_kTrialStarted) ??
-            await dyn.getOpt?.call(_kTrialStarted) ??
-            await dyn.getKey?.call(_kTrialStarted);
+                  await dyn.getOpt?.call(_kTrialStarted) ??
+                  await dyn.getKey?.call(_kTrialStarted);
         if (s is String && s.trim().isNotEmpty) {
           _trialStartedAtUtc = DateTime.tryParse(s.trim())?.toUtc();
         }
@@ -137,34 +119,31 @@ class _PrivacyOrchestratorState extends State<PrivacyOrchestrator> {
       // expiry
       try {
         final s = await dyn.getOptString?.call(_kExpiryAt) ??
-            await dyn.getOpt?.call(_kExpiryAt) ??
-            await dyn.getKey?.call(_kExpiryAt);
+                  await dyn.getOpt?.call(_kExpiryAt) ??
+                  await dyn.getKey?.call(_kExpiryAt);
         if (s is String && s.trim().isNotEmpty) {
           _expiryAtUtc = DateTime.tryParse(s.trim())?.toUtc();
         }
       } catch (_) {/* noop */}
     } catch (_) {
-      // Falls keine KV/Accessors vorhanden sind, bleiben Defaults aktiv
+      // Kein KV? → Defaults bleiben aktiv.
     }
 
-    // Falls es noch keinen Startzeitpunkt gibt, aber Consent bereits aktiv ist,
-    // initialisieren wir den Trial-Start jetzt (nur 1x).
+    // Falls Consent aktiv, aber kein Trial-Start existiert → jetzt initialisieren
     if (_memoryConsent && _trialStartedAtUtc == null) {
-      _trialStartedAtUtc = DateTime.now().toUtc();
-      _expiryAtUtc = _trialStartedAtUtc!.add(const Duration(days: 7));
+      final now = DateTime.now().toUtc();
+      _trialStartedAtUtc = now;
+      _expiryAtUtc = now.add(const Duration(days: 7));
       await _persistTrial(_trialStartedAtUtc!, _expiryAtUtc!);
     }
-
-    // Wenn es gar keinen Eintrag gibt, setze memory_active true als Default.
-    // Die _checkAndApplyExpiry() entscheidet dann, ob es verfallen ist.
   }
 
   Future<void> _persistTrial(DateTime startedUtc, DateTime expiryUtc) async {
     try {
       final dyn = _svc as dynamic;
       final startStr = startedUtc.toIso8601String();
-      final expStr = expiryUtc.toIso8601String();
-      // Optionale KV-APIs des MemoryService nutzen:
+      final expStr   = expiryUtc.toIso8601String();
+
       await dyn.setOptString?.call(_kTrialStarted, startStr);
       await dyn.setOpt?.call(_kTrialStarted, startStr);
       await dyn.setKey?.call(_kTrialStarted, startStr);
@@ -179,25 +158,21 @@ class _PrivacyOrchestratorState extends State<PrivacyOrchestrator> {
     _memoryActive = active;
     try {
       final dyn = _svc as dynamic;
-      await dyn.setMemoryActive?.call(active); // falls vorhanden
+      await dyn.setMemoryActive?.call(active); // bevorzugter Weg
     } catch (_) {/* noop */}
     try {
       final dyn = _svc as dynamic;
-      // Alternative KV Flags
       await dyn.setOptBool?.call(_kMemActive, active);
       await dyn.setOpt?.call(_kMemActive, active);
       await dyn.setFlag?.call(_kMemActive, active);
     } catch (_) {/* ignore */}
   }
 
-  // ---------------------------------------------------------------------------
-  // Expiry-Logik
-  // ---------------------------------------------------------------------------
+  // ---- Expiry-Logik ---------------------------------------------------------
 
   void _checkAndApplyExpiry() {
     final now = DateTime.now().toUtc();
 
-    // Wenn kein Trial-Start gesetzt ist → aus Consent ableiten (nur Anzeige).
     if (_trialStartedAtUtc == null && _memoryConsent) {
       _trialStartedAtUtc = now;
       _expiryAtUtc = now.add(const Duration(days: 7));
@@ -205,28 +180,28 @@ class _PrivacyOrchestratorState extends State<PrivacyOrchestrator> {
 
     if (_expiryAtUtc != null) {
       final remaining = _expiryAtUtc!.difference(now);
-      _daysLeft = remaining.isNegative ? 0 : remaining.inDays.clamp(0, 9999);
-      // Trial abgelaufen → Active auf false setzen
       if (remaining.isNegative) {
-        _memoryActive = false;
+        _daysLeft = 0;
+        _memoryActive = false; // Trial abgelaufen
+      } else {
+        _daysLeft = (remaining.inDays.clamp(0, 9999)).toInt();
       }
     } else {
       _daysLeft = 0;
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Anwenden von UI-Änderungen (Save)
-  // ---------------------------------------------------------------------------
+  // ---- Anwenden von UI-Änderungen (Save) ------------------------------------
 
   Future<void> _applySave(PrivacySettings s) async {
-    // 1) Consent (memory_consent)
-    await _svc.setShareEnabled(s.memoryConsent);
+    // 1) Consent
+    try {
+      await _svc.setShareEnabled(s.memoryConsent);
+    } catch (_) {/* ignore */}
     _memoryConsent = s.memoryConsent;
 
     // 2) Greet/Name
     if (s.greetByName) {
-      // Nutzer möchte Begrüßung mit Namen
       if ((_currentName ?? '').trim().isEmpty) {
         final newName = await _askForName(context);
         if (newName != null && newName.trim().isNotEmpty) {
@@ -234,30 +209,22 @@ class _PrivacyOrchestratorState extends State<PrivacyOrchestrator> {
           _currentName = newName.trim();
           _greetByName = true;
         } else {
-          // kein Name -> Gruß wieder deaktivieren
           await _svc.saveIdentityName('', greetByName: false);
           _currentName = null;
           _greetByName = false;
         }
       } else {
-        // Name existiert bereits -> nur Greet-Flag sicherstellen
         await _svc.saveIdentityName(_currentName!, greetByName: true);
         _greetByName = true;
       }
     } else {
-      // Begrüßung deaktivieren (Name bleibt lokal gespeichert; kein proaktiver Recall)
       await _svc.saveIdentityName(_currentName ?? '', greetByName: false);
       _greetByName = false;
     }
 
     // 3) Trial-/Active-Logik
-    //    – Beim erstmaligen Aktivieren von Consent wird (falls nicht vorhanden)
-    //      der Trial-Start gesetzt und memory_active=true.
-    //    – Wenn Trial bereits abgelaufen ist, bleibt memory_active=false,
-    //      bis Premium/Upgrade (Hook unten).
     final now = DateTime.now().toUtc();
 
-    // Lade aktuellen Start/Expiry sicher (falls neu gesetzt werden muss)
     if (_memoryConsent) {
       if (_trialStartedAtUtc == null) {
         _trialStartedAtUtc = now;
@@ -265,18 +232,14 @@ class _PrivacyOrchestratorState extends State<PrivacyOrchestrator> {
         await _persistTrial(_trialStartedAtUtc!, _expiryAtUtc!);
       }
 
-      // Nach Speichern neu prüfen
       _checkAndApplyExpiry();
 
       if (_expiryAtUtc != null && !_expiryAtUtc!.isBefore(now)) {
-        // Trial läuft → aktivieren
         await _persistMemoryActive(true);
       } else {
-        // Trial abgelaufen → active=false, Consent darf aber an bleiben
         await _persistMemoryActive(false);
       }
     } else {
-      // Kein Consent → immer deaktiviert
       await _persistMemoryActive(false);
     }
 
@@ -284,9 +247,7 @@ class _PrivacyOrchestratorState extends State<PrivacyOrchestrator> {
     setState(() {});
   }
 
-  // ---------------------------------------------------------------------------
-  // Name-Dialog & kleine Actions
-  // ---------------------------------------------------------------------------
+  // ---- Name-Dialog & kleine Actions ----------------------------------------
 
   Future<void> _forgetName() async {
     await _svc.saveIdentityName('', greetByName: false);
@@ -324,24 +285,16 @@ class _PrivacyOrchestratorState extends State<PrivacyOrchestrator> {
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // Optional: Upgrade/Premium (Platzhalter)
-  // ---------------------------------------------------------------------------
+  // ---- Optional: Upgrade/Premium (Platzhalter) ------------------------------
 
   Future<void> _handleUpgrade() async {
-    // Hier Premium-Flow integrieren (Paywall, StoreKit/Billing, etc.)
-    // Bis dahin nur ein freundlicher Hinweis.
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Upgrade ist noch nicht verfügbar.'),
-      ),
+      const SnackBar(content: Text('Upgrade ist noch nicht verfügbar.')),
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // UI
-  // ---------------------------------------------------------------------------
+  // ---- UI -------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
@@ -349,11 +302,8 @@ class _PrivacyOrchestratorState extends State<PrivacyOrchestrator> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    // Hinweis-Text zum Status für PrivacyScreen (falls Props vorgesehen)
     final statusNote = () {
-      if (!_memoryConsent) {
-        return 'Kontext-Teilen: AUS';
-      }
+      if (!_memoryConsent) return 'Kontext-Teilen: AUS';
       if (_memoryActive) {
         final left = _daysLeft;
         return left > 0
@@ -365,30 +315,28 @@ class _PrivacyOrchestratorState extends State<PrivacyOrchestrator> {
 
     return PrivacyScreen(
       props: PrivacyScreenProps(
-        // Basics (falls du App-weite Prefs hast, hier injizieren)
+        // Basiskonfig (falls vom PrivacyScreen genutzt)
         shareDiagnostics: false,
         shareUsage: false,
         enableCloudBackup: false,
         localOnly: true,
 
-        // Wichtig für Merge-Handshake:
-        // memoryConsent steuert MemoryService.shareEnabled
-        // memoryActive (Trial/Premium) steuert zusätzlich das Senden von context.memories
-        memoryConsent: _memoryConsent,
+        // Wichtig: Handshake zu MemoryService
+        memoryConsent: _memoryConsent, // steuert shareEnabled
         greetByName: _greetByName,
 
         currentName: _currentName,
         policyVersion: 'v2.1',
         lastUpdated: DateTime(2025, 10, 10),
 
-        // (Optionale) Zusatzinfos, falls PrivacyScreen Props dafür hat:
-        memoryActive: _memoryActive, // falls vorhanden
-        memoryExpiryAt: _expiryAtUtc, // falls vorhanden
-        memoryStatusNote: statusNote, // falls vorhanden
+        // Zusatzinfos (optional, je nach Props verfügbar)
+        memoryActive: _memoryActive,
+        memoryExpiryAt: _expiryAtUtc,
+        memoryStatusNote: statusNote,
 
         // Aktionen
-        onOpenPolicy: () {/* policy öffnen */},
-        onExport: () {/* optional: Export */},
+        onOpenPolicy: () {/* TODO: Policy anzeigen */},
+        onExport: () {/* optional: Export triggern */},
         onDeleteAll: () {/* optional: Full Wipe */},
 
         onEditName: () async {
@@ -404,12 +352,10 @@ class _PrivacyOrchestratorState extends State<PrivacyOrchestrator> {
         },
         onForgetName: _forgetName,
 
-        // Speichern der Privacy-Einstellungen
         onSave: (s) async {
           await _applySave(s);
           if (!mounted) return;
 
-          // Benutzer-Feedback
           final sendAllowed = _memoryConsent && _memoryActive;
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -425,7 +371,7 @@ class _PrivacyOrchestratorState extends State<PrivacyOrchestrator> {
         },
 
         // (Optional) Upgrade-Action, wenn Trial abgelaufen:
-        onUpgrade: _handleUpgrade, // falls PrivacyScreen einen Upgrade-Button hat
+        onUpgrade: _handleUpgrade,
       ),
     );
   }
