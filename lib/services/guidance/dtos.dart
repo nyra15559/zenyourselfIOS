@@ -1,12 +1,15 @@
-// [PATCHED] lib/services/guidance/dtos.dart (Stand: 2025-11-09, v7.1.6+insight.2+timeline.1)
+// [PATCHED] lib/services/guidance/dtos.dart (Stand: 2025-11-10, v7.1.7+insight.3+timeline.2)
 // DTOs & Value-Types für Guidance-Service (standalone, ohne Api-Abhängigkeit)
 // ────────────────────────────────────────────────────────────────────────────
-// MERGE SIGNAL — v7.1.6 (insight.2+timeline.1)
-// • Compile-Fix: Keine static Member in Extensions. Parser als Top-Level-Funktionen:
-//   parseToneType(), parseStage(), parseActionType(). Aufrufer angepasst.
-// • Sonst unverändert: Snake/camel-Aliasse, TimelineMarker & InsightFact, Persona-Sanitizer.
-//
-// Rückwärtskompatibel zu v6.x & v7.1.x — keine Breaking Changes.
+// MERGE SIGNAL — v7.1.7 (insight.3+timeline.2)
+// • Akzeptanzvorgaben aus Plan 1.2 verankert:
+//   – DTOs enthalten answer_helpers[], flow.mood_prompt, risk_level,
+//     closure{mode,tone,hope_reply}, understanding{topic_shift,tags}, memories_to_save[].
+//   – Parser defensiv/tolerant, keine lokalen Chips erzeugt.
+// • Risk-Normalisierung: robustere Aliasse ('level','risk','risk_flag') → 'crisis'|'support'|'none'.
+// • Smalltalk-Sanitizer beibehalten (Panda-Persona ohne „See“-Welt).
+// • TimelineMarker & InsightFact: ISO-Datetime → YYYY-MM-DD Kürzung; List-Parser stabil.
+// • Keine Imports; reine Dart-Value-Types.
 // ────────────────────────────────────────────────────────────────────────────
 
 library guidance_dtos;
@@ -15,6 +18,7 @@ library guidance_dtos;
 // Enums – Tone & Stage
 // ────────────────────────────────────────────────────────────────────────────
 enum ToneType { neutral, calm, hope, gentle, insight, ritual, light, crisis, unknown }
+
 extension ToneTypeWire on ToneType {
   String get wire {
     switch (this) {
@@ -30,6 +34,7 @@ extension ToneTypeWire on ToneType {
     }
   }
 }
+
 ToneType parseToneType(dynamic v) {
   final s = v?.toString().toLowerCase().trim() ?? '';
   switch (s) {
@@ -46,6 +51,7 @@ ToneType parseToneType(dynamic v) {
 }
 
 enum Stage { intro, clarify, hypothesize, deepen, bridge, closure, redirect, unknown }
+
 extension StageWire on Stage {
   String get wire {
     switch (this) {
@@ -60,6 +66,7 @@ extension StageWire on Stage {
     }
   }
 }
+
 Stage parseStage(dynamic v) {
   final s = v?.toString().toLowerCase().trim() ?? '';
   switch (s) {
@@ -108,7 +115,6 @@ class HistoryTurn {
   }
 }
 
-
 // ────────────────────────────────────────────────────────────────────────────
 /* V7.1 (+compat): NextTurnFullRequest — Request-Envelope für /next_turn_full */
 // ────────────────────────────────────────────────────────────────────────────
@@ -121,7 +127,8 @@ class NextTurnFullRequest {
   /// Wird in toJson() nach {context:{memories:…}} serialisiert.
   final dynamic contextMemories;
 
-  final bool? metaClientMemory;           // meta.flags.client_memory
+  /// meta.flags.client_memory (optional; nur Hinweis)
+  final bool? metaClientMemory;
 
   const NextTurnFullRequest({
     required this.sessionId,
@@ -141,7 +148,9 @@ class NextTurnFullRequest {
 
     if (contextMemories != null) {
       if (contextMemories is Map) {
-        map['context'] = {'memories': Map<String, dynamic>.from(contextMemories as Map)};
+        map['context'] = {
+          'memories': Map<String, dynamic>.from(contextMemories as Map),
+        };
       } else if (contextMemories is List && (contextMemories as List).isNotEmpty) {
         map['context'] = {'memories': List<dynamic>.from(contextMemories as List)};
       }
@@ -171,7 +180,6 @@ class NextTurnFullRequest {
     );
   }
 }
-
 
 // ────────────────────────────────────────────────────────────────────────────
 // V7 A1: SpeechMeta – Meta-Infos über Tonalität, Thema, Safety, Vertrauen
@@ -217,7 +225,6 @@ class SpeechMeta {
   }
 }
 
-
 // ────────────────────────────────────────────────────────────────────────────
 // V7 A1: Facets – Facet-Queue & aktives Facet
 // ────────────────────────────────────────────────────────────────────────────
@@ -248,7 +255,6 @@ class Facets {
     return null;
   }
 }
-
 
 // ────────────────────────────────────────────────────────────────────────────
 // V7 A1: SkillCard & SkillBlock – Kartenbasierte Skills mit Stage
@@ -323,7 +329,6 @@ class SkillBlock {
   }
 }
 
-
 // ────────────────────────────────────────────────────────────────────────────
 // Legacy/Analysis (beibehalten für Backcompat)
 // ────────────────────────────────────────────────────────────────────────────
@@ -343,11 +348,11 @@ class AnalyzeResult {
   }
 }
 
-
 // ────────────────────────────────────────────────────────────────────────────
 // ActionType & UserAction (mit Enum-Backcompat)
 // ────────────────────────────────────────────────────────────────────────────
 enum ActionType { reflectionLink, journalLink, storyLink, save, skip, changeTopic, unknown }
+
 extension ActionTypeWire on ActionType {
   String get wire {
     switch (this) {
@@ -361,6 +366,7 @@ extension ActionTypeWire on ActionType {
     }
   }
 }
+
 ActionType parseActionType(dynamic v) {
   final s = v?.toString().toLowerCase().trim() ?? '';
   switch (s) {
@@ -407,7 +413,6 @@ class UserAction {
     );
   }
 }
-
 
 // ────────────────────────────────────────────────────────────────────────────
 // TurnAnalysis & ClosureData
@@ -494,7 +499,6 @@ class ClosureData {
     );
   }
 }
-
 
 // ────────────────────────────────────────────────────────────────────────────
 // ReflectionTurn – Kernantwort inkl. V7-Feldern
@@ -793,7 +797,6 @@ class ReflectionTurn {
   }
 }
 
-
 // ────────────────────────────────────────────────────────────────────────────
 class ReflectionFlow {
   final bool recommendEnd;
@@ -903,7 +906,6 @@ class ReflectionSession {
     return ReflectionSession(threadId: id, turnIndex: turn, maxTurns: max);
   }
 }
-
 
 // ────────────────────────────────────────────────────────────────────────────
 // Weitere Value-Types (unverändert)
@@ -1021,14 +1023,12 @@ class MiniChallenge {
   }
 }
 
-
 // ────────────────────────────────────────────────────────────────────────────
 // Kleine String-Extension
 // ────────────────────────────────────────────────────────────────────────────
 extension IfEmptyX on String {
   String ifEmpty(String Function() alt) => isEmpty ? alt() : this;
 }
-
 
 // ────────────────────────────────────────────────────────────────────────────
 // Interne, wiederverwendbare Parse-Helfer (keine Abhängigkeiten)
@@ -1090,7 +1090,6 @@ bool? _parseBoolOrNull(dynamic v) {
   return null;
 }
 
-
 // ────────────────────────────────────────────────────────────────────────────
 // P3-S11.1 — Persona-Sanitizer: Panda-Welt ohne See (nur Bambus/Licht/Laternen/Tee)
 // Greift ausschließlich bei Panda-Persona-Texten (smalltalk_reply, talk).
@@ -1119,9 +1118,8 @@ String _sanitizePersona(String s) {
 List<String> _sanitizePersonaList(List<String> v) =>
     v.map(_sanitizePersona).where((e) => e.trim().isNotEmpty).toList();
 
-
 // ────────────────────────────────────────────────────────────────────────────
-/* OPTIONAL: TimelineMarker (Mini-DTO) — v7.1.4+timeline.1 (2025-11-08)
+/* OPTIONAL: TimelineMarker (Mini-DTO) — v7.1.4+timeline.2 (2025-11-10)
  * Zweck: Einheitliche, leichte Struktur für Timeline-Punkte (Client-seitig).
  * Felder sind defensiv & tolerant (siehe fromMaybe). */
 // ────────────────────────────────────────────────────────────────────────────
@@ -1237,9 +1235,8 @@ class TimelineMarker {
   }
 }
 
-
 // ────────────────────────────────────────────────────────────────────────────
-/* OPTIONAL: InsightFact (Mini-DTO) — v7.1.4+insight.1 (2025-11-08)
+/* OPTIONAL: InsightFact (Mini-DTO) — v7.1.4+insight.3 (2025-11-10)
  * Zweck: Einheitliche, leichte Struktur für Aha-Fakten („Atomic Facts“).
  * Felder (tolerant): topic, fact/value/text, since (YYYY-MM-DD), confidence (0..1),
  * tags[], source?, id?  – rein clientseitig für UI/Storage/Exports; Server optional. */
@@ -1297,7 +1294,7 @@ class InsightFact {
       if (raw.length >= 10 && RegExp(r'^\d{4}-\d{2}-\d{2}').hasMatch(raw)) {
         return raw.substring(0, 10);
       }
-      // einfache Fallbacks (z. B. '2025/11/08' oder '08.11.2025' nicht konvertieren)
+      // einfache Fallbacks beibehalten
       return raw;
     }
 

@@ -1,18 +1,19 @@
-// [PATCHED] lib/core/memory/memory_store.dart — v6.6.3 (09.11.2025)
-// MERGE SIGNAL: InsightFact/MemoryFact Kompatibilität + Upsert-Fixes + stabile Ingest-Adapter
+// [PATCHED] lib/core/memory/memory_store.dart — v6.6.4 (10.11.2025)
+// MERGE SIGNAL: Soft-Invalidation (TTL) + conversations/*.jsonl + robuste Ingest-Adapter
 // -----------------------------------------------------------------------------
-// Neu in v6.6.3 (Patch auf v6.6.2):
-// • Fix: ingestFacts(...) greift nicht mehr direkt auf Getter von InsightFact zu (die es evtl. nicht gibt),
-//   sondern nutzt Kompatibilitäts-Adapter (_factType/_factLine/_factTopic/...).
-// • Alias-Import (im) bleibt; keine Typkollisionen mit MemoryEntry.
-// • Kleine Robustheit: getFactsForContext() budget-Check bleibt erhalten; UTF-8 sicher.
-// • Restliche APIs/Dateistruktur unverändert zu v6.6.2.
+// Neu in v6.6.4 (Patch auf v6.6.3):
+// • Soft-Invalidation: Caches für Timeline/Facts werden nach TTL automatisch neu
+//   geladen; zusätzlich Public-API invalidateSoftCaches() zum sanften Zurücksetzen.
+// • conversations/*.jsonl: Jede Zeile (Turn/Ereignis) wird zusätzlich in eine
+//   pro Tag+Session rotierende Datei geschrieben: /profiles/<id>/conversations/YYYYMMDD_<session>.jsonl
+// • saveMap()/appendLine()/recordAcknowledge() schreiben nun JSONL-Conversation-Files.
+// • Kleine Robustheit: Budget-Check in getFactsForContext() bleibt, JSONL-Append safe.
 //
-// Bestand aus v6.6.2 (zur Einordnung):
-// • Upsert-Logik für Insights (De-Dupe nach type/topic/(canon|line), Merge von score/tags).
-// • ingestFacts(...) akzeptiert List<MemoryFact|InsightFact|Map|String>, sanitiert & upserted atomar.
-// • getFactsForContext(...) gibt kompakte Facts (≤ budget Bytes) für die Bridge zurück.
-// • latestFacts()/replaceInsights()/clearInsights() unverändert; addInsight() nutzt Upsert-Pfad.
+// Bestand aus v6.6.3 (zur Einordnung):
+// • ingestFacts(...) arbeitet mit InsightFact/MemoryFact/Map/String über
+//   Kompatibilitäts-Adapter (_factTypeDyn/_factLineDyn/...).
+// • Timeline/Facts Persistenz in /profiles/<id>/timeline.json(.jsonl) & facts.json.
+// • Generische Save-/Dyn-APIs (saveDynamic/saveMap/appendLine) + Histogramm-Utils.
 // -----------------------------------------------------------------------------
 
 import 'dart:convert';
@@ -51,9 +52,13 @@ class MemoryStore {
   static const String _kTimelineJson = 'timeline.json';
   static const String _kTimelineJsonl = 'timeline.jsonl';
 
+  // Conversations
+  static const String _kConversationsFolder = 'conversations';
+
   String _activeProfileId = 'default';
   final Map<String, List<Map<String, dynamic>>> _timelineCache = {};
   final Map<String, bool> _timelineLoaded = {};
+  final Map<String, DateTime> _timelineLoadedAt = {};
   final Map<String, Object> _profileLocks = {}; // simple per-profile lock token
 
   // ---------------------------- Facts (Files) --------------------------------
@@ -62,6 +67,10 @@ class MemoryStore {
 
   final Map<String, List<Map<String, dynamic>>> _insightsCache = {};
   final Map<String, bool> _insightsLoaded = {};
+  final Map<String, DateTime> _insightsLoadedAt = {};
+
+  // ---------------------------- Cache/TTL Config ------------------------------
+  static const Duration _kCacheTtl = Duration(minutes: 5);
 
   // ============================ Init / State =================================
 
@@ -271,7 +280,10 @@ class MemoryStore {
 
   /// Fügt eine generische „Zeile“ ein (role: 'user'|'panda'), meta optional.
   Future<void> appendLine(
-      String role, String text, Map<String, dynamic>? meta) async {
+    String role,
+    String text,
+    Map<String, dynamic>? meta,
+  ) async {
     final m = <String, dynamic>{
       'kind': 'line',
       'role': role,
@@ -281,34 +293,38 @@ class MemoryStore {
       'created_at': DateTime.now().toUtc().toIso8601String(),
       'context_facets': const <dynamic>[],
     };
+
+    // Persist in Prefs (aggregiertes Journal)
     await saveMap(m);
+
+    // Zusätzlich: Conversation JSONL
+    await _appendConversationIfApplicable(m);
   }
 
   Future<void> saveLine({
     required String role,
     required String text,
     Map<String, dynamic>? meta,
-  }) {
-    return appendLine(role, text, meta);
-  }
+  }) =>
+      appendLine(role, text, meta);
 
-  Future<void> saveUserLine(String text, Map<String, dynamic>? meta) {
-    return appendLine('user', text, meta);
-  }
+  Future<void> saveUserLine(String text, Map<String, dynamic>? meta) =>
+      appendLine('user', text, meta);
 
-  Future<void> savePandaLine(String text, Map<String, dynamic>? meta) {
-    return appendLine('panda', text, meta);
-  }
+  Future<void> savePandaLine(String text, Map<String, dynamic>? meta) =>
+      appendLine('panda', text, meta);
 
   /// Acknowledge-Ereignis speichern (z. B. für Insight-Bestärkung).
   Future<void> recordAcknowledge(Map<String, dynamic> ack) async {
     final safe = Map<String, dynamic>.from(ack);
     safe['kind'] = safe['kind'] ?? 'ack';
-    safe['created_at'] = (safe['created_at'] as String?) ??
-        DateTime.now().toUtc().toIso8601String();
+    safe['created_at'] =
+        (safe['created_at'] as String?) ?? DateTime.now().toUtc().toIso8601String();
     safe['session_id'] =
         (safe['session_id'] as String?) ?? (safe['round_id'] as String?) ?? 'local';
-    await saveMap(safe);
+
+    await saveMap(safe); // auch im aggregierten Journal festhalten
+    await _appendConversationIfApplicable(safe); // und zusätzlich in JSONL
   }
 
   /// Alias (für dyn.saveAck? in MemoryService).
@@ -340,13 +356,16 @@ class MemoryStore {
   Future<void> saveDynamic(dynamic value) async {
     if (value is MemoryEntry) {
       await save(value);
+      await _appendConversationIfApplicable(value.toMap());
     } else if (value is Map) {
       await saveMap(Map<String, dynamic>.from(value));
+      await _appendConversationIfApplicable(Map<String, dynamic>.from(value));
     } else if (value is String) {
       try {
         final decoded = jsonDecode(value);
         if (decoded is Map) {
           await saveMap(Map<String, dynamic>.from(decoded));
+          await _appendConversationIfApplicable(Map<String, dynamic>.from(decoded));
         }
       } catch (_) {/* ignore */}
     }
@@ -393,33 +412,51 @@ class MemoryStore {
 
   // ============================== Timeline API ================================
 
-  /// Aktives Profil setzen & Timeline + Facts laden (once). Ordner wird bei Bedarf erzeugt.
+  /// Aktives Profil setzen & Timeline + Facts laden (mit TTL-Check). Ordner wird bei Bedarf erzeugt.
   Future<void> openProfile(String profileId) async {
     _activeProfileId = (profileId.isEmpty) ? 'default' : profileId.trim();
     _profileLocks[_activeProfileId] ??= Object();
 
-    // Timeline lazy-load
-    if (_timelineLoaded[_activeProfileId] != true) {
+    // Timeline lazy-load (mit TTL)
+    if (_timelineLoaded[_activeProfileId] != true ||
+        _isStale(_timelineLoadedAt[_activeProfileId])) {
       try {
         final list = await _loadTimeline(_activeProfileId);
         _timelineCache[_activeProfileId] = list;
         _timelineLoaded[_activeProfileId] = true;
+        _timelineLoadedAt[_activeProfileId] = DateTime.now().toUtc();
       } catch (_) {
         _timelineCache[_activeProfileId] = <Map<String, dynamic>>[];
         _timelineLoaded[_activeProfileId] = true;
+        _timelineLoadedAt[_activeProfileId] = DateTime.now().toUtc();
       }
     }
 
-    // Insights/Facts lazy-load
-    if (_insightsLoaded[_activeProfileId] != true) {
+    // Insights/Facts lazy-load (mit TTL)
+    if (_insightsLoaded[_activeProfileId] != true ||
+        _isStale(_insightsLoadedAt[_activeProfileId])) {
       try {
         final facts = await _loadInsights(_activeProfileId);
         _insightsCache[_activeProfileId] = facts;
         _insightsLoaded[_activeProfileId] = true;
+        _insightsLoadedAt[_activeProfileId] = DateTime.now().toUtc();
       } catch (_) {
         _insightsCache[_activeProfileId] = <Map<String, dynamic>>[];
         _insightsLoaded[_activeProfileId] = true;
+        _insightsLoadedAt[_activeProfileId] = DateTime.now().toUtc();
       }
+    }
+  }
+
+  /// Externe Sanft-Invalidierung (setzt nur Flags zurück; Nachladen beim nächsten Zugriff).
+  Future<void> invalidateSoftCaches({bool timeline = true, bool insights = true}) async {
+    if (timeline) {
+      _timelineLoaded[_activeProfileId] = false;
+      _timelineLoadedAt.remove(_activeProfileId);
+    }
+    if (insights) {
+      _insightsLoaded[_activeProfileId] = false;
+      _insightsLoadedAt.remove(_activeProfileId);
     }
   }
 
@@ -514,6 +551,11 @@ class MemoryStore {
         p.join(base.path, _kAppFolder, _kProfilesFolder, profileId));
     if (!await dir.exists()) {
       await dir.create(recursive: true);
+    }
+    // Conversations-Unterordner sicherstellen
+    final conv = Directory(p.join(dir.path, _kConversationsFolder));
+    if (!await conv.exists()) {
+      try { await conv.create(recursive: true); } catch (_) {}
     }
     return dir;
   }
@@ -1264,7 +1306,7 @@ class MemoryStore {
     }
 
     return byKey.values.toList(growable: false);
-    }
+  }
 
   void _sortInsightsList(List<Map<String, dynamic>> list) {
     list.sort((a, b) {
@@ -1277,6 +1319,44 @@ class MemoryStore {
       // neueste zuerst
       return tb.compareTo(ta);
     });
+  }
+
+  // --------------------------- Conversations (JSONL) --------------------------
+
+  Future<void> _appendConversationIfApplicable(Map<String, dynamic> map) async {
+    try {
+      final sessionId = _asString(map['session_id']) ??
+          _asString((map['meta'] is Map) ? map['meta']['session_id'] : null) ??
+          'local';
+      final dir = await _profileDir(_activeProfileId);
+      final convDir = Directory(p.join(dir.path, _kConversationsFolder));
+      if (!await convDir.exists()) {
+        try { await convDir.create(recursive: true); } catch (_) {}
+      }
+      final tsIso = _asString(map['created_at']) ??
+          DateTime.now().toUtc().toIso8601String();
+      final ts = _tryParseDateTime(tsIso) ?? DateTime.now().toUtc();
+      final fileName = '${_yyyymmdd(ts)}_${_sanitizeFileSegment(sessionId)}.jsonl';
+      final f = File(p.join(convDir.path, fileName));
+      final enc = jsonEncode(map);
+      await f.writeAsString('$enc\n', mode: FileMode.append, flush: true);
+    } catch (_) {
+      // still
+    }
+  }
+
+  String _sanitizeFileSegment(String s) {
+    // rudimentär: nur Buchstaben/Ziffern/_-
+    final cleaned = s.replaceAll(RegExp(r'[^A-Za-z0-9_\-]'), '');
+    if (cleaned.isEmpty) return 'local';
+    return cleaned;
+  }
+
+  String _yyyymmdd(DateTime utc) {
+    final y = utc.year.toString().padLeft(4, '0');
+    final m = utc.month.toString().padLeft(2, '0');
+    final d = utc.day.toString().padLeft(2, '0');
+    return '$y$m$d';
   }
 
   // --------------------------- Insights: Sanitizer-Utils ----------------------
@@ -1299,6 +1379,12 @@ class MemoryStore {
   }
 
   // ================================ Utils ====================================
+
+  bool _isStale(DateTime? loadedAt) {
+    if (loadedAt == null) return true;
+    final now = DateTime.now().toUtc();
+    return now.difference(loadedAt) > _kCacheTtl;
+  }
 
   int _cap(int value, int min, int max) {
     if (value < min) return min;
@@ -1370,5 +1456,13 @@ class MemoryStore {
     if (n < lo) n = lo;
     if (n > hi) n = hi;
     return n;
+  }
+
+  // ============================ Export/Forget Stubs ===========================
+
+  /// (Stub) Exportiert das Profil als ZIP. Future-Feature – derzeit null.
+  Future<File?> exportProfileZip({String? profileId}) async {
+    // Platzhalter – wird in Phase 4 implementiert.
+    return null;
   }
 }

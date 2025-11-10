@@ -1,17 +1,11 @@
-// [BASELINE] lib/features/reflection/reflection_screen.dart (Stand: 08.11.2025, v6.7.11)
-// MERGE SIGNAL: Reflection v6.7.11 — K2 Mood (Dual-Scale, Consent-Gate 🍃/🌿) + UIEvent fix
-// Patch v6.7.11:
-// • Ergänzt Switch-Case für `UIEventKind.openDualMoodPicker` (öffnet Dual-Mood-Sheet & speichert gemäß 🍃/🌿 Regeln).
-// • Fix: timestamp → `toIso8601String()` (vorher iso8601String).
-// • Kleinere Robustheits-Guards (mounted-Checks) beim asynchronen Picker-Callback.
-// Patch v6.7.9:
-// • Kleinere Robustheits-Guards (ListScroll, mounted) & sanfteres Auto-Scroll nach Inserts.
-// • Dual-Mood (Kopf/Körper) bleibt *nur* bei flow.mood_prompt && !closure aktiv; kein Save-Flow-Trigger.
-// • Lokales Mood-Speichern nur bei 🍃/🌿; Server-Post (ApiService.mood) nur bei 🌿.
-// • Worker-only answer_helpers (max 3), keine lokalen Fallback-Chips (Starter-Chips bleiben).
-// • Sofortiges User-Echo, keine Leerbildschirm-Phase, STT angebunden (WhisperService).
-// • CH-Safety: Hotline-Karte bei risk mild/high; No-Quote-Mirror/Closure steuert Worker.
-// Hinweis: KEIN In-Session-Consent-Hint (Einstellung im Privacy-/Settings-Screen)
+// [PATCHED] lib/features/reflection/reflection_screen.dart — v6.7.12
+// MERGE SIGNAL: Reflection v6.7.12 — Therapeutische Kernlinie, Worker-only Chips, Dual-Mood (🍃/🌿), UIEvent-Fix
+// Änderungen ggü. v6.7.11:
+// • Worker-only Chips strikt (keine lokalen Fallbacks), max 3; keine Chips in Closure-Phase.
+// • Dual-Mood deterministisch (nur bei flow.mood_prompt && !closure); lokales Save (🍃/🌿), Server-Post nur (🌿).
+// • UIEventKind.openDualMoodPicker Case vorhanden; DateTime → toIso8601String Fix beibehalten.
+// • Intro-Ritual einmalig; No-Quote-Mirror; sanfte Save-Bestätigung; CH-Hotline bei risk mild/high.
+// • Consent-Hint im Screen weiterhin **deaktiviert** (wie v6.7.11) – erfolgt künftig über Settings/Privacy.
 
 library reflection_screen;
 
@@ -547,7 +541,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
         FocusScope.of(context).unfocus();
         await _speech.start(locale: 'de-DE');
       }
-      if (mounted) setState(() {});
+      if (mounted) setState(() => _speech.isRecording);
     } catch (_) {
       _toast('Mikrofon nicht verfügbar. Bitte Berechtigung erlauben.');
     }

@@ -1,28 +1,34 @@
-// [MERGE SIGNAL] lib/core/privacy/privacy_orchestrator.dart (v1.5 · 2025-11-09)
+// [MERGE SIGNAL] lib/core/privacy/privacy_orchestrator.dart (v1.6 · 2025-11-10)
 // ZenYourself — Privacy Orchestrator (Glue UI ↔ MemoryService)
 // -----------------------------------------------------------------------------
-// Aufgaben:
-// • 3-Stufen-Toggle 🕊️/🍃/🌿 & Consent (shareEnabled) steuern.
-// • Gating-Regel: SEND_CONTEXT := memory_consent && memory_active
-//   → Nur dann setzt ApiService meta.flags.client_memory:true & context.memories.
-// • Trial-Expiry: 7 Tage ab erstem Einschalten von Consent; danach memory_active=false
-//   bis Premium/Upgrade (hier nur Platzhalter-Hook).
-// • UI-Glue: liest/stellt Consent (shareEnabled), Greet-by-Name & Name.
+// Was ist neu (v1.6):
+// • 3-Stufen-Toggle: 🕊️ Aus · 🍃 On-Device (nur lokal) · 🌿 Voll (Bridge)
+// • Trial/Expiry: 7 Tage ab erstem Einschalten von Consent (🌿). Danach memory_active=false,
+//   bis Upgrade (nur Platzhalter-Hook). Statushinweis im UI.
+// • SEND_CONTEXT-Regel: Nur wenn (memory_consent && memory_active) → ApiService sendet
+//   meta.flags.client_memory:true und context.memories (≤2 kB) – sonst nie.
+// • Session-Reset: Beim Wechsel von 🌿 → 🕊️/🍃 (also bei Deaktivierung des Kontext-Versands)
+//   wird best-effort eine neue thread_id erzwungen (ApiService.resetThreadId/bumpThreadId, dynamisch).
+// • Defensiv: dynamic-Calls für rückwärtskompatible MemoryService-/UI-Props; robuste Name-Flows.
+// • Sanfte Snackbars für Nutzerfeedback.
 //
 // Pfade/Kompatibilität:
-// • MemoryService liegt im Core:  import '../memory/memory_service.dart' as mem;
-// • PrivacyScreen-UI liegt unter Features: '../../features/settings/privacy_screen.dart'
-// • Defensiv via dynamic-Calls (Backward-Compat zu v6.4+).
+// • MemoryService im Core:  import '../memory/memory_service.dart' as mem;
+// • PrivacyScreen-UI unter Features: '../../features/settings/privacy_screen.dart'
+// • Diese Datei ist „Glue“ – keine hart verdrahteten Abhängigkeiten auf konkrete UI-Props.
 //
 // ignore_for_file: avoid_dynamic_calls
 
 import 'package:flutter/material.dart';
 
-// UI-Komponente + Settings-Types
+// UI-Komponente + Settings-Types (defensiv verwendet)
 import '../../features/settings/privacy_screen.dart';
 
 // Kanonischer MemoryService-Pfad (Core)
 import '../memory/memory_service.dart' as mem;
+
+/// Optionaler Modus, falls die UI ihn liefert (Strings werden tolerant gemappt).
+enum PrivacyMode { off, onDevice, bridge }
 
 class PrivacyOrchestrator extends StatefulWidget {
   const PrivacyOrchestrator({super.key});
@@ -35,8 +41,8 @@ class _PrivacyOrchestratorState extends State<PrivacyOrchestrator> {
   bool _loading = true;
 
   // Quellen (aus MemoryService):
-  bool _memoryConsent = false; // memory_consent → shareEnabled
-  bool _memoryActive = true;   // Trial/Premium Gate (clientseitig)
+  bool _memoryConsent = false; // memory_consent → shareEnabled (🌿 erfordert true)
+  bool _memoryActive = true;   // Trial/Premium Gate (clientseitig); für 🍃 true, für 🕊️ false
   bool _greetByName = false;   // Begrüßung mit Name erlaubt?
   String? _currentName;        // nur wenn greetByName == true sinnvoll
 
@@ -59,7 +65,7 @@ class _PrivacyOrchestratorState extends State<PrivacyOrchestrator> {
   }
 
   Future<void> _load() async {
-    // 1) Consent lesen
+    // 1) Consent lesen (Bridge-Erlaubnis)
     _memoryConsent = _svc.shareEnabled;
 
     // 2) Name/Gruß laden – robust zu v6.5 (Record) und Legacy (String?)
@@ -80,7 +86,7 @@ class _PrivacyOrchestratorState extends State<PrivacyOrchestrator> {
       _currentName = null;
     }
 
-    // 3) Trial/Active/Expiry laden (defensive dynamic-Calls)
+    // 3) Trial/Active/Expiry laden (defensiv via dynamic)
     await _loadActiveAndExpiry();
 
     // 4) Expires jetzt prüfen
@@ -100,7 +106,7 @@ class _PrivacyOrchestratorState extends State<PrivacyOrchestrator> {
     try {
       final dyn = _svc as dynamic;
 
-      // memory_active
+      // memory_active (persistierter Schalter)
       try {
         final v = await dyn.getMemoryActive?.call();
         if (v is bool) _memoryActive = v;
@@ -191,10 +197,66 @@ class _PrivacyOrchestratorState extends State<PrivacyOrchestrator> {
     }
   }
 
+  // ---- Hilfsfunktionen ------------------------------------------------------
+
+  PrivacyMode _parseModeDynamic(dynamic s) {
+    // Tolerante Extraktion: s.mode / s.privacyMode / s.stage / s.toggle / s.value
+    String? raw;
+    try {
+      raw = (s?.mode as String?) ??
+            (s?.privacyMode as String?) ??
+            (s?.stage as String?) ??
+            (s?.toggle as String?) ??
+            (s?.value as String?);
+    } catch (_) {/* ignore */}
+
+    final v = (raw ?? '').trim().toLowerCase();
+    if (v.isEmpty) return _deriveModeFromState();
+
+    if (v == 'off' || v == 'aus' || v == '🕊️' || v == 'dove' || v == '0') {
+      return PrivacyMode.off;
+    }
+    if (v == 'on-device' || v == 'ondevice' || v == 'local' || v == '🍃' || v == '1') {
+      return PrivacyMode.onDevice;
+    }
+    if (v == 'bridge' || v == 'voll' || v == 'full' || v == '🌿' || v == '2') {
+      return PrivacyMode.bridge;
+    }
+    // Fallback
+    return _deriveModeFromState();
+  }
+
+  PrivacyMode _deriveModeFromState() {
+    if (!_memoryConsent && !_memoryActive) return PrivacyMode.off;
+    if (!_memoryConsent && _memoryActive)  return PrivacyMode.onDevice;
+    return PrivacyMode.bridge; // consent true → 🌿 (active kann via Trial false sein)
+  }
+
+  Future<void> _resetThreadIdIfSupported() async {
+    // Best-effort: verschiedene mögliche Haken versuchen
+    try {
+      // Direkter Zugriff auf ApiService (falls offen gelegt)
+      final dynSvc = _svc as dynamic;
+      final api = dynSvc.apiService ?? dynSvc.getApiService?.call();
+      if (api != null) {
+        await api.resetThreadId?.call();
+        return;
+      }
+    } catch (_) {/* noop */}
+    try {
+      // Alternativer Hook am MemoryService selbst
+      final dynSvc = _svc as dynamic;
+      await dynSvc.bumpThreadId?.call();
+    } catch (_) {/* noop */}
+  }
+
   // ---- Anwenden von UI-Änderungen (Save) ------------------------------------
 
   Future<void> _applySave(PrivacySettings s) async {
-    // 1) Consent
+    // 0) Modus (falls UI ihn liefert)
+    final desiredMode = _parseModeDynamic(s);
+
+    // 1) Consent (shareEnabled) – vorläufig aus Settings; final durch Modus überschrieben
     try {
       await _svc.setShareEnabled(s.memoryConsent);
     } catch (_) {/* ignore */}
@@ -222,29 +284,67 @@ class _PrivacyOrchestratorState extends State<PrivacyOrchestrator> {
       _greetByName = false;
     }
 
-    // 3) Trial-/Active-Logik
-    final now = DateTime.now().toUtc();
+    // 3) Modus anwenden (überschreibt Consent/Active konsistent)
+    final wasBridge = _memoryConsent; // bisheriger Sendestatus
 
-    if (_memoryConsent) {
+    if (desiredMode == PrivacyMode.off) {
+      _memoryConsent = false;                // kein Versand
+      await _persistMemoryActive(false);     // lokale Memory AUS
+    } else if (desiredMode == PrivacyMode.onDevice) {
+      _memoryConsent = false;                // kein Versand
+      await _persistMemoryActive(true);      // lokale Memory AN
+    } else {
+      // 🌿 Bridge
+      _memoryConsent = true;
+      final now = DateTime.now().toUtc();
       if (_trialStartedAtUtc == null) {
         _trialStartedAtUtc = now;
         _expiryAtUtc = now.add(const Duration(days: 7));
         await _persistTrial(_trialStartedAtUtc!, _expiryAtUtc!);
       }
-
       _checkAndApplyExpiry();
-
+      // Wenn Trial nicht abgelaufen → active true, sonst false
       if (_expiryAtUtc != null && !_expiryAtUtc!.isBefore(now)) {
         await _persistMemoryActive(true);
       } else {
         await _persistMemoryActive(false);
       }
-    } else {
-      await _persistMemoryActive(false);
+    }
+
+    // 4) Consent final persistieren (nach Modus)
+    try {
+      await _svc.setShareEnabled(_memoryConsent);
+    } catch (_) {/* ignore */}
+
+    // 5) Session-Reset, falls Versand vorher AN (🌿) und jetzt AUS (🕊️/🍃)
+    final sendNowAllowed = _memoryConsent && _memoryActive;
+    if (wasBridge && !sendNowAllowed) {
+      await _resetThreadIdIfSupported();
     }
 
     if (!mounted) return;
     setState(() {});
+
+    // 6) Feedback
+    final status = () {
+      if (!_memoryConsent) {
+        // 🕊️ oder 🍃
+        return _memoryActive
+            ? 'Gespeichert – On-Device aktiv (kein Kontext-Versand).'
+            : 'Gespeichert – On-Device AUS (kein Kontext-Versand).';
+      }
+      // 🌿
+      if (_memoryActive) {
+        final left = _daysLeft;
+        return left > 0
+            ? 'Gespeichert – Bridge AKTIV (Trial, noch $left Tag${left == 1 ? "" : "e"}).'
+            : 'Gespeichert – Bridge AKTIV (Trial).';
+      }
+      return 'Gespeichert – Consent an, aber Trial abgelaufen (kein Versand).';
+    }();
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(status)));
   }
 
   // ---- Name-Dialog & kleine Actions ----------------------------------------
@@ -303,7 +403,13 @@ class _PrivacyOrchestratorState extends State<PrivacyOrchestrator> {
     }
 
     final statusNote = () {
-      if (!_memoryConsent) return 'Kontext-Teilen: AUS';
+      if (!_memoryConsent) {
+        // 🕊️ (off) oder 🍃 (on-device)
+        return _memoryActive
+            ? 'Kontext-Teilen: AUS · On-Device: AN'
+            : 'Kontext-Teilen: AUS · On-Device: AUS';
+      }
+      // 🌿 (bridge)
       if (_memoryActive) {
         final left = _daysLeft;
         return left > 0
@@ -319,10 +425,10 @@ class _PrivacyOrchestratorState extends State<PrivacyOrchestrator> {
         shareDiagnostics: false,
         shareUsage: false,
         enableCloudBackup: false,
-        localOnly: true,
+        localOnly: !_memoryConsent, // Heuristik für UI: wenn kein Versand → lokal only
 
-        // Wichtig: Handshake zu MemoryService
-        memoryConsent: _memoryConsent, // steuert shareEnabled
+        // Handshake zu MemoryService
+        memoryConsent: _memoryConsent, // steuert shareEnabled (🌿 erfordert true)
         greetByName: _greetByName,
 
         currentName: _currentName,
@@ -333,6 +439,8 @@ class _PrivacyOrchestratorState extends State<PrivacyOrchestrator> {
         memoryActive: _memoryActive,
         memoryExpiryAt: _expiryAtUtc,
         memoryStatusNote: statusNote,
+
+        // (Falls die UI bereits einen Modus anbietet, kann sie ihn via onSave(...mode...)) setzen.
 
         // Aktionen
         onOpenPolicy: () {/* TODO: Policy anzeigen */},
@@ -352,23 +460,7 @@ class _PrivacyOrchestratorState extends State<PrivacyOrchestrator> {
         },
         onForgetName: _forgetName,
 
-        onSave: (s) async {
-          await _applySave(s);
-          if (!mounted) return;
-
-          final sendAllowed = _memoryConsent && _memoryActive;
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                sendAllowed
-                    ? 'Einstellungen gespeichert – Kontext wird (Trial) mitgesendet.'
-                    : _memoryConsent
-                        ? 'Gespeichert – Trial abgelaufen, kein Kontext-Versand.'
-                        : 'Gespeichert – Kontext-Versand deaktiviert.',
-              ),
-            ),
-          );
-        },
+        onSave: (s) async => _applySave(s),
 
         // (Optional) Upgrade-Action, wenn Trial abgelaufen:
         onUpgrade: _handleUpgrade,
