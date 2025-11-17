@@ -1,20 +1,17 @@
-// [PATCHED] lib/features/reflection/reflection_logic.dart (Stand: 2025-11-08)
+// [UPDATED] lib/features/reflection/reflection_logic.dart (Stand: 2025-11-17, v6.8.4)
 // ZenYourself — ReflectionLogic (Controller & Handler)
-// PANDA-REFLECT-12.9 → v6.8.3b (Patched 2025-11-08b)
-// -----------------------------------------------------------------------------
-// Änderungen ggü. deiner letzten Fassung (Build-Fix):
-// • MemoryService-Aufrufe robust über `dynamic` + Fallbacks (keine Compile-Fehler
-//   bei abweichenden Signaturen):
-//     - saveMoodEntry(...) → versucht (ts, mental, physical) und named (when/ts).
-//     - saveTimelineMarker(...) → versucht named/positional Varianten.
-//     - saveInsight(...) → optional, falls vorhanden.
-// • Entfernt: statischer Zugriff auf ApiService.classifyMood (fehlte).
-// • Sonst unverändert: UIEvents inkl. openDualMoodPicker, After-Turn Timeline,
-//   Facets/Actions, Bridge/Meta, History-Trim.
+// PANDA-REFLECT-12.9 → v6.8.4 (MemoryFlow: Conversation-Turns → MemoryService)
 //
-// Hinweis: Wenn dein reflection_screen.dart den neuen UIEvent nicht handelt,
-// füge dort in der switch(e.kind) einen Case hinzu (Snippet unten).
-// -----------------------------------------------------------------------------
+// Änderungen ggü. v6.8.3b:
+// • Neu: _logTurnToMemory(role, text) – speichert User- und Panda-Turns im MemoryService
+//   (saveUserTurn/savePandaTurn, dynamisch und tolerant).
+// • Neu: _appendUserToHistory / _appendAssistantToHistory rufen _logTurnToMemory() (fire & forget).
+// • Erweiterung: _appendAssistantToHistory nimmt neben Mirror/Frage auch talk-Linien + Hope in den Payload auf,
+//   damit der Worker seinen eigenen vollständigen Output als Verlaufstext zurückbekommt.
+// • Sonst unverändert: History-Trimming, Mood/Closure, Timeline, Facets, Actions.
+//
+// Hinweis: MemoryService.buildContextMemories() kann nun auf die gespeicherten Conversation-Turns zugreifen,
+// sodass der Worker nicht nur User-Text, sondern auch die eigenen Antworten als Kontext-Fakten zurückerhält.
 
 import 'dart:async';
 import 'package:flutter/foundation.dart';
@@ -138,6 +135,14 @@ class AvailableAction {
       AvailableAction(id: id, label: label ?? this.label, note: note ?? this.note);
 }
 
+// --------- Private Structs ---------------------------------------------------
+
+class _MemPrep {
+  final bool consent;
+  final Map<String, dynamic>? memories;
+  const _MemPrep({required this.consent, required this.memories});
+}
+
 // --------------------------- Controller --------------------------------------
 
 class ReflectionController extends ChangeNotifier {
@@ -171,7 +176,7 @@ class ReflectionController extends ChangeNotifier {
   List<AvailableAction> get availableActions => List.unmodifiable(_availableActions);
   bool get inSkillFlow => _inSkillFlow;
 
-  // History (read-only view for UI/diagnostics)
+  // History (read-only view für UI/Diagnostics)
   List<gdt.HistoryTurn> get history => List.unmodifiable(_history);
 
   // Signal an die View, ob UI den Mood-Picker anbieten soll
@@ -226,7 +231,7 @@ class ReflectionController extends ChangeNotifier {
   // Mood-Prompt Guard (pro TurnIndex nur 1× öffnen)
   int? _lastMoodPromptAtTurn;
 
-  // Memory-Proposal Buffer (sanitizte Maps mit key 'line' usw.)
+  // Memory-Proposal Buffer (sanitisierte Maps mit key 'line' usw.)
   final List<Map<String, dynamic>> _insightProposals = <Map<String, dynamic>>[];
 
   // ---------------- Init / Bridge / Thread-ID --------------------------------
@@ -741,7 +746,12 @@ class ReflectionController extends ChangeNotifier {
       } catch (_) {
         try {
           // named: when/ts + mental/physical
-          await ms.saveMoodEntry(when: ts, ts: ts, mental: mental.clamp(0, 4), physical: physical.clamp(0, 4));
+          await ms.saveMoodEntry(
+            when: ts,
+            ts: ts,
+            mental: mental.clamp(0, 4),
+            physical: physical.clamp(0, 4),
+          );
         } catch (_) {
           // minimal: separate Setter/Save-Pfade ignorieren leise
         }
@@ -1013,7 +1023,7 @@ class ReflectionController extends ChangeNotifier {
     return {
       'ui': {
         'controller': 'reflection_logic',
-        'version': 'v6.8.3b',
+        'version': 'v6.8.4',
       },
       'memory': {
         'bridge': _bridgeText,
@@ -1210,460 +1220,301 @@ class ReflectionController extends ChangeNotifier {
         label: 'Einsicht übernehmen',
         note: note.isEmpty ? null : '„$note”',
       ));
-      // Zusätzlich: „Später“ als direkte Action anbieten
+
       _availableActions.add(const AvailableAction(
         id: _ACT_MEMORY_PROPOSAL_LATER,
-        label: 'Später',
+        label: 'Später entscheiden',
       ));
     }
 
-    _availableActions.add(const AvailableAction(
-      id: _ACT_TOPIC_SWITCH,
-      label: 'Thema wechseln',
-    ));
+    // Nur wenn wir nicht in der Closure-Phase sind, weitere Actions anbieten
+    if (_vm?.allowClosure != true) {
+      if (_facetQueue.length > 1 ||
+          (_facetQueue.isNotEmpty && _activeFacet != null)) {
+        _availableActions.add(AvailableAction(
+          id: _ACT_TOPIC_SWITCH,
+          label: 'Anderes Thema',
+          note: _activeFacet,
+        ));
+      }
 
-    if (!_inSkillFlow) {
-      _availableActions.add(const AvailableAction(
-        id: _ACT_ESSENCE,
-        label: 'Essenz',
-      ));
-      _availableActions.add(const AvailableAction(
-        id: _ACT_EXAMPLE,
-        label: 'Beispiel',
-      ));
-    } else {
+      final pin = _topicPin;
+      if (pin != null && pin.trim().isNotEmpty) {
+        _availableActions.add(AvailableAction(
+          id: _ACT_ESSENCE,
+          label: 'Kernaussage dazu',
+          note: pin,
+        ));
+        _availableActions.add(AvailableAction(
+          id: _ACT_EXAMPLE,
+          label: 'Beispiel dazu',
+          note: pin,
+        ));
+      }
+    }
+
+    if (_inSkillFlow) {
       _availableActions.add(const AvailableAction(
         id: _ACT_ABORT,
-        label: 'Abbrechen',
+        label: 'Zurück zur Reflexion',
       ));
     }
 
     notifyListeners();
   }
 
-  // ---------------- Wire helpers ---------------------------------------------
+  // --------- Memory-Proposals (Kutsche 4) ------------------------------------
 
-  gdt.UserAction _toUserAction(String type, {String? note}) {
-    return gdt.UserAction(type: type, note: (note ?? '').trim().isEmpty ? null : note!.trim());
-  }
-
-  @override
-  void dispose() {
-    _debounceCancel();
-    _stopTypingGuard();
-    super.dispose();
-  }
-
-  // ---------------- History Buffer -------------------------------------------
-
-  void _appendUserToHistory(String text) {
-    _history.add(gdt.HistoryTurn(role: 'user', text: text));
-    _trimHistoryIfNeeded();
-  }
-
-  void _appendAssistantToHistory(gdt.ReflectionTurn turn) {
-    // Bevorzugt 'output_text'; fallback: Mirror + Frage
-    final pieces = <String>[];
+  void _ingestMemoryProposalsFromTurn(gdt.ReflectionTurn turn) {
+    _insightProposals.clear();
     try {
       final dyn = turn as dynamic;
-      final txt = dyn.outputText?.toString().trim();
-      if ((txt ?? '').isNotEmpty) {
-        pieces.add(txt!);
+      final raw = dyn.memoriesToSave ?? dyn.memories_to_save;
+      if (raw is List) {
+        for (final it in raw) {
+          if (it is Map) {
+            final line = (it['line'] ?? it['hint'] ?? '').toString().trim();
+            if (line.isEmpty) continue;
+            _insightProposals.add(<String, dynamic>{
+              'line': line,
+              if (it['topic'] != null) 'topic': it['topic'],
+              if (it['kind'] != null) 'kind': it['kind'],
+            });
+          }
+        }
       }
     } catch (_) {/* ignore */}
-    if (pieces.isEmpty) {
-      final m = (turn.mirror ?? '').trim();
-      if (m.isNotEmpty) pieces.add(m);
-      final pq = (turn.primaryQuestion ?? '').toString().trim();
-      if (pq.isNotEmpty) {
-        pieces.add(pq);
-      } else {
-        try {
-          final q = (turn as dynamic).question?.toString().trim();
-          if ((q ?? '').isNotEmpty) pieces.add(q!);
-        } catch (_) {/* ignore */}
-      }
-    }
-    final payload = pieces.join('\n').trim();
-    if (payload.isNotEmpty) {
-      _history.add(gdt.HistoryTurn(role: 'assistant', text: _cap(payload, 800)));
-      _trimHistoryIfNeeded();
-    }
   }
 
-  void _trimHistoryIfNeeded() {
-    if (_history.length <= _kMaxHistoryTurns) return;
-    final toRemove = _trimCount(_history.length);
-    if (toRemove <= 0) return;
-    _history.removeRange(0, toRemove);
+  Future<void> saveMemoryProposal() async {
+    if (_insightProposals.isEmpty) return;
+    final toSave = List<Map<String, dynamic>>.from(_insightProposals);
+    _insightProposals.clear();
+    _recomputeAvailableActions();
+
+    try {
+      final ms = MemoryService.instance as dynamic;
+      await ms.saveFromWorker?.call({'memories_to_save': toSave});
+    } catch (_) {/* ignore */}
   }
 
-  int _trimCount(int len) {
-    final want = (len - _kMaxHistoryTurns);
-    if (want <= 0) return 0;
-    final frac = (len * _kTrimFraction).round();
-    final n = (frac < _kTrimMin) ? _kTrimMin : frac;
-    return n.clamp(1, want);
+  void skipMemoryProposal() {
+    _insightProposals.clear();
+    _recomputeAvailableActions();
   }
 
-  // ---------------- Consent/Active & Memories --------------------------------
+  // --------- History + Memory bridge ----------------------------------------
 
   Future<void> _refreshConsentAndActive() async {
-    // Consent (shareEnabled)
     try {
-      bool v = _memoryConsent;
-      final dyn = MemoryService.instance as dynamic;
-      final val = dyn.shareEnabled;
-      if (val is bool) v = val;
-      else if (val is Future<bool>) v = await val;
-      else if (val is Function) {
-        final r = val();
-        if (r is bool) v = r; else if (r is Future<bool>) v = await r;
-      }
-      _memoryConsent = v;
-    } catch (_) {/* keep */}
-
-    // Active (memoryActive / isActive / bridgeActive) — tolerant
-    try {
-      bool a = _memoryActive;
-      final dyn = MemoryService.instance as dynamic;
-
-      bool _coerceBool(dynamic v) {
-        if (v is bool) return v;
-        if (v is Future) return false; // handled below
-        return v == true;
-      }
-
-      dynamic x = dyn.memoryActive;
-      if (x is Future) { x = await x; }
-      if (x == null) {
-        x = dyn.isActive;
-        if (x is Future) { x = await x; }
-      }
-      if (x == null) {
-        x = dyn.bridgeActive;
-        if (x is Future) { x = await x; }
-      }
-      if (x is Function) {
-        final r = x();
-        x = (r is Future) ? await r : r;
-      }
-      if (x != null) a = _coerceBool(x);
-
-      _memoryActive = a;
-    } catch (_) {/* keep */}
+      final ms = MemoryService.instance as dynamic;
+      dynamic c = ms.memoryConsent ?? ms.shareEnabled ?? ms.consent;
+      dynamic a = ms.memoryActive ?? ms.isActive ?? ms.active;
+      if (c is Future) c = await c;
+      if (a is Future) a = await a;
+      if (c is bool) _memoryConsent = c;
+      if (a is bool) _memoryActive = a;
+    } catch (_) {/* keep defaults */}
+    _lastClientMemoryFlag = _memoryConsent && _memoryActive;
   }
 
   Future<_MemPrep> _prepareMemForCall({required String userText}) async {
     await _refreshConsentAndActive();
-    final bool flag = _memoryConsent && _memoryActive;
-    _lastClientMemoryFlag = flag;
-
-    if (!flag) return const _MemPrep(null, false);
-
+    if (!_memoryConsent || !_memoryActive) {
+      _lastClientMemoryFlag = false;
+      return const _MemPrep(consent: false, memories: null);
+    }
     try {
-      final built = await MemoryService.instance.buildContextMemories(consent: true);
-      if (built is Map<String, dynamic>) {
-        return _MemPrep(built, true);
-      }
-    } catch (_) {/* ignore */}
-    return const _MemPrep(null, true); // Consent ja, aber kein Bundle → null senden ist ok
+      final ms = MemoryService.instance as dynamic;
+      final res = await (ms.buildContextMemories?.call(
+            userText: userText,
+            history: _history,
+          ) ??
+          ms.buildContextMemories(
+            userText: userText,
+            history: _history,
+          ));
+      Map<String, dynamic>? memMap;
+      if (res is Map<String, dynamic>) memMap = res;
+      _lastClientMemoryFlag = true;
+      return _MemPrep(consent: true, memories: memMap);
+    } catch (_) {
+      _lastClientMemoryFlag = true;
+      return const _MemPrep(consent: true, memories: null);
+    }
   }
 
-  // ========================= After-Turn Bookkeeping ===========================
+  void _appendUserToHistory(String text) {
+    final cleaned = _cap(_sanitizeInput(text), 800);
+    if (cleaned.isEmpty) return;
 
-  /// Speichert Timeline-Marker nach einem regulären Turn (kein Mood/Closure).
-  /// - Topic: bevorzugt via HelperMappers.timelineTopic(turn, hint), sonst Fallback.
-  /// - Mood: bevorzugt via ApiService.classifyMood(userText) (instanz/dyn), sonst Heuristik.
+    // History-Eintrag
+    _history.add(
+      gdt.HistoryTurn(
+        role: 'user',
+        text: cleaned,
+      ),
+    );
+    _trimHistoryIfNeeded();
+
+    // Fire & forget ins MemoryService loggen
+    _logTurnToMemory(
+      role: 'user',
+      text: cleaned,
+      extra: {
+        'mode': 'text',
+        'source': 'reflection_logic',
+      },
+    );
+  }
+
+  void _appendAssistantToHistory(gdt.ReflectionTurn turn) {
+    // Volltext für Verlauf: Mirror + Frage + Hope + Talk-Linien
+    final buffer = StringBuffer();
+
+    final mirror = (turn.mirror ?? '').toString().trim();
+    if (mirror.isNotEmpty) {
+      buffer.writeln(mirror);
+    }
+
+    // Frage (primaryQuestion > question)
+    String q = '';
+    final pq = (turn.primaryQuestion ?? '').toString().trim();
+    if (pq.isNotEmpty) {
+      q = pq;
+    } else {
+      try {
+        final dynQ = (turn as dynamic).question?.toString().trim();
+        if ((dynQ ?? '').isNotEmpty) q = dynQ!;
+      } catch (_) {/* ignore */}
+    }
+    if (q.isNotEmpty) {
+      if (buffer.isNotEmpty) buffer.writeln();
+      buffer.writeln(q);
+    }
+
+    // Hope-Text (falls vorhanden)
+    final hope = _extractHopeText(turn);
+    if (hope != null && hope.trim().isNotEmpty) {
+      if (buffer.isNotEmpty) buffer.writeln();
+      buffer.writeln(hope.trim());
+    }
+
+    // Talk-Linien (max. 2)
+    final talkLines = (turn.talk ?? const <String>[])
+        .map((e) => (e).toString().trim())
+        .where((e) => e.isNotEmpty)
+        .take(2)
+        .toList();
+
+    if (talkLines.isNotEmpty) {
+      if (buffer.isNotEmpty) buffer.writeln();
+      for (final line in talkLines) {
+        buffer.writeln(line);
+      }
+    }
+
+    final fullText = _cap(buffer.toString().trim(), 800);
+    if (fullText.isEmpty) return;
+
+    // History-Eintrag
+    _history.add(
+      gdt.HistoryTurn(
+        role: 'assistant',
+        text: fullText,
+      ),
+    );
+    _trimHistoryIfNeeded();
+
+    // Fire & forget ins MemoryService loggen – inkl. Talk & Hope im Payload
+    _logTurnToMemory(
+      role: 'assistant',
+      text: fullText,
+      extra: {
+        if (talkLines.isNotEmpty) 'talk': talkLines,
+        if (hope != null && hope.trim().isNotEmpty) 'hope': hope.trim(),
+        'source': 'reflection_logic',
+      },
+    );
+  }
+
+  void _trimHistoryIfNeeded() {
+    if (_history.length <= _kMaxHistoryTurns) return;
+
+    final int len = _history.length;
+    final int rawRemove = (len * _kTrimFraction).floor();
+    final int removeCount = rawRemove < _kTrimMin ? _kTrimMin : rawRemove;
+
+    if (removeCount >= len) {
+      // Sicherstellen, dass nicht alles verschwindet
+      _history.removeRange(0, len - 1);
+    } else {
+      _history.removeRange(0, removeCount);
+    }
+  }
+
+  /// Schreibt einen Turn (user/assistant) tolerant in den MemoryService.
+  /// Nutzt saveUserTurn / savePandaTurn, falls vorhanden.
+  void _logTurnToMemory({
+    required String role,
+    required String text,
+    Map<String, dynamic>? extra,
+  }) {
+    final cleaned = text.trim();
+    if (cleaned.isEmpty) return;
+
+    // Fire & forget, damit der UI-Thread nicht blockiert
+    Future<void>(() async {
+      try {
+        final dyn = MemoryService.instance as dynamic;
+        final payload = <String, dynamic>{
+          'screen': 'reflection',
+          'role': role,
+          'ts': DateTime.now().toUtc().toIso8601String(),
+          if (_threadId != null) 'thread_id': _threadId,
+          if (_apiSession?.id != null) 'session_id': _apiSession!.id,
+          if (extra != null) ...extra,
+        };
+
+        if (role == 'user') {
+          await dyn.saveUserTurn?.call(cleaned, payload);
+        } else {
+          await dyn.savePandaTurn?.call(cleaned, payload);
+        }
+      } catch (_) {
+        // bewusst still – Memory darf niemals den Flow brechen
+      }
+    });
+  }
+
   Future<void> _afterTurnBookkeeping(gdt.ReflectionTurn turn, {String? lastUserText}) async {
     try {
-      // 1) Guard – NICHT doppeln während aktiver Mood-/Closure-Phase
-      final flow = turn.flow;
-      final bool isMoodPhase = (flow?.moodPrompt ?? false) == true;
-      final bool isClosurePhase = (flow?.recommendEnd ?? false) == true;
-      if (isMoodPhase || isClosurePhase) return;
-
-      // 2) Topic ermitteln (Helper-Mappers bevorzugt)
-      String topic = '';
-      try {
-        topic = (hm.HelperMappers.timelineTopic(turn, hint: _topicPin) ?? '').trim();
-      } catch (_) {/* ignore */}
-      if (topic.isEmpty) {
-        final String? rawTopic =
-            _extractTopicFromTags(turn) ??
-            _extractTopicFromAnalysis(turn) ??
-            (_topicPin?.trim().isNotEmpty == true ? _topicPin!.trim() : null);
-        topic = _normalizeTopic(rawTopic ?? '');
-      }
-      if (topic.isEmpty) return; // Ohne Topic kein Marker
-
-      // 3) Mood bestimmen (0–4)
-      int mood = 2; // neutral
-      final src = (lastUserText ?? '').trim();
-      if (src.isNotEmpty) {
-        final viaApi = await _classifyMoodViaApi(src);
-        mood = (viaApi ?? _classifyMoodHeuristic(src)).clamp(0, 4);
-      }
-
-      // 4) Persistieren (robust, Fehler schlucken)
-      try {
-        final ms = (MemoryService.instance as dynamic);
-        final now = DateTime.now();
-        try {
-          // named-Variante
-          await ms.saveTimelineMarker(ts: now, topic: topic, mood: mood);
-        } catch (_) {
-          try {
-            // alternative Namen
-            await ms.saveTimelineMarker(when: now, topic: topic, mood: mood);
-          } catch (_) {
-            try {
-              // positional Fallback
-              await ms.saveTimelineMarker(now, topic, mood);
-            } catch (_) {/* ignore */}
-          }
-        }
-      } catch (_) {/* ignore */}
-    } catch (_) {/* never throw */}
-  }
-
-  String? _extractTopicFromTags(gdt.ReflectionTurn t) {
-    try {
-      final dyn = t as dynamic;
-      final tags = dyn.tags;
-      if (tags is List) {
-        for (final raw in tags) {
-          final s = raw?.toString() ?? '';
-          final m = RegExp(r'^\s*topic\s*:\s*(.+)\s*$', caseSensitive: false).firstMatch(s);
-          if (m != null) {
-            final val = m.group(1)?.trim();
-            if ((val ?? '').isNotEmpty) return val;
-          }
-        }
-      } else if (tags is Map) {
-        final v = tags['topic']?.toString().trim();
-        if ((v ?? '').isNotEmpty) return v;
-      }
-    } catch (_) {/* ignore */}
-    return null;
-  }
-
-  String? _extractTopicFromAnalysis(gdt.ReflectionTurn t) {
-    try {
-      final a = t.analysis;
-      final adyn = a as dynamic;
-      final topic = adyn?.topic?.toString().trim();
-      if ((topic ?? '').isNotEmpty) return topic;
-      final topics = (adyn?.topics as List?) ?? const <dynamic>[];
-      if (topics.isNotEmpty) {
-        final s = (topics.first ?? '').toString().trim();
-        if (s.isNotEmpty) return s;
-      }
-    } catch (_) {/* ignore */}
-    try {
-      final dyn = t as dynamic;
-      final utopic = dyn.understanding?.topic?.toString().trim();
-      if ((utopic ?? '').isNotEmpty) return utopic;
-    } catch (_) {/* ignore */}
-    return null;
-  }
-
-  Future<int?> _classifyMoodViaApi(String text) async {
-    try {
-      // bevorzugt: ApiService.instance.classifyMood(text) — dyn tolerant
-      final dyn = api.ApiService.instance as dynamic;
-      final res = await dyn.classifyMood?.call(text);
-      if (res is int) return res.clamp(0, 4);
-      if (res is Map && res['mood'] is int) return (res['mood'] as int).clamp(0, 4);
-    } catch (_) {/* ignore */}
-    return null;
-  }
-
-  int _classifyMoodHeuristic(String text) {
-    final t = text.toLowerCase();
-
-    final neg4 = ['verzweifelt', 'panik', 'hoffnungslos', 'suizid', 'suizidal', 'katastrophe'];
-    final neg3 = ['sehr schlecht', 'schlimm', 'ängstlich', 'angst', 'heftig', 'weh', 'traurig', 'depressiv'];
-    final neg2 = ['nicht gut', 'müde', 'erschöpft', 'überfordert', 'gestresst', 'stress', 'nervös', 'unsicher'];
-    final pos4 = ['großartig', 'fantastisch', 'super', 'wunderbar', 'glücklich', 'sehr gut'];
-    final pos3 = ['gut', 'besser', 'ruhig', 'entspannt', 'zufrieden', 'okay', 'ok', 'geht'];
-
-    bool any(List<String> xs) => xs.any((w) => t.contains(w));
-
-    if (any(neg4)) return 0;
-    if (any(neg3)) return 1;
-    if (any(neg2)) return 1;
-    if (any(pos4)) return 4;
-    if (any(pos3)) return 3;
-
-    // einfache Emoji-/Smiley-Heuristik
-    final hasSad = RegExp(r'(:\(|😞|😢|😭|💔)').hasMatch(text);
-    final hasHappy = RegExp(r'(:\)|😊|🙂|😁|🥰|💚|💖)').hasMatch(text);
-    if (hasSad && !hasHappy) return 1;
-    if (hasHappy && !hasSad) return 3;
-
-    return 2; // neutral
-  }
-
-  // ========================= Kutsche 4: Memory-Proposal =======================
-
-  void _ingestMemoryProposalsFromTurn(gdt.ReflectionTurn t) {
-    final proposals = <Map<String, dynamic>>[];
-
-    try {
-      final dyn = t as dynamic;
-      final arr = dyn.memoriesToSave ?? dyn.memories_to_save;
-      if (arr is List) {
-        for (final it in arr) {
-          if (it is Map) {
-            final m = Map<String, dynamic>.from(it);
-            final s = _sanitizeInsightProposal(m);
-            if ((s['line'] ?? '').toString().trim().isNotEmpty) proposals.add(s);
-          } else if (it is String) {
-            final s = _sanitizeInsightProposal({'line': it});
-            if ((s['line'] ?? '').toString().trim().isNotEmpty) proposals.add(s);
-          }
-        }
-      }
-    } catch (_) {/* ignore */}
-
-    _insightProposals
-      ..clear()
-      ..addAll(proposals);
-
-    _recomputeAvailableActions();
-  }
-
-  Map<String, dynamic> _sanitizeInsightProposal(Map<String, dynamic> inMap) {
-    final m = Map<String, dynamic>.from(inMap);
-    String line = ((m['line'] ?? m['value'] ?? '')).toString().trim();
-    if (line.length > 240) line = line.substring(0, 240);
-    m['line'] = line;
-
-    String _clip(String? s, int n) {
-      final x = (s ?? '').trim();
-      return (x.length <= n) ? x : x.substring(0, n);
-    }
-
-    if (m.containsKey('topic')) m['topic'] = _clip(m['topic']?.toString(), 64);
-    if (m.containsKey('activeFacet')) m['activeFacet'] = _clip(m['activeFacet']?.toString(), 64);
-    if (m.containsKey('active_facet')) {
-      m['activeFacet'] = _clip(m['active_facet']?.toString(), 64); m.remove('active_facet');
-    }
-    if (m.containsKey('topicPin')) m['topicPin'] = _clip(m['topicPin']?.toString(), 64);
-    if (m.containsKey('topic_pin')) {
-      m['topicPin'] = _clip(m['topic_pin']?.toString(), 64); m.remove('topic_pin');
-    }
-
-    final sc = m['score'];
-    if (sc is num) {
-      double s = sc.toDouble();
-      if (!s.isNaN) {
-        if (s < 0) s = 0; if (s > 1) s = 1;
-        m['score'] = double.parse(s.toStringAsFixed(3));
-      } else {
-        m.remove('score');
-      }
-    } else if (sc != null) {
-      m.remove('score');
-    }
-
-    // tags: max 5 strings, je ≤32
-    final tags = <String>[];
-    final rawTags = m['tags'];
-    if (rawTags is List) {
-      for (final it in rawTags) {
-        final s = (it?.toString() ?? '').trim();
-        if (s.isEmpty) continue;
-        final clip = (s.length <= 32) ? s : s.substring(0, 32);
-        if (!tags.contains(clip)) tags.add(clip);
-        if (tags.length >= 5) break;
-      }
-    } else if (rawTags is String) {
-      final s = rawTags.trim();
-      if (s.isNotEmpty) tags.add(s.length <= 32 ? s : s.substring(0, 32));
-    }
-    if (tags.isNotEmpty) m['tags'] = tags; else m.remove('tags');
-
-    return m;
-  }
-
-  String _excerpt(String s, int max) {
-    final t = s.trim();
-    if (t.length <= max) return t;
-    return '${t.substring(0, max - 1).trimRight()}…';
-  }
-
-  /// Public-API für die View: „Speichern“ gedrückt.
-  Future<void> saveMemoryProposal({int index = 0}) async {
-    if (_insightProposals.isEmpty) return;
-    final i = index.clamp(0, _insightProposals.length - 1);
-    final m = _insightProposals[i];
-
-    try {
-      final ms = (MemoryService.instance as dynamic);
-      await ms.saveInsight?.call(
-        line: (m['line'] ?? '').toString().trim(),
-        score: (m['score'] is num) ? (m['score'] as num).toDouble() : null,
-        topic: (m['topic'] ?? '').toString().trim().isEmpty ? null : m['topic'].toString().trim(),
-        activeFacet: (m['activeFacet'] ?? '').toString().trim().isEmpty ? null : m['activeFacet'].toString().trim(),
-        topicPin: (m['topicPin'] ?? '').toString().trim().isEmpty ? null : m['topicPin'].toString().trim(),
-        tags: (m['tags'] is List) ? List<String>.from((m['tags'] as List).map((e) => e.toString())) : null,
-        canon: (m['canon'] ?? '').toString().trim().isEmpty ? null : m['canon'].toString().trim(),
+      final ms = MemoryService.instance as dynamic;
+      await ms.afterReflectionTurn?.call(
+        turn,
+        lastUserText: lastUserText,
       );
     } catch (_) {/* ignore */}
+  }
 
-    // optional: kleines Ack-Event ins Memory loggen
-    try {
-      final dyn = MemoryService.instance as dynamic;
-      await dyn.saveAck?.call({
-        'kind': 'insight_saved',
-        'line': (m['line'] ?? '').toString().trim(),
-        'ts': DateTime.now().toUtc().toIso8601String(),
-      });
-    } catch (_) {/* ignore */}
+  // --------- Misc helpers ----------------------------------------------------
 
-    _insightProposals.clear();
-    _recomputeAvailableActions();
-
-    // Kurzer, warmer Acknowledge-Ton in der UI; keine Frage, kein Worker-Call
-    if (_vm != null) {
-      _vm = _vm!.copyWith(helperSuggestion: 'Gespeichert – ich halte diese kleine Einsicht für dich fest.');
-      notifyListeners();
-      _emitScrollToEnd(const Duration(milliseconds: 120));
+  String _excerpt(String s, int maxChars) {
+    final t = s.trim();
+    if (t.length <= maxChars) return t;
+    final cut = t.substring(0, maxChars);
+    final lastSpace = cut.lastIndexOf(' ');
+    if (lastSpace > 12) {
+      return '${cut.substring(0, lastSpace).trimRight()}…';
     }
+    return '$cut…';
   }
 
-  /// Public-API für die View: „Später“ gedrückt.
-  void skipMemoryProposal() {
-    if (_insightProposals.isEmpty) return;
-    _insightProposals.clear();
-    _recomputeAvailableActions();
-
-    // Sanftes, kurzes Ack – ohne Folgefrage/Turn
-    if (_vm != null) {
-      _vm = _vm!.copyWith(helperSuggestion: 'Alles klar – wir können das später jederzeit aufnehmen.');
-      notifyListeners();
-      _emitScrollToEnd(const Duration(milliseconds: 120));
-    }
+  gdt.UserAction _toUserAction(String id, {String? note}) {
+    // DTO: const UserAction({required this.type, this.actionType = ActionType.unknown, this.note});
+    return gdt.UserAction(
+      type: id,
+      note: note,
+    );
   }
-
-  // ---------------- Topic-Normalisierung (Fallback für Kutsche 3) ------------
-
-  /// Normalisiert Topics auf ≤3 Worte, Kleinbuchstaben, Trim; entfernt Punkte/Ellipsen.
-  String _normalizeTopic(String raw) {
-    var t = raw.trim();
-    if (t.isEmpty) return '';
-    t = t.replaceAll(RegExp(r'[.。…]+$'), '').trim();
-    // Zerlegen und auf 3 Tokens begrenzen
-    final parts = t.split(RegExp(r'\s+')).where((e) => e.trim().isNotEmpty).toList();
-    final keep = parts.take(3).map((e) => e.toLowerCase()).toList();
-    return keep.join(' ').trim();
-  }
-}
-
-class _MemPrep {
-  final Map<String, dynamic>? memories;
-  final bool consent;
-  const _MemPrep(this.memories, this.consent);
 }

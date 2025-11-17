@@ -1,4 +1,4 @@
-// [BASELINE] lib/features/reflection/reflection_view.dart (Stand: 2025-11-07, v6.7.2)
+// [BASELINE] lib/features/reflection/reflection_view.dart (Stand: 2025-11-08, v6.8.3b)
 // ReflectionView — reine Layout-Schicht (Plan v6.2.2 + v6.3.x VM-Wiring)
 // + v6.4 AutoScroll v1 (2025-10-31):
 //   • Stateful (ScrollController, extentAfter-Heuristik, Jump-to-Bottom FAB)
@@ -29,6 +29,11 @@
 // v6.7.2 (2025-11-07):
 //   • BUGFIX: Composer verwendete konstanten Hint-Text; jetzt `hint`-Prop korrekt genutzt.
 //   • Kleinere Mikro-Polishes (sanftere Auto-Scroll-Signatur, Null-Guards).
+//
+// v6.8.3b (2025-11-08):
+//   • Neues Prop `composerHint` in ReflectionViewProps (Default: „Antworte in 1–2 Sätzen.“).
+//   • Composer nutzt nun konsequent `props.composerHint` statt konstantem String.
+//   • Sonst keine Logik-Änderungen (stabil zu ReflectionLogic v6.8.3b).
 //
 
 import 'dart:math' as math;
@@ -73,6 +78,7 @@ class ReflectionViewProps {
   final VoidCallback? onSend;
   final VoidCallback? onMicTap;
   final bool isRecording;
+  final String composerHint; // NEU v6.8.3b – z.B. Fragebezogener Hint
 
   // Abschluss/Mood-CTA
   final bool allowClosure; // kompatibel belassen, aber UI gate nur über moodPrompt!
@@ -83,7 +89,7 @@ class ReflectionViewProps {
   final bool risk;
 
   // Hope-Slot (kleiner, warmer Hinweis unter den Chips)
-  final String? hopeText;  // einfacher Text
+  final String? hopeText;   // einfacher Text
   final Widget? hopeWidget; // alternativ: kompletter Widget-Slot
 
   // Footer-Disclaimer
@@ -94,8 +100,8 @@ class ReflectionViewProps {
 
   // Optional: Dev-Badge (Mem ON/OFF)
   final bool showDevMemBadge; // zeigt kleines Badge oben rechts
-  final bool memoryOn; // true → „Mem ON“
-  final int memoryCount; // n in „Mem ON (n)“
+  final bool memoryOn;        // true → „Mem ON“
+  final int memoryCount;      // n in „Mem ON (n)“
 
   const ReflectionViewProps({
     this.headerTitle = 'Ordne deine Gedanken',
@@ -118,6 +124,7 @@ class ReflectionViewProps {
     this.onSend,
     this.onMicTap,
     this.isRecording = false,
+    this.composerHint = 'Antworte in 1–2 Sätzen.', // Default-Hint
     this.allowClosure = false,
     this.moodPrompt = false,
     this.onClosureTap,
@@ -339,23 +346,33 @@ class _ReflectionViewState extends State<ReflectionView> {
                               ? Scrollbar(
                                   controller: _scroll,
                                   thumbVisibility: true,
-                                  child: _buildListView(cardMaxW, bottomInset, w, props,
-                                      showIntro: _showIntro,
-                                      showSmalltalk: _showSmalltalk,
-                                      showBridge: _showBridge,
-                                      showQuestion: _showQuestion,
-                                      showChips: _showChips,
-                                      showHope: _showHope,
-                                      showMoodCta: _showMoodCta),
+                                  child: _buildListView(
+                                    cardMaxW,
+                                    bottomInset,
+                                    w,
+                                    props,
+                                    showIntro: _showIntro,
+                                    showSmalltalk: _showSmalltalk,
+                                    showBridge: _showBridge,
+                                    showQuestion: _showQuestion,
+                                    showChips: _showChips,
+                                    showHope: _showHope,
+                                    showMoodCta: _showMoodCta,
+                                  ),
                                 )
-                              : _buildListView(cardMaxW, bottomInset, w, props,
+                              : _buildListView(
+                                  cardMaxW,
+                                  bottomInset,
+                                  w,
+                                  props,
                                   showIntro: _showIntro,
                                   showSmalltalk: _showSmalltalk,
                                   showBridge: _showBridge,
                                   showQuestion: _showQuestion,
                                   showChips: _showChips,
                                   showHope: _showHope,
-                                  showMoodCta: _showMoodCta),
+                                  showMoodCta: _showMoodCta,
+                                ),
                         ),
 
                         // „Nach unten“-FAB (nur zeigen, wenn neue Items da sind und User nicht unten ist)
@@ -386,7 +403,7 @@ class _ReflectionViewState extends State<ReflectionView> {
                           child: _ComposerBar(
                             controller: props.controller,
                             focusNode: props.focusNode,
-                            hint: 'Antworte in 1–2 Sätzen.',
+                            hint: props.composerHint, // jetzt aus Props
                             canSend: props.canSend,
                             onSend: _onSendWrapped, // ← wrapped!
                             onMicTap: props.onMicTap,
@@ -627,7 +644,7 @@ class _ReflectionViewState extends State<ReflectionView> {
   }
 
   String _normalizeChip(String s) {
-    var t = s.trim().replaceAll(RegExp(r'[?？]+$'), '');
+    var t = s.trim().replaceAll(RegExp(r'[?؟]+$'), '');
     t = t.replaceAll(RegExp(r'\s+'), ' ').trim();
     if (t.length > 72) t = '${t.substring(0, 72).trimRight()}…';
     t = t.replaceAll(RegExp(r'[.。]+$'), '').trim();
@@ -988,7 +1005,7 @@ class _ComposerBar extends StatelessWidget {
                 if (canSend) onSend?.call();
               },
               decoration: InputDecoration(
-                hintText: hint, // ← BUGFIX: nutzt jetzt das Prop
+                hintText: hint, // nutzt jetzt das Prop
                 border: InputBorder.none,
                 isDense: true,
                 contentPadding: const EdgeInsets.symmetric(vertical: 10),

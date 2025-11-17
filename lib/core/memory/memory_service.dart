@@ -882,7 +882,7 @@ class MemoryService {
       }
 
       // 2) Facts & diverse Saves aus memories_to_save (K4+)
-      await _ingestMemoriesToSave(map, allowIdentity: false);
+      await _ingestMemoriesToSave(map, allowIdentity: true);
 
       // 3) last.topic/mood/date Pins aus Root (understanding/flow/last)
       String? _topicFromUnderstanding(Map<String, dynamic> root) {

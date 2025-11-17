@@ -1,11 +1,12 @@
-// [PATCHED] lib/features/reflection/reflection_screen.dart — v6.7.12
-// MERGE SIGNAL: Reflection v6.7.12 — Therapeutische Kernlinie, Worker-only Chips, Dual-Mood (🍃/🌿), UIEvent-Fix
-// Änderungen ggü. v6.7.11:
-// • Worker-only Chips strikt (keine lokalen Fallbacks), max 3; keine Chips in Closure-Phase.
-// • Dual-Mood deterministisch (nur bei flow.mood_prompt && !closure); lokales Save (🍃/🌿), Server-Post nur (🌿).
-// • UIEventKind.openDualMoodPicker Case vorhanden; DateTime → toIso8601String Fix beibehalten.
-// • Intro-Ritual einmalig; No-Quote-Mirror; sanfte Save-Bestätigung; CH-Hotline bei risk mild/high.
-// • Consent-Hint im Screen weiterhin **deaktiviert** (wie v6.7.11) – erfolgt künftig über Settings/Privacy.
+// [PATCHED] lib/features/reflection/reflection_screen.dart — v6.7.13
+// MERGE SIGNAL: Reflection v6.7.13 — Therapeutische Kernlinie, Worker-only Chips,
+// Dual-Mood (🍃/🌿), UIEvent-Fix, History+Bridge via ReflectionController
+//
+// Änderungen ggü. v6.7.12:
+// • Memory-Bridge bevorzugt jetzt (falls vorhanden) die bridgeText-Ausgabe aus
+//   ReflectionController, mit Rückfall auf die lokale Recall-Brücke (_bridgeText).
+// • Sonst keinerlei Verhaltensänderung: Chips, Mood, Save-Flow, Safety & Intro
+//   bleiben identisch.
 
 library reflection_screen;
 
@@ -188,7 +189,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
   // ---- NEW: pro Runde die Dual-Mood-Werte halten, ohne Models anzufassen ----
   final Map<String, _DualMood> _dualMoodsByRoundId = {};
 
-  // Prefetch Recall (best effort)
+  // Prefetch Recall (best effort, lokaler Fallback)
   Future<void> _prefetchRecall() async {
     try {
       final recall = await MemoryService.instance.recall(limit: 6);
@@ -239,6 +240,22 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     return '$body Falls das heute noch mitschwingt – magst du dort anknüpfen?';
   }
 
+  /// NEW: Bevorzugt Bridge-Text aus ReflectionController (History),
+  /// fällt zurück auf lokalen Recall-Text (_bridgeText), wenn nichts da ist.
+  String? get _effectiveBridgeText {
+    String? fromCtrl;
+    try {
+      final dyn = _ctrl as dynamic;
+      final val = dyn.bridgeText;
+      if (val is String && val.trim().isNotEmpty) {
+        fromCtrl = val.trim();
+      }
+    } catch (_) {
+      // Kein bridgeText im Controller – still.
+    }
+    return fromCtrl ?? _bridgeText;
+  }
+
   // ---------------- META: Builder --------------------------------------------
   Map<String, dynamic> _buildMeta({
     String? userText,
@@ -255,7 +272,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       },
       'ui': {
         'screen': 'reflection',
-        'version': '3.26.2',
+        'version': '3.26.3',
         'platform': kIsWeb ? 'web' : 'flutter',
         'is_desktop': _isDesktop,
         'chip_mode': _chipMode.name,
@@ -273,7 +290,8 @@ class _ReflectionScreenState extends State<ReflectionScreen>
         'is_closure': isClosure,
       },
       'memory': {
-        'bridge': _bridgeText,
+        // wichtig: Controller-Bridge (History) zuerst, dann Recall-Fallback
+        'bridge': _effectiveBridgeText,
         'injected': {'present': false},
       },
       'input': {
@@ -401,8 +419,9 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       } catch (_) {}
     }());
 
-    // Memory-Recall
+    // Memory-Recall (Fallback)
     unawaited(_prefetchRecall());
+    // Controller-Bridge (History-basiert)
     unawaited(_ctrl.prefetchBridge());
 
     // Live-Transkript → direkt in Input einfügen
