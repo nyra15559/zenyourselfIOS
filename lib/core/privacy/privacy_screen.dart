@@ -1,40 +1,47 @@
-// [MERGE SIGNAL] lib/core/privacy/privacy_screen.dart (v1.6 · 2025-11-09)
+// [MERGE SIGNAL] lib/core/privacy/privacy_screen.dart (v2.0 · 2025-11-18 · memoryToggle-3stage)
 // ZenYourself — Privacy Screen (calm, props-only UI)
 // -----------------------------------------------------------------------------
 // • Reine UI-Schicht: rendert Transparenz/Einwilligungen ohne Business-Logik.
+// • 3-Stufen-Memory-Toggle (🕊️ AUS · 🍃 On-Device · 🌿 Voll/Bridge) als zentrale Steuerung.
+// • Props: memoryMode (0/1/2) + memoryConsent/greetByName → Orchestrator verdrahtet auf MemoryService.
 // • Gear tappbar (AppBar.actions), Backdrop per IgnorePointer → keine Tap-Blocker.
 // • Optional-Props für Trial/Status/Upgrade ergänzt (kompatibel zum Orchestrator).
 // • Ruhige Oxford-Zen-Typografie & Glass Cards.
 //
 // Hinweise:
 // – Save-Button triggert props.onSave(PrivacySettings).
+// – memoryMode: 0 = Aus (🕊️), 1 = On-Device (🍃), 2 = Voll/Bridge (🌿).
 // – "Mit Namen ansprechen" ist nur aktiv, wenn currentName gesetzt ist.
-// – Wenn memoryConsent==true und memoryActive==false → Upgrade-CTA (falls onUpgrade gesetzt).
+// – Wenn memoryMode==2 und memoryActive==false → Upgrade-CTA (falls onUpgrade gesetzt).
 
 import 'package:flutter/material.dart';
 import '../../shared/zen_style.dart';
 
 class PrivacyScreenProps {
   // Datenschutz-Basics
-  final bool shareDiagnostics;       // Absturz-/Diagnose-Infos teilen
-  final bool shareUsage;             // anonyme Nutzungsanalyse
-  final bool enableCloudBackup;      // optionales Cloud-Backup von Metadaten
-  final bool localOnly;              // Inhalte nur lokal (keine Cloud-Inhalte)
+  final bool shareDiagnostics; // Absturz-/Diagnose-Infos teilen
+  final bool shareUsage; // anonyme Nutzungsanalyse
+  final bool enableCloudBackup; // optionales Cloud-Backup von Metadaten
+  final bool localOnly; // Inhalte nur lokal (keine Cloud-Inhalte)
 
   // Erinnerung & Name
-  final bool memoryConsent;          // Panda darf sich erinnern (on-device)
-  final bool greetByName;            // Panda darf dich mit Namen ansprechen
-  final String? currentName;         // gespeicherter Name (optional)
+  final bool memoryConsent; // Panda darf sich erinnern (on-device)
+  final bool greetByName; // Panda darf dich mit Namen ansprechen
+  final String? currentName; // gespeicherter Name (optional)
+
+  /// Memory-Mode: 0 = AUS (🕊️), 1 = On-Device (🍃), 2 = Voll/Bridge (🌿).
+  /// Orchestrator übersetzt auf MemoryService + ApiService (buildContextMemories).
+  final int memoryMode;
 
   // Policy-Meta
   final String policyVersion;
   final DateTime? lastUpdated;
 
   // Optional: Trial/Status/Upgrade (für Anzeige)
-  final bool? memoryActive;          // ob Kontext-Bridge aktuell aktiv ist (Trial/Premium)
-  final DateTime? memoryExpiryAt;    // optionales Trial-Ende
-  final String? memoryStatusNote;    // vorformulierte Status-Zeile
-  final VoidCallback? onUpgrade;     // Upgrade-Action (wenn Trial abgelaufen)
+  final bool? memoryActive; // ob Kontext-Bridge aktuell aktiv ist (Trial/Premium)
+  final DateTime? memoryExpiryAt; // optionales Trial-Ende
+  final String? memoryStatusNote; // vorformulierte Status-Zeile
+  final VoidCallback? onUpgrade; // Upgrade-Action (wenn Trial abgelaufen)
 
   // Actions/Callbacks
   final VoidCallback? onOpenPolicy;
@@ -62,6 +69,7 @@ class PrivacyScreenProps {
     this.memoryConsent = false,
     this.greetByName = false,
     this.currentName,
+    this.memoryMode = 0,
 
     // Policy
     this.policyVersion = 'v1.0',
@@ -98,6 +106,9 @@ class PrivacySettings {
   final bool memoryConsent;
   final bool greetByName;
 
+  /// Memory-Mode: 0 = AUS (🕊️), 1 = On-Device (🍃), 2 = Voll/Bridge (🌿).
+  final int memoryMode;
+
   const PrivacySettings({
     required this.shareDiagnostics,
     required this.shareUsage,
@@ -105,6 +116,7 @@ class PrivacySettings {
     required this.localOnly,
     required this.memoryConsent,
     required this.greetByName,
+    this.memoryMode = 0,
   });
 
   Map<String, dynamic> toJson() => {
@@ -114,6 +126,7 @@ class PrivacySettings {
         'local_only': localOnly,
         'memory_consent': memoryConsent,
         'greet_by_name': greetByName,
+        'memory_mode': memoryMode,
       };
 }
 
@@ -127,14 +140,39 @@ class PrivacyScreen extends StatefulWidget {
 
 class _PrivacyScreenState extends State<PrivacyScreen> {
   // Basics
-  late bool _shareDiagnostics = widget.props.shareDiagnostics;
-  late bool _shareUsage = widget.props.shareUsage;
-  late bool _enableCloudBackup = widget.props.enableCloudBackup;
-  late bool _localOnly = widget.props.localOnly;
+  late bool _shareDiagnostics;
+  late bool _shareUsage;
+  late bool _enableCloudBackup;
+  late bool _localOnly;
 
   // Memory & Name
-  late bool _memoryConsent = widget.props.memoryConsent;
-  late bool _greetByName = widget.props.greetByName;
+  late int _memoryMode; // 0/1/2
+  late bool _memoryConsent;
+  late bool _greetByName;
+
+  @override
+  void initState() {
+    super.initState();
+    final p = widget.props;
+
+    _shareDiagnostics = p.shareDiagnostics;
+    _shareUsage = p.shareUsage;
+    _enableCloudBackup = p.enableCloudBackup;
+    _localOnly = p.localOnly;
+
+    // Memory-Mode: Backcompat – wenn nur memoryConsent gesetzt war, default auf On-Device (1)
+    var mode = p.memoryMode;
+    if (mode < 0 || mode > 2) {
+      mode = 0;
+    }
+    if (mode == 0 && p.memoryConsent) {
+      mode = 1;
+    }
+    _memoryMode = mode;
+    _memoryConsent = _memoryMode > 0;
+
+    _greetByName = p.greetByName;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -154,10 +192,20 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
     final statusNote = widget.props.memoryStatusNote ??
         (() {
           final active = widget.props.memoryActive;
-          if (!_memoryConsent) return 'Kontext-Teilen: AUS';
-          if (active == true) return 'Kontext-Teilen: AN';
-          if (active == false) return 'Kontext-Teilen: AUS (Trial abgelaufen)';
-          return 'Kontext-Teilen: –';
+          if (!_memoryConsent || _memoryMode <= 0) {
+            return 'Erinnerungen: AUS (🕊️ Ghost-Mode)';
+          }
+          if (_memoryMode == 1) {
+            return 'Erinnerungen: On-Device (🍃, nur auf diesem Gerät)';
+          }
+          // _memoryMode == 2
+          if (active == false) {
+            return 'Kontext-Bridge: AUS (🌿 gewählt, aber nicht aktiv)';
+          }
+          if (active == true) {
+            return 'Kontext-Bridge: AN (🌿, kuratierter Kontext wird mitgeschickt)';
+          }
+          return 'Kontext-Bridge: –';
         })();
 
     return Scaffold(
@@ -314,18 +362,18 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
                                   ),
                                 ),
                                 const SizedBox(height: 8),
-                                _ToggleRow(
-                                  item: _ToggleItem(
-                                    title: 'Erinnerungen erlauben (on-device)',
-                                    subtitle:
-                                        'Panda darf auf deinem Gerät Erinnerungen an eure Gespräche speichern und nutzen. '
-                                        'Nichts verlässt dein Gerät ohne deine ausdrückliche Zustimmung.',
-                                    icon: Icons.memory_rounded,
-                                    value: _memoryConsent,
-                                    onChanged: (v) =>
-                                        setState(() => _memoryConsent = v),
-                                  ),
+
+                                // Neuer 3-Stufen-Memory-Toggle
+                                _MemoryModeRow(
+                                  mode: _memoryMode,
+                                  onChanged: (mode) {
+                                    setState(() {
+                                      _memoryMode = mode;
+                                      _memoryConsent = _memoryMode > 0;
+                                    });
+                                  },
                                 ),
+
                                 const SizedBox(height: 8),
                                 _ToggleRow(
                                   item: _ToggleItem(
@@ -363,8 +411,11 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
                                 Opacity(
                                   opacity: .82,
                                   child: Text(
-                                    'Hinweis: Erinnerungen werden nur lokal gespeichert (Ghost-Mode). '
-                                    'Panda nennt gespeicherte Inhalte nie proaktiv — nur wenn du das Thema wieder aufgreifst.',
+                                    'Hinweis: Im Modus 🍃 bleiben Erinnerungen auf deinem Gerät. '
+                                    'Im Modus 🌿 sendet Panda einen kleinen, kuratierten Kontext '
+                                    '(z. B. Thema, Stimmung) mit – niemals ganze Texte. '
+                                    'Panda spricht gespeicherte Inhalte nie von sich aus an, '
+                                    'sie fließen nur ein, wenn du ähnliche Themen wieder ansprichst.',
                                     style: tt.bodySmall?.copyWith(
                                       color: ZenColors.ink.withValue(alpha: .80),
                                     ),
@@ -372,8 +423,8 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
                                   ),
                                 ),
 
-                                // Optionaler Upgrade-Hinweis, wenn Trial abgelaufen
-                                if (_memoryConsent &&
+                                // Optionaler Upgrade-Hinweis, wenn Trial abgelaufen und Voll-Modus gewählt
+                                if (_memoryMode == 2 &&
                                     (widget.props.memoryActive == false) &&
                                     widget.props.onUpgrade != null) ...[
                                   const SizedBox(height: 12),
@@ -426,7 +477,8 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
                                           'Version ${widget.props.policyVersion}',
                                         ].join(' • '),
                                         style: tt.bodyMedium?.copyWith(
-                                          color: ZenColors.ink.withValue(alpha: .75),
+                                          color: ZenColors.ink
+                                              .withValue(alpha: .75),
                                         ),
                                       ),
                                       const SizedBox(height: 8),
@@ -525,6 +577,11 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
                           const SizedBox(width: 10),
                           ElevatedButton.icon(
                             onPressed: () {
+                              final hasName = (widget.props.currentName != null &&
+                                  widget.props.currentName!
+                                      .trim()
+                                      .isNotEmpty);
+
                               final out = PrivacySettings(
                                 shareDiagnostics:
                                     _shareDiagnostics && !_localOnly,
@@ -534,6 +591,7 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
                                 localOnly: _localOnly,
                                 memoryConsent: _memoryConsent,
                                 greetByName: _greetByName && hasName,
+                                memoryMode: _memoryMode,
                               );
                               widget.props.onSave?.call(out);
                               ScaffoldMessenger.of(context).showSnackBar(
@@ -852,6 +910,155 @@ class _NameRow extends StatelessWidget {
             label: const Text('Name löschen'),
           ),
       ],
+    );
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Memory-Mode UI (3-Stufen-Toggle 🕊️ · 🍃 · 🌿)
+// -----------------------------------------------------------------------------
+
+class _MemoryModeRow extends StatelessWidget {
+  final int mode; // 0/1/2
+  final ValueChanged<int> onChanged;
+
+  const _MemoryModeRow({
+    required this.mode,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const ExcludeSemantics(
+          child: Icon(Icons.memory_rounded, size: 18, color: ZenColors.ink),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Panda-Gedächtnis',
+                style: tt.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: ZenColors.inkStrong,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                _descriptionForMode(mode),
+                style: tt.bodyMedium?.copyWith(
+                  color: ZenColors.ink.withValue(alpha: .80),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _MemoryModeChip(
+                    label: '🕊️ AUS',
+                    subtitle: 'kein Gedächtnis',
+                    isActive: mode == 0,
+                    onTap: () => onChanged(0),
+                  ),
+                  _MemoryModeChip(
+                    label: '🍃 On-Device',
+                    subtitle: 'nur lokal',
+                    isActive: mode == 1,
+                    onTap: () => onChanged(1),
+                  ),
+                  _MemoryModeChip(
+                    label: '🌿 Voll',
+                    subtitle: 'mit Kontext-Bridge',
+                    isActive: mode == 2,
+                    onTap: () => onChanged(2),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  static String _descriptionForMode(int mode) {
+    switch (mode) {
+      case 0:
+        return 'Panda vergisst nach jeder Sitzung (Ghost-Mode).';
+      case 1:
+        return 'Panda erinnert sich nur lokal an Name, Stimmung und Erkenntnisse.';
+      case 2:
+        return 'Panda nutzt zusätzlich eine kleine Kontext-Bridge, damit Antworten besser zu dir passen.';
+      default:
+        return 'Steuere, wie stark Panda sich erinnern darf.';
+    }
+  }
+}
+
+class _MemoryModeChip extends StatelessWidget {
+  final String label;
+  final String subtitle;
+  final bool isActive;
+  final VoidCallback onTap;
+
+  const _MemoryModeChip({
+    required this.label,
+    required this.subtitle,
+    required this.isActive,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+    final bg = isActive
+        ? ZenColors.jade.withValue(alpha: .20)
+        : ZenColors.surface.withValue(alpha: .70);
+    final border = isActive
+        ? ZenColors.jade.withValue(alpha: .70)
+        : ZenColors.ink.withValue(alpha: .16);
+    final textColor =
+        isActive ? ZenColors.inkStrong : ZenColors.ink.withValue(alpha: .90);
+
+    return InkWell(
+      borderRadius: const BorderRadius.all(ZenRadii.m),
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: const BorderRadius.all(ZenRadii.m),
+          border: Border.all(color: border),
+          boxShadow: isActive ? const [ZenShadows.glow] : const [],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: tt.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: textColor,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              subtitle,
+              style: tt.bodySmall?.copyWith(
+                color: ZenColors.ink.withValue(alpha: .80),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

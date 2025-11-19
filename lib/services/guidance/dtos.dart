@@ -1,15 +1,18 @@
-// [PATCHED] lib/services/guidance/dtos.dart (Stand: 2025-11-10, v7.1.7+insight.3+timeline.2)
+// [PATCHED] lib/services/guidance/dtos.dart (Stand: 2025-11-18, v7.2.0+session.1)
 // DTOs & Value-Types für Guidance-Service (standalone, ohne Api-Abhängigkeit)
 // ────────────────────────────────────────────────────────────────────────────
-// MERGE SIGNAL — v7.1.7 (insight.3+timeline.2)
-// • Akzeptanzvorgaben aus Plan 1.2 verankert:
-//   – DTOs enthalten answer_helpers[], flow.mood_prompt, risk_level,
-//     closure{mode,tone,hope_reply}, understanding{topic_shift,tags}, memories_to_save[].
-//   – Parser defensiv/tolerant, keine lokalen Chips erzeugt.
-// • Risk-Normalisierung: robustere Aliasse ('level','risk','risk_flag') → 'crisis'|'support'|'none'.
-// • Smalltalk-Sanitizer beibehalten (Panda-Persona ohne „See“-Welt).
-// • TimelineMarker & InsightFact: ISO-Datetime → YYYY-MM-DD Kürzung; List-Parser stabil.
-// • Keine Imports; reine Dart-Value-Types.
+// MERGE SIGNAL — v7.2.0 (session.1+insight.3+timeline.2)
+// • Full-Session-Mode laut Arbeitsplan 8 Dateien:
+//   – Neuer GuidanceTurn mit role/text/createdAt als kanonischer Turn-Typ.
+//   – NextTurnFullRequest verwendet List<GuidanceTurn>.
+//   – JSON-Shape: session{id,thread_id,history[ {role,text,created_at} ]},
+//     keine Top-Level-"history" mehr.
+// • Bisherige Felder bleiben erhalten:
+//   – answer_helpers[], flow.mood_prompt, risk_level,
+//     closure{mode,tone,hope_reply}, understanding{topic_shift,tags},
+//     memories_to_save[], meta.flags.client_memory, context.memories.
+// • TimelineMarker & InsightFact unverändert (ISO-Datetime → YYYY-MM-DD).
+// • HistoryTurn bleibt als einfacher Legacy-Typ (role+text) für Backcompat.
 // ────────────────────────────────────────────────────────────────────────────
 
 library guidance_dtos;
@@ -120,7 +123,67 @@ Stage parseStage(dynamic v) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// V7.1: HistoryTurn — typisierte Chat-Historie ohne Heuristik
+// V7.2: GuidanceTurn — kanonischer Turn-Typ für Full-Session-Mode
+// ────────────────────────────────────────────────────────────────────────────
+
+class GuidanceTurn {
+  /// Rolle in der Unterhaltung: 'user' | 'assistant' | optional 'system'.
+  final String role;
+
+  /// Inhalt dieses Turns (bereits normalisierter Text).
+  final String text;
+
+  /// Erstellzeitpunkt dieses Turns (Client-Sicht).
+  final DateTime createdAt;
+
+  const GuidanceTurn({
+    required this.role,
+    required this.text,
+    required this.createdAt,
+  });
+
+  /// JSON-Shape für session.history:
+  /// { "role": "user", "text": "...", "created_at": "2025-11-18T12:34:56.000Z" }
+  Map<String, dynamic> toSessionJson() => {
+        'role': role.trim(),
+        'text': text,
+        'created_at': createdAt.toIso8601String(),
+      };
+
+  /// Generische JSON-Repräsentation (z. B. für Debug/Logs).
+  Map<String, dynamic> toJson() => toSessionJson();
+
+  /// Tolerantes Parsing (für evtl. spätere Nutzung).
+  static GuidanceTurn? fromMaybe(dynamic v) {
+    if (v is! Map) return null;
+    final m = Map<String, dynamic>.from(v);
+    final role = (m['role'] ?? '').toString();
+    final text = (m['text'] ?? m['content'] ?? '').toString();
+
+    if (role.trim().isEmpty && text.trim().isEmpty) return null;
+
+    final rawTs =
+        (m['created_at'] ?? m['createdAt'] ?? m['ts'] ?? m['timestamp'])?.toString();
+    DateTime created;
+    if (rawTs == null || rawTs.trim().isEmpty) {
+      created = DateTime.now();
+    } else {
+      created = DateTime.tryParse(rawTs.trim()) ?? DateTime.now();
+    }
+
+    return GuidanceTurn(
+      role: role,
+      text: text,
+      createdAt: created,
+    );
+  }
+
+  /// Backcompat-Helfer: auf einfachen HistoryTurn (ohne Zeitstempel) abbilden.
+  HistoryTurn toHistoryTurn() => HistoryTurn(role: role, text: text);
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// V7.1: HistoryTurn — einfache Chat-Historie (Legacy, ohne createdAt)
 // ────────────────────────────────────────────────────────────────────────────
 
 class HistoryTurn {
@@ -152,35 +215,47 @@ class HistoryTurn {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// V7.1 (+compat): NextTurnFullRequest — Request-Envelope für /next_turn_full
+// V7.2: NextTurnFullRequest — Request-Envelope für /next_turn_full
+//       (Full-Session-Mode mit session.history)
 // ────────────────────────────────────────────────────────────────────────────
 
 class NextTurnFullRequest {
-  final String sessionId; // = ReflectionSession.threadId
-  final String userText; // aktueller User-Text (kann leer sein bei Actions)
-  final List<HistoryTurn> history; // verlustfrei, ohne Heuristik
+  /// = ReflectionSession.threadId – eindeutige Kennung der Unterhaltung.
+  final String sessionId;
+
+  /// Aktueller User-Text (kann bei reinen Actions leer sein).
+  final String userText;
+
+  /// Vollständige Verlaufsliste (max. ~20 Turns), inkl. createdAt.
+  final List<GuidanceTurn> history;
 
   /// Kompakter Memory-Context (kuratiert). Darf Map<String,dynamic> ODER List<dynamic> sein.
   /// Wird in toJson() nach {context:{memories:…}} serialisiert.
   final dynamic contextMemories;
 
-  /// meta.flags.client_memory (optional; nur Hinweis)
+  /// meta.flags.client_memory (optional; nur Hinweis).
   final bool? metaClientMemory;
 
   const NextTurnFullRequest({
     required this.sessionId,
     required this.userText,
-    this.history = const <HistoryTurn>[],
+    this.history = const <GuidanceTurn>[],
     this.contextMemories,
     this.metaClientMemory,
   });
 
   Map<String, dynamic> toJson() {
-    final hist = history.map((h) => h.toMessageJson()).toList();
-    final map = <String, dynamic>{
-      'session': {'id': sessionId, 'thread_id': sessionId},
-      'user_text': userText,
+    final hist = history.map((h) => h.toSessionJson()).toList();
+
+    final session = <String, dynamic>{
+      'id': sessionId,
+      'thread_id': sessionId,
       if (hist.isNotEmpty) 'history': hist,
+    };
+
+    final map = <String, dynamic>{
+      'session': session,
+      'user_text': userText,
     };
 
     if (contextMemories != null) {
@@ -205,14 +280,14 @@ class NextTurnFullRequest {
   static NextTurnFullRequest fromParts({
     required String sessionId,
     required String userText,
-    List<HistoryTurn>? history,
+    List<GuidanceTurn>? history,
     dynamic contextMemories, // Map<String,dynamic> ODER List<dynamic>
     bool? metaClientMemory,
   }) {
     return NextTurnFullRequest(
       sessionId: sessionId,
       userText: userText,
-      history: history ?? const <HistoryTurn>[],
+      history: history ?? const <GuidanceTurn>[],
       contextMemories: contextMemories,
       metaClientMemory: metaClientMemory,
     );
@@ -336,7 +411,8 @@ class SkillCard {
     final title = (m['title'] ?? m['headline'] ?? '').toString().trim();
     final body = (m['body'] ?? m['text'] ?? '').toString().trim();
     final stage = parseStage(m['stage']);
-    final helpers = _orderedDedup(_strings([m['helpers'], m['chips'], m['answers']])).take(3).toList();
+    final helpers =
+        _orderedDedup(_strings([m['helpers'], m['chips'], m['answers']])).take(3).toList();
     if (id.isEmpty && title.isEmpty && body.isEmpty) return null;
     return SkillCard(
       id: id.ifEmpty(() => 'card_${title.hashCode}_${body.hashCode}'),
@@ -589,8 +665,7 @@ class ClosureData {
 
     Map<String, dynamic>? mm(dynamic x) => _asMap(x);
     final closure = mm(m['closure']) ?? m;
-    final moodIntro =
-        mm(closure['mood_intro']) ?? const <String, dynamic>{};
+    final moodIntro = mm(closure['mood_intro']) ?? const <String, dynamic>{};
 
     final text = (moodIntro['text'] ?? '').toString();
     final hope = (closure['hope_reply'] ?? '').toString();
@@ -728,8 +803,7 @@ class ReflectionTurn {
       if (speechSequence.isNotEmpty)
         'speech_sequence': List<dynamic>.from(speechSequence),
       if (analysis != null) 'analysis': analysis!.toJson(),
-      if (topicSuggestions.isNotEmpty)
-        'topic_suggestions': topicSuggestions,
+      if (topicSuggestions.isNotEmpty) 'topic_suggestions': topicSuggestions,
       if (memoriesToSave.isNotEmpty)
         'memories_to_save': List<dynamic>.from(memoriesToSave),
       if (contextMemories.isNotEmpty)
@@ -768,8 +842,7 @@ class ReflectionTurn {
     final primary = asMap(m['primary']);
     final flowMap = asMap(m['flow']);
     final uiMap = asMap(m['ui']);
-    final understandingMap =
-        asMap(m['understanding']) ?? const <String, dynamic>{};
+    final understandingMap = asMap(m['understanding']) ?? const <String, dynamic>{};
 
     final outputText = (m['output_text'] ??
                 m['outputText'] ??
@@ -811,8 +884,7 @@ class ReflectionTurn {
     }
 
     final smalltalk = parseSmalltalk();
-    final smalltalkSan =
-        (smalltalk == null) ? null : _sanitizePersona(smalltalk);
+    final smalltalkSan = (smalltalk == null) ? null : _sanitizePersona(smalltalk);
 
     // talk ohne Doppelung aus smalltalk_reply, Persona-Sanitizer anwenden
     final talk = _sanitizePersonaList(
@@ -862,9 +934,8 @@ class ReflectionTurn {
     final answerHelpers = _orderedDedup(helpersRaw).take(3).toList();
 
     String? helperSuggestion() {
-      final top = (m['helper_suggestion'] ?? m['helperSuggestion'])
-          ?.toString()
-          .trim();
+      final top =
+          (m['helper_suggestion'] ?? m['helperSuggestion'])?.toString().trim();
       if ((top ?? '').isNotEmpty) return top;
       final fromPrimary =
           _pickString(primary, const ['helper_suggestion', 'helperSuggestion']);
@@ -908,8 +979,7 @@ class ReflectionTurn {
       if (turnAnalysis != null) ...turnAnalysis.topicSuggestions,
     ]);
 
-    final speechSequence =
-        _listDyn(m['speech_sequence'] ?? m['speechSequence']);
+    final speechSequence = _listDyn(m['speech_sequence'] ?? m['speechSequence']);
 
     final memoriesToSave = _listDyn(
       m['memories_to_save'] ??
@@ -920,9 +990,8 @@ class ReflectionTurn {
 
     String? understandingTopicShift() {
       final u = understandingMap;
-      final s = (u['topic_shift'] ?? u['topicShift'] ?? u['shift'])
-          ?.toString()
-          .trim();
+      final s =
+          (u['topic_shift'] ?? u['topicShift'] ?? u['shift'])?.toString().trim();
       return (s == null || s.isEmpty) ? null : s;
     }
 
@@ -1329,9 +1398,8 @@ class MiniChallenge {
 
   static MiniChallenge? fromMaybe(dynamic v) {
     if (v is Map<String, dynamic>) {
-      final steps = ((v['steps'] as List?) ?? const [])
-          .map((e) => e.toString())
-          .toList();
+      final steps =
+          ((v['steps'] as List?) ?? const []).map((e) => e.toString()).toList();
       return MiniChallenge(
         id: (v['id'] ?? '').toString(),
         title: (v['title'] ?? '').toString(),

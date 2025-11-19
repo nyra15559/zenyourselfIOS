@@ -1,10 +1,12 @@
 // ignore_for_file: unused_element
 
-// [BASELINE] lib/services/guidance_service.dart — Stand: 2025-11-10 — v6.5.0
+// [PATCHED] lib/services/guidance_service.dart — Stand: 2025-11-18 — v7.2.1+fullsession.1
 // ZenYourself — Guidance / Coaching Service (Team-Loop / Kugelservice)
 // ============================================================================
-// MERGE SIGNAL • v6.5.0 (V7-Ready, ApiService v6.7.3 Alignment)
+// MERGE SIGNAL • v7.2.1 (V7-Ready, Full-Session-Bridge, ApiService v6.7.4 Alignment)
 // • Primärweg /next_turn_full via ApiService.sendNextTurnFull(..) mit dynamischem Meta.
+// • Full-Session-Bridge: nextTurnFull kann nun optional eine sessionId + List<GuidanceTurn>
+//   annehmen; History wird 1:1 in Messages überführt (keine Re-Sortierung / Heuristiken).
 // • Merge-644++: flags.client_memory **immer** (true/false); memory.bridge spiegelt consent && memoryActive.
 // • Consent/Bridge-Gate: _prepareMemories() sendet nur bei consent && memoryActive; respektiert „heute anonym“.
 // • Name-Erkennung (_extractDeclaredName) robust (’ ' – ÄÖÜ ß Bindestrich), niemals Zitat aus >3 Wörtern.
@@ -14,8 +16,9 @@
 // • Logging minimal (debugPrint nur im Debug).
 //
 // Kompatibilität
-// • Abgestimmt auf: core/api_service.dart [BASELINE] v6.7.3 (Client-Memory Bridge, Recall≤240B, Context≤2kB).
-// • DTOs: guidance/dtos.dart sollte ReflectionTurn/Session/Flow/UserAction/HistoryTurn/StoryResult definieren.
+// • Abgestimmt auf: core/api_service.dart [BASELINE] v6.7.4 (Client-Memory Bridge, Recall≤240B, Context≤2kB).
+// • DTOs: guidance/dtos.dart v7.2.0+session.1 (GuidanceTurn, HistoryTurn, ReflectionTurn,
+//   ReflectionSession, UserAction, StoryResult).
 // ============================================================================
 
 library guidance_service;
@@ -201,12 +204,19 @@ class GuidanceService {
   }
 
   /// Bevorzugte V7-Fassade über /next_turn_full (ThreadFix + TurnIndexPersist).
+  ///
+  /// Full-Session-Bridge:
+  ///  - Optional [sessionId] + [sessionHistory] (List<GuidanceTurn]) erlaubt,
+  ///    damit Logic/UI die komplette Full-Session-History durchreichen kann.
+  ///  - Die History wird 1:1 in Messages überführt (keine lokale Heuristik).
   Future<ReflectionTurn> nextTurnFull({
     required ReflectionSession session,
+    String? sessionId, // aktuell nur Meta-Hinweis, Session kommt aus Worker
     required String text,
     String locale = 'de',
     String tz = 'Europe/Zurich',
-    List<HistoryTurn>? history, // typed
+    List<HistoryTurn>? history, // legacy typed
+    List<GuidanceTurn>? sessionHistory, // neuer Full-Session-Typ
     dynamic memories,
     bool? memoryConsent,
     UserAction? userAction,
@@ -219,7 +229,12 @@ class GuidanceService {
     Map<String, dynamic>? m = _attachIntroAndSessionMeta(meta, session);
     m = _withClientMemoryFlag(m, consent);
 
-    final List<Map<String, String>>? messages = _historyToMessages(history);
+    // Full-Session bevorzugen: GuidanceTurn → HistoryTurn → Messages
+    final List<HistoryTurn>? mergedHistory =
+        sessionHistory != null ? _guidanceToHistoryTurns(sessionHistory) : history;
+
+    final List<Map<String, String>>? messages =
+        _historyToMessages(mergedHistory);
 
     final mems = await _prepareMemories(
       incoming: memories,
@@ -1185,6 +1200,30 @@ class GuidanceService {
       final content = (m['content'] ?? m['text'] ?? '').toString();
       return HistoryTurn(role: role, text: content);
     }).toList();
+  }
+
+  /// Full-Session-Bridge: GuidanceTurn → HistoryTurn (1:1, ohne Heuristik).
+  List<HistoryTurn>? _guidanceToHistoryTurns(List<GuidanceTurn>? turns) {
+    if (turns == null) return null;
+    final out = <HistoryTurn>[];
+    for (final g in turns) {
+      try {
+        final dyn = g as dynamic;
+        final role = (dyn.role ?? dyn['role'] ?? '').toString().trim();
+        final text = (dyn.text ??
+                dyn['text'] ??
+                dyn.content ??
+                dyn['content'] ??
+                '')
+            .toString()
+            .trim();
+        if (role.isEmpty && text.isEmpty) continue;
+        out.add(HistoryTurn(role: role, text: text));
+      } catch (_) {
+        continue;
+      }
+    }
+    return out;
   }
 }
 

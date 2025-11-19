@@ -1,17 +1,15 @@
-// [UPDATED] lib/features/reflection/reflection_logic.dart (Stand: 2025-11-17, v6.8.4)
+// [UPDATED] lib/features/reflection/reflection_logic.dart (Stand: 2025-11-19, v6.8.5a)
 // ZenYourself — ReflectionLogic (Controller & Handler)
-// PANDA-REFLECT-12.9 → v6.8.4 (MemoryFlow: Conversation-Turns → MemoryService)
+// PANDA-REFLECT-12.9 → v6.8.5a (Full-Session-Mode + lokale Session-ID)
 //
-// Änderungen ggü. v6.8.3b:
-// • Neu: _logTurnToMemory(role, text) – speichert User- und Panda-Turns im MemoryService
-//   (saveUserTurn/savePandaTurn, dynamisch und tolerant).
-// • Neu: _appendUserToHistory / _appendAssistantToHistory rufen _logTurnToMemory() (fire & forget).
-// • Erweiterung: _appendAssistantToHistory nimmt neben Mirror/Frage auch talk-Linien + Hope in den Payload auf,
-//   damit der Worker seinen eigenen vollständigen Output als Verlaufstext zurückbekommt.
-// • Sonst unverändert: History-Trimming, Mood/Closure, Timeline, Facets, Actions.
+// Änderungen ggü. v6.8.4:
+// • Neu: _sessionId + startNewSession() – lokale Session-Kennung pro Reflexionslauf.
+// • Neu: _ensureSessionId() + Payload-Erweiterung (session_id/local_session_id) für Meta & MemoryService.
+// • Fix: Memory-Proposal-Aktionen ("Einsicht übernehmen" / "Später entscheiden") nur, wenn Vorschläge vorliegen.
 //
-// Hinweis: MemoryService.buildContextMemories() kann nun auf die gespeicherten Conversation-Turns zugreifen,
-// sodass der Worker nicht nur User-Text, sondern auch die eigenen Antworten als Kontext-Fakten zurückerhält.
+// v6.8.5a (2025-11-19):
+// • _ensureSessionId() jetzt auch in send(), handleAction() und completeClosureWithMood() → konsistente local_session_id.
+// • Fix: Bei geblocktem Send (Send-Gap) wird der Typing-Indicator sofort wieder deaktiviert.
 
 import 'dart:async';
 import 'package:flutter/foundation.dart';
@@ -201,6 +199,9 @@ class ReflectionController extends ChangeNotifier {
   ReflectionVM? _vm;
   String? _bridgeText;
 
+  // Lokale Session-ID (Client-Perspektive, unabhängig von thread_id des Workers)
+  String? _sessionId;
+
   // Thread-ID (aus Provider – dynamisch gelesen)
   String? _threadId;
 
@@ -276,6 +277,7 @@ class ReflectionController extends ChangeNotifier {
     _lastMoodPromptAtTurn = null;
 
     _insightProposals.clear();
+    _sessionId = null;
 
     // neue Thread-ID erzwingen: lokal leeren oder explizit setzen
     _threadId = (newThreadId != null && newThreadId.trim().isNotEmpty) ? newThreadId.trim() : null;
@@ -303,6 +305,13 @@ class ReflectionController extends ChangeNotifier {
     _hasSeenIntroThisSession = true;
   }
 
+  /// Startet eine komplett neue Reflexions-Session (Client-Seite).
+  /// Wird z.B. beim Öffnen des Screens aufgerufen.
+  void startNewSession() {
+    reset();
+    _ensureSessionId();
+  }
+
   void reset() {
     _debounceCancel();
     _stopTypingGuard();
@@ -313,6 +322,7 @@ class ReflectionController extends ChangeNotifier {
     _bridgeText = null;
     _actionUsedInThisSession = false;
     _threadId = null;
+    _sessionId = null;
 
     _facetQueue.clear();
     _activeFacet = null;
@@ -333,6 +343,7 @@ class ReflectionController extends ChangeNotifier {
 
   /// Einfache öffentliche API, die Start/Next intern entscheidet.
   Future<void> sendUser(String text, {bool fromVoice = false, BuildContext? context}) async {
+    _ensureSessionId();
     if (_apiSession == null) {
       await start(text, fromVoice: fromVoice, context: context);
     } else {
@@ -342,6 +353,8 @@ class ReflectionController extends ChangeNotifier {
 
   Future<void> start(String text, {bool fromVoice = false, BuildContext? context}) async {
     if (context != null) wireSessionFromContext(context);
+
+    _ensureSessionId();
 
     _debounceCancel();
     if (!_gateSendNow()) return;
@@ -413,7 +426,7 @@ class ReflectionController extends ChangeNotifier {
       _emitScrollToEnd(const Duration(milliseconds: 160));
       _maybeTriggerMoodPromptUI();
 
-      // ---- After-Turn-Hook (Timeline) – fire & forget -----------------------
+      // ---- After-Turn-Hook (Timeline + Memory) – fire & forget --------------
       Future<void>(() async {
         try { await _afterTurnBookkeeping(turn, lastUserText: text); } catch (_) {}
       });
@@ -442,6 +455,7 @@ class ReflectionController extends ChangeNotifier {
     if (context != null && _threadId == null) {
       wireSessionFromContext(context);
     }
+    _ensureSessionId();
     _emitTypingOn();
     _pendingSend?.cancel();
     _pendingSend = Timer(const Duration(milliseconds: 220), () async {
@@ -450,7 +464,10 @@ class ReflectionController extends ChangeNotifier {
   }
 
   Future<void> _sendNow(String text) async {
-    if (!_gateSendNow()) return;
+    if (!_gateSendNow()) {
+      _emitTypingOff(); // Fix: bei geblocktem Send Typing sofort deaktivieren
+      return;
+    }
 
     text = _sanitizeInput(text);
     if (text.isEmpty && _apiSession == null) return;
@@ -523,7 +540,7 @@ class ReflectionController extends ChangeNotifier {
       _emitScrollToEnd(const Duration(milliseconds: 160));
       _maybeTriggerMoodPromptUI();
 
-      // ---- After-Turn-Hook (Timeline) – fire & forget -----------------------
+      // ---- After-Turn-Hook (Timeline + Memory) – fire & forget --------------
       Future<void>(() async {
         try { await _afterTurnBookkeeping(turn, lastUserText: text); } catch (_) {}
       });
@@ -538,6 +555,7 @@ class ReflectionController extends ChangeNotifier {
   Future<void> handleAction(gdt.UserAction action) async {
     if (_apiSession == null) return;
     if (_actionUsedInThisSession) return;
+    _ensureSessionId();
     if (!_gateSendNow()) return;
 
     _emitTypingOn();
@@ -628,7 +646,7 @@ class ReflectionController extends ChangeNotifier {
       _emitScrollToEnd(const Duration(milliseconds: 160));
       _maybeTriggerMoodPromptUI();
 
-      // ---- After-Turn-Hook (Timeline) – fire & forget -----------------------
+      // ---- After-Turn-Hook (Timeline + Memory) – fire & forget --------------
       Future<void>(() async {
         try { await _afterTurnBookkeeping(turn, lastUserText: null); } catch (_) {}
       });
@@ -760,22 +778,16 @@ class ReflectionController extends ChangeNotifier {
 
     if (_apiSession == null) return;
 
+    _ensureSessionId();
     _emitTypingOn();
     _setLoading(true);
     try {
       final svc = GuidanceService.instance;
+      final _MemPrep mem = await _prepareMemForCall(userText: '');
       gdt.ReflectionTurn turn;
 
       try {
-        final dyn = svc as dynamic;
-        turn = await (dyn.closureFull(
-          session: _apiSession!,
-          locale: 'de',
-          tz: 'Europe/Zurich',
-          meta: _buildMeta(),
-        ) as Future<gdt.ReflectionTurn>).timeout(_kNetTimeout);
-      } catch (_) {
-        // Fallback: nextTurnFull ohne Text als "soft close"
+        // Soft-Closure über nextTurnFull ohne User-Text
         turn = await svc
             .nextTurnFull(
               session: _apiSession!,
@@ -783,8 +795,8 @@ class ReflectionController extends ChangeNotifier {
               locale: 'de',
               tz: 'Europe/Zurich',
               history: _history,
-              memories: (await _prepareMemForCall(userText: '')).memories,
-              memoryConsent: _memoryConsent,
+              memories: mem.memories,
+              memoryConsent: mem.consent,
               meta: _buildMeta(),
               clientContext: {
                 'mode': 'closure',
@@ -793,6 +805,9 @@ class ReflectionController extends ChangeNotifier {
               },
             )
             .timeout(_kNetTimeout);
+      } catch (_) {
+        // Bei Fehler: VM/State nicht überschreiben
+        return;
       }
 
       _apiSession = _coerceSession(turn);
@@ -803,7 +818,12 @@ class ReflectionController extends ChangeNotifier {
       _recomputeAvailableActions();
 
       _emitScrollToEnd(const Duration(milliseconds: 160));
-    } catch (_) {/* ignore */} finally {
+
+      // After-Turn-Hook auch beim Abschluss (Timeline + Memory)
+      Future<void>(() async {
+        try { await _afterTurnBookkeeping(turn, lastUserText: null); } catch (_) {}
+      });
+    } finally {
       _emitTypingOff();
       _setLoading(false);
     }
@@ -910,6 +930,11 @@ class ReflectionController extends ChangeNotifier {
     x = _cap(x, 800);
     x = x.replaceAll(RegExp(r'\s+'), ' ').trim();
     return x;
+  }
+
+  void _ensureSessionId() {
+    if (_sessionId != null && _sessionId!.trim().isNotEmpty) return;
+    _sessionId = DateTime.now().microsecondsSinceEpoch.toString();
   }
 
   bool _gateSendNow() {
@@ -1023,7 +1048,7 @@ class ReflectionController extends ChangeNotifier {
     return {
       'ui': {
         'controller': 'reflection_logic',
-        'version': 'v6.8.4',
+        'version': 'v6.8.5a',
       },
       'memory': {
         'bridge': _bridgeText,
@@ -1034,6 +1059,7 @@ class ReflectionController extends ChangeNotifier {
       },
       'thread': {
         if (_threadId != null) 'id': _threadId,
+        if (_sessionId != null) 'session_id': _sessionId,
         if (_apiSession?.turnIndex != null) 'turn_index': _apiSession!.turnIndex,
       },
       'intro': {
@@ -1473,6 +1499,7 @@ class ReflectionController extends ChangeNotifier {
           'ts': DateTime.now().toUtc().toIso8601String(),
           if (_threadId != null) 'thread_id': _threadId,
           if (_apiSession?.id != null) 'session_id': _apiSession!.id,
+          if (_sessionId != null) 'local_session_id': _sessionId,
           if (extra != null) ...extra,
         };
 
@@ -1490,6 +1517,22 @@ class ReflectionController extends ChangeNotifier {
   Future<void> _afterTurnBookkeeping(gdt.ReflectionTurn turn, {String? lastUserText}) async {
     try {
       final ms = MemoryService.instance as dynamic;
+
+      // 1) Roh-Worker-Daten (memories_to_save, context_memories, session …)
+      //    an den MemoryService geben – best-effort, ohne den Flow zu brechen.
+      try {
+        final payload = Map<String, dynamic>.from(turn.toJson());
+        if (turn.metaClientMemory != null) {
+          payload['meta'] = {
+            'flags': {'client_memory': turn.metaClientMemory}
+          };
+        }
+        await ms.saveFromWorker?.call(payload);
+      } catch (_) {
+        // Fehler beim Speichern sind ok – dürfen die Reflexion nie abbrechen.
+      }
+
+      // 2) Nachgelagerte Auswertung (Timeline, Insights, Marker …)
       await ms.afterReflectionTurn?.call(
         turn,
         lastUserText: lastUserText,

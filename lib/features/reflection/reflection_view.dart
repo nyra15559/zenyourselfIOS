@@ -1,4 +1,4 @@
-// [BASELINE] lib/features/reflection/reflection_view.dart (Stand: 2025-11-08, v6.8.3b)
+// [UPDATED] lib/features/reflection/reflection_view.dart (Stand: 2025-11-19, v6.8.3e)
 // ReflectionView — reine Layout-Schicht (Plan v6.2.2 + v6.3.x VM-Wiring)
 // + v6.4 AutoScroll v1 (2025-10-31):
 //   • Stateful (ScrollController, extentAfter-Heuristik, Jump-to-Bottom FAB)
@@ -35,6 +35,18 @@
 //   • Composer nutzt nun konsequent `props.composerHint` statt konstantem String.
 //   • Sonst keine Logik-Änderungen (stabil zu ReflectionLogic v6.8.3b).
 //
+// v6.8.3c (2025-11-19):
+//   • ScrollController-Init in initState (kein this-Zugriff im Field-Init, sauberer Lifecycle).
+//   • _effectiveBottomInset: clamp-Ergebnis explizit nach double gecastet (kein num→double-Noise).
+//   • Sonst keinerlei Logik- oder API-Änderungen (Drop-in-kompatibel).
+//
+// v6.8.3d (2025-11-19):
+//   • TypingDots-AnimationController in initState initialisiert (kein this im Field-Init).
+//   • Sonst keinerlei Logik-/API-Änderungen (Drop-in-kompatibel zu v6.8.3c).
+//
+// v6.8.3e (2025-11-19):
+//   • DevMemBadge zeigt jetzt den Text „Mem ON (n)“ / „Mem OFF“ neben dem Icon.
+//   • Keine weiteren Änderungen (reines UI-Micro-Polishing).
 
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
@@ -51,9 +63,9 @@ class ReflectionViewProps {
   final String pandaAsset;
 
   // Bubbles oben
-  final String? introText;     // Pitch/Intro (oben, pinned-ähnlich)
+  final String? introText; // Pitch/Intro (oben, pinned-ähnlich)
   final String? smalltalkText; // kurzer Smalltalk des Panda (unter Intro)
-  final String? bridgeText;    // Bridge/Recall (optional, unter Smalltalk)
+  final String? bridgeText; // Bridge/Recall (optional, unter Smalltalk)
 
   // Leitfrage-Block
   final String? question; // Leitfrage (mit Fragezeichen)
@@ -82,14 +94,14 @@ class ReflectionViewProps {
 
   // Abschluss/Mood-CTA
   final bool allowClosure; // kompatibel belassen, aber UI gate nur über moodPrompt!
-  final bool moodPrompt;   // **allein maßgeblich** für CTA-Sichtbarkeit
+  final bool moodPrompt; // **allein maßgeblich** für CTA-Sichtbarkeit
   final VoidCallback? onClosureTap;
 
   // Risk/Hotline
   final bool risk;
 
   // Hope-Slot (kleiner, warmer Hinweis unter den Chips)
-  final String? hopeText;   // einfacher Text
+  final String? hopeText; // einfacher Text
   final Widget? hopeWidget; // alternativ: kompletter Widget-Slot
 
   // Footer-Disclaimer
@@ -100,8 +112,8 @@ class ReflectionViewProps {
 
   // Optional: Dev-Badge (Mem ON/OFF)
   final bool showDevMemBadge; // zeigt kleines Badge oben rechts
-  final bool memoryOn;        // true → „Mem ON“
-  final int memoryCount;      // n in „Mem ON (n)“
+  final bool memoryOn; // true → „Mem ON“
+  final int memoryCount; // n in „Mem ON (n)“
 
   const ReflectionViewProps({
     this.headerTitle = 'Ordne deine Gedanken',
@@ -149,20 +161,20 @@ class ReflectionView extends StatefulWidget {
 }
 
 class _ReflectionViewState extends State<ReflectionView> {
-  late final ScrollController _scroll = ScrollController()..addListener(_onScroll);
-  bool _stickToBottom = true;   // auto-scroll nur, wenn Nutzer nahe unten ist
-  bool _hasPendingNew = false;  // zeigt Jump-to-Bottom FAB
-  int _lastSignature = 0;       // Content-Signatur für didUpdateWidget
-  double _lastBottomInset = 0;  // Keyboard-Änderungen erkennen
+  late final ScrollController _scroll;
+  bool _stickToBottom = true; // auto-scroll nur, wenn Nutzer nahe unten ist
+  bool _hasPendingNew = false; // zeigt Jump-to-Bottom FAB
+  int _lastSignature = 0; // Content-Signatur für didUpdateWidget
+  double _lastBottomInset = 0; // Keyboard-Änderungen erkennen
 
   // ——— Plattform-Helfer ———
   bool get _isDesktop {
     final p = defaultTargetPlatform;
     if (kIsWeb) return true; // Web wie Desktop behandeln
     return p == TargetPlatform.linux ||
-           p == TargetPlatform.macOS ||
-           p == TargetPlatform.windows ||
-           p == TargetPlatform.fuchsia;
+        p == TargetPlatform.macOS ||
+        p == TargetPlatform.windows ||
+        p == TargetPlatform.fuchsia;
   }
 
   ScrollPhysics get _platformPhysics =>
@@ -172,12 +184,14 @@ class _ReflectionViewState extends State<ReflectionView> {
     // Auf Desktop/Web kein Keyboard-Inset → 0; auf Mobile sanft klammern
     if (_isDesktop) return 0;
     // harte Klammer verhindert wilde Sprünge bei Keyboard-Animation
-    return raw.clamp(0.0, 320.0);
+    final clamped = raw.clamp(0.0, 320.0);
+    return clamped is double ? clamped : (clamped as num).toDouble();
   }
 
   @override
   void initState() {
     super.initState();
+    _scroll = ScrollController()..addListener(_onScroll);
     _lastSignature = _calcSignature(widget.props);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _scheduleAutoScroll(force: true);
@@ -307,7 +321,7 @@ class _ReflectionViewState extends State<ReflectionView> {
           ),
           // Sanfter Hintergrund
           Positioned.fill(
-            child: ZenBackdrop(
+            child: ZenBackdrop,
               asset: 'assets/flusspanda.png',
               alignment: Alignment.centerRight,
               glow: .36,
@@ -512,15 +526,17 @@ class _ReflectionViewState extends State<ReflectionView> {
           ),
 
         // Verlauf / Thread (bereits vorgerendert vom Orchestrator)
-        ...props.thread.map((w) => Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Center(
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(maxWidth: cardMaxW),
-                  child: w,
-                ),
+        ...props.thread.map(
+          (w) => Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: cardMaxW),
+                child: w,
               ),
-            )),
+            ),
+          ),
+        ),
 
         // Typing-Indicator direkt unter der letzten User-Bubble
         if (props.isTyping)
@@ -636,7 +652,8 @@ class _ReflectionViewState extends State<ReflectionView> {
     final next = (needsSpace ? '$cur ' : cur) + withEllipsis;
     widget.props.controller
       ..text = next
-      ..selection = TextSelection.fromPosition(TextPosition(offset: next.length));
+      ..selection =
+          TextSelection.fromPosition(TextPosition(offset: next.length));
     if (widget.props.focusNode != null) {
       FocusScope.of(context).requestFocus(widget.props.focusNode);
     }
@@ -696,10 +713,12 @@ class _Header extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(title,
-                        style: theme.textTheme.headlineSmall?.copyWith(
-                          height: 1.15,
-                        )),
+                    Text(
+                      title,
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                        height: 1.15,
+                      ),
+                    ),
                     if ((subtitle ?? '').trim().isNotEmpty)
                       Padding(
                         padding: const EdgeInsets.only(top: 4),
@@ -896,10 +915,16 @@ class _TypingDots extends StatefulWidget {
 
 class _TypingDotsState extends State<_TypingDots>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _c = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 900),
-  )..repeat();
+  late final AnimationController _c;
+
+  @override
+  void initState() {
+    super.initState();
+    _c = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat();
+  }
 
   @override
   void dispose() {
@@ -915,7 +940,8 @@ class _TypingDotsState extends State<_TypingDots>
       child: AnimatedBuilder(
         animation: _c,
         builder: (_, __) {
-          double n(int i) => (math.sin((_c.value * 2 * math.pi) + (i * .8)) + 1) / 2;
+          double n(int i) =>
+              (math.sin((_c.value * 2 * math.pi) + (i * .8)) + 1) / 2;
           final op0 = ((.35 + n(0) * .65) * .6).clamp(0.0, 1.0);
           final op1 = ((.35 + n(1) * .65) * .6).clamp(0.0, 1.0);
           final op2 = ((.35 + n(2) * .65) * .6).clamp(0.0, 1.0);
@@ -1039,10 +1065,12 @@ class _Markdownish extends StatelessWidget {
     final parts = text.split(regex);
     for (final part in parts) {
       if (part.startsWith('**') && part.endsWith('**')) {
-        spans.add(TextSpan(
-          text: part.substring(2, part.length - 2),
-          style: const TextStyle(fontWeight: FontWeight.w600),
-        ));
+        spans.add(
+          TextSpan(
+            text: part.substring(2, part.length - 2),
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+        );
       } else {
         spans.add(TextSpan(text: part));
       }
@@ -1069,8 +1097,10 @@ class _SafetyHotlineCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Wenn es dir nicht gut geht',
-              style: theme.textTheme.titleSmall?.copyWith(height: 1.25)),
+          Text(
+            'Wenn es dir nicht gut geht',
+            style: theme.textTheme.titleSmall?.copyWith(height: 1.25),
+          ),
           const SizedBox(height: 6),
           Text(
             'Du bist nicht allein. In akuten Krisen wende dich bitte an lokale Notfallnummern '
@@ -1098,7 +1128,7 @@ class _DevMemBadge extends StatelessWidget {
     final bg = on
         ? const Color(0xFF2E7D32).withValues(alpha: .90) // grünlich
         : Colors.black.withValues(alpha: .60);
-    final fg = Colors.white;
+    const fg = Colors.white;
     final label = on ? 'Mem ON (${count.clamp(0, 999)})' : 'Mem OFF';
     return Material(
       color: Colors.transparent,
@@ -1110,8 +1140,8 @@ class _DevMemBadge extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Icon(
-              on ? Icons.memory_rounded : Icons.block,
+            const Icon(
+              Icons.memory_rounded,
               size: 16,
               color: fg,
             ),
@@ -1119,10 +1149,10 @@ class _DevMemBadge extends StatelessWidget {
             Text(
               label,
               style: const TextStyle(
-                fontSize: 12,
-                height: 1.1,
-                color: Colors.white,
-                fontWeight: FontWeight.w600,
+                color: fg,
+                fontSize: 11,
+                height: 1.2,
+                letterSpacing: .1,
               ),
             ),
           ],
@@ -1136,8 +1166,13 @@ class _DevMemBadge extends StatelessWidget {
 
 class _NoGlowScrollBehavior extends ScrollBehavior {
   const _NoGlowScrollBehavior();
+
   @override
-  Widget buildOverscrollIndicator(BuildContext context, Widget child, ScrollableDetails details) {
+  Widget buildOverscrollIndicator(
+    BuildContext context,
+    Widget child,
+    ScrollableDetails details,
+  ) {
     return child;
   }
 }

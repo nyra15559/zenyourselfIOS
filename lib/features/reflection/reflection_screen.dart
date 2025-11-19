@@ -1,12 +1,7 @@
-// [PATCHED] lib/features/reflection/reflection_screen.dart — v6.7.13
-// MERGE SIGNAL: Reflection v6.7.13 — Therapeutische Kernlinie, Worker-only Chips,
-// Dual-Mood (🍃/🌿), UIEvent-Fix, History+Bridge via ReflectionController
-//
-// Änderungen ggü. v6.7.12:
-// • Memory-Bridge bevorzugt jetzt (falls vorhanden) die bridgeText-Ausgabe aus
-//   ReflectionController, mit Rückfall auf die lokale Recall-Brücke (_bridgeText).
-// • Sonst keinerlei Verhaltensänderung: Chips, Mood, Save-Flow, Safety & Intro
-//   bleiben identisch.
+// [PATCHED] lib/features/reflection/reflection_screen.dart — v6.8.0
+// MERGE SIGNAL: Reflection v6.8.0 — Therapeutische Kernlinie, Worker-only Chips,
+// Dual-Mood (🍃/🌿), UIEvent-Fix, History+Bridge via ReflectionController,
+// Full-Session-Mode: Screen nutzt nur ReflectionController (kein direkter Worker-Call).
 
 library reflection_screen;
 
@@ -146,7 +141,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
   // Runden / Session
   final List<ReflectionRound> _rounds = <ReflectionRound>[];
   ReflectionRound? get _current => _rounds.isEmpty ? null : _rounds.last;
-  ReflectionSession? _session;
 
   // Flags
   bool loading = false;
@@ -179,6 +173,9 @@ class _ReflectionScreenState extends State<ReflectionScreen>
   // Controller (History/Typing/Bridge)
   late final ReflectionController _ctrl;
   late final VoidCallback _ctrlListener;
+
+  // Letzter gerenderter Panda-Vm-Stand (gegen Doppel-Rendering)
+  String? _lastAssistantKey;
 
   // ---------------- Intro (dynamisch, einmalig) ------------------------------
   bool _hasShownIntro = false; // Guards: nur 1× pro Sitzung
@@ -257,6 +254,9 @@ class _ReflectionScreenState extends State<ReflectionScreen>
   }
 
   // ---------------- META: Builder --------------------------------------------
+  // Hinweis: Meta wird hier aktuell nicht mehr an den Worker gesendet – der
+  // Full-Session-Mode läuft komplett über ReflectionController. Diese Funktion
+  // bleibt vorerst als Referenz bestehen.
   Map<String, dynamic> _buildMeta({
     String? userText,
     String? userAnswer,
@@ -280,8 +280,6 @@ class _ReflectionScreenState extends State<ReflectionScreen>
         'save_hint_after_rounds': 2,
       },
       'session': {
-        'thread_id': _session?.threadId,
-        'turn_index': _session?.turnIndex,
         'rounds': _rounds.length,
         'has_mood': _current?.hasMood ?? false,
         'allow_closure': _current?.allowClosure ?? false,
@@ -345,8 +343,32 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       if (!mounted) return;
       switch (e.kind) {
         case UIEventKind.appendUser:
-          if (_current == null) return;
-          setState(() {});
+          // NEU: User-Bubble kommt vollständig aus der Logic.
+          final text = e.text?.trim() ?? '';
+          if (text.isEmpty) break;
+
+          setState(() {
+            if (_rounds.isEmpty || !(_rounds.last.hasPendingQuestion)) {
+              // Neue Runde starten
+              final round = ReflectionRound(
+                id: _makeId(),
+                ts: DateTime.now(),
+                mode: _speech.isRecording ? 'voice' : 'text',
+                userInput: text,
+                allowClosure: false,
+              );
+              _rounds.add(round);
+            } else {
+              // Antwort auf bestehende Panda-Frage
+              final round = _rounds.last;
+              if (round.steps.isNotEmpty) {
+                round.steps.last.answer = text;
+              } else {
+                round.userInput = text;
+              }
+            }
+            _chipMode = _ChipMode.none;
+          });
           _scrollToBottom();
           break;
         case UIEventKind.insertTypingPlaceholder:
@@ -376,13 +398,15 @@ class _ReflectionScreenState extends State<ReflectionScreen>
               _didPromptMood = true;
             });
 
+            final ts = DateTime.now().toUtc();
+
             // Lokal speichern (🍃/🌿)
             unawaited(() async {
               try {
                 if (_isLocalStoreAllowed()) {
                   final dyn = MemoryService.instance as dynamic;
                   await dyn.saveMoodEntry?.call(
-                    DateTime.now().toUtc(),
+                    ts,
                     chosen.mental,
                     chosen.physical,
                   );
@@ -400,13 +424,22 @@ class _ReflectionScreenState extends State<ReflectionScreen>
                 );
               } catch (_) {}
             }
+
+            // Controller: Closure-Turn auslösen (Full-Session-Mode)
+            unawaited(
+              _ctrl.completeClosureWithMood(
+                chosen.mental,
+                chosen.physical,
+                when: ts,
+              ),
+            );
           });
           break;
       }
     });
     _ctrlListener = () {
       if (!mounted) return;
-      setState(() {});
+      _syncFromControllerVm();
     };
 
     _ctrl.addListener(_ctrlListener);
@@ -451,9 +484,10 @@ class _ReflectionScreenState extends State<ReflectionScreen>
 
     final seed = (widget.initialUserText ?? '').trim();
     if (seed.isNotEmpty) {
-      WidgetsBinding.instance.addPostFrameCallback((_) async {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        await _startNewReflection(userText: seed, mode: 'text');
+        // Full-Session-Start komplett über ReflectionController
+        _ctrl.sendUser(seed, fromVoice: false, context: context);
       });
     }
   }
@@ -579,55 +613,26 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       _toast('Dein Text wurde auf $kInputHardLimit Zeichen gekürzt.');
     }
 
-    if (_current == null) {
-      await _startNewReflection(
-        userText: text,
-        mode: _speech.isRecording ? 'voice' : 'text',
-      );
-      return;
-    }
+    // Namenslernen (best-effort, lokal)
+    unawaited(MemoryService.instance.learnNameFromText(text));
 
-    if (_current!.hasPendingQuestion) {
-      setState(() {
-        _current!.steps.last.answer = text; // sofortiges lokal-Echo
-        _controller.clear();
-        _chipMode = _ChipMode.none;
-      });
-      _scrollToBottom();
-      _focusInput();
-      HapticFeedback.lightImpact();
+    setState(() {
+      _chipMode = _ChipMode.none;
+    });
 
-      // NEU: lokales Namenslernen aus der Antwort (best-effort)
-      unawaited(MemoryService.instance.learnNameFromText(text));
-
-      // Phase-9: User-Turn speichern (unsichtbar)
-      unawaited(() async {
-        try {
-          final dyn = MemoryService.instance as dynamic;
-          await dyn.saveUserTurn?.call(text, {
-            'screen': 'reflection',
-            'mode': 'answer',
-            'ts': DateTime.now().toUtc().toIso8601String(),
-          });
-        } catch (_) {}
-      }());
-
-      // Controller: history/typing mitschreiben
-      unawaited(_ctrl.send(text, context: context));
-
-      unawaited(
-        _continueReflectionFromWorker(round: _current!, userAnswer: text),
-      );
-      return;
-    }
-
-    await _startNewReflection(
-      userText: text,
-      mode: _speech.isRecording ? 'voice' : 'text',
+    // Full-Session-Start/Next komplett über ReflectionController
+    _ctrl.sendUser(
+      text,
+      fromVoice: _speech.isRecording,
+      context: context,
     );
+
+    _controller.clear();
+    _focusInput();
+    HapticFeedback.lightImpact();
   }
 
-  // ---------------- Session-Coercion -----------------------------------------
+  // ---------------- Session-Coercion (Legacy, ungenutzt im neuen Flow) -------
   ReflectionSession _coerceSession(dynamic turn) {
     try {
       if (turn is ReflectionTurn) return turn.session;
@@ -676,346 +681,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     );
   }
 
-  // --- Start: neue Reflexion -------------------------------------------------
-  Future<void> _startNewReflection({
-    required String userText,
-    required String mode,
-  }) async {
-    setState(() {
-      loading = true;
-      _chipMode = _ChipMode.none;
-      _didPromptMood = false;
-      _isMoodOpen = false;
-      // Intro verschwindet, sobald wir starten
-      _showIntro = false;
-    });
-
-    // Name lokal lernen (best-effort)
-    unawaited(MemoryService.instance.learnNameFromText(userText));
-
-    // Phase-9: User-Turn speichern (unsichtbar)
-    unawaited(() async {
-      try {
-        final dyn = MemoryService.instance as dynamic;
-        await dyn.saveUserTurn?.call(userText, {
-          'screen': 'reflection',
-          'mode': mode,
-          'ts': DateTime.now().toUtc().toIso8601String(),
-        });
-      } catch (_) {}
-    }());
-
-    try {
-      final round = ReflectionRound(
-        id: _makeId(),
-        ts: DateTime.now(),
-        mode: mode,
-        userInput: userText,
-        allowClosure: false,
-      );
-
-      setState(() {
-        _rounds.add(round);
-        _controller.clear();
-      });
-      _scrollToBottom();
-
-      dynamic turn;
-      final meta = _buildMeta(
-        userText: userText,
-        mode: mode,
-        isStart: true,
-      );
-
-      // Controller: history + typing/bridge für Start synchronisieren
-      unawaited(
-          _ctrl.start(userText, fromVoice: mode == 'voice', context: context));
-
-      try {
-        // 1) Neuer Endpunkt
-        turn = await (GuidanceService.instance as dynamic)
-            .startSessionFull(
-              text: userText,
-              locale: 'de',
-              tz: 'Europe/Zurich',
-              meta: meta,
-            )
-            .timeout(_netTimeout);
-      } on NoSuchMethodError {
-        try {
-          // 2) Alter Endpunkt ohne Meta
-          turn = await (GuidanceService.instance as dynamic)
-              .startSessionFull(
-                text: userText,
-                locale: 'de',
-                tz: 'Europe/Zurich',
-              )
-              .timeout(_netTimeout);
-        } on NoSuchMethodError {
-          // 3) Ganz alter Fallback
-          turn = await GuidanceService.instance
-              .startSessionFull(
-                  text: userText, locale: 'de', tz: 'Europe/Zurich')
-              .timeout(_netTimeout);
-        }
-      } on TimeoutException {
-        if (!mounted) return;
-        _handleTurnError(round);
-        _showRetryError(_errorHint, () {
-          if (!mounted) return;
-          unawaited(_startNewReflection(userText: userText, mode: mode));
-        });
-        return;
-      } catch (_) {
-        if (!mounted) return;
-        _handleTurnError(round);
-        _showRetryError(_errorHint, () {
-          if (!mounted) return;
-          unawaited(_startNewReflection(userText: userText, mode: mode));
-        });
-        return;
-      }
-
-      final bool flagMoodPrompt = _safeBool(turn, ['mood', 'prompt']) ||
-          _safeBool(turn, ['flow', 'mood_prompt']);
-      final bool flagRecommendEnd = _safeBool(turn, ['flow', 'recommend_end']);
-
-      final step = _buildStepFromTurn(turn);
-      setState(() {
-        _session = _coerceSession(turn);
-        round.steps.add(step);
-
-        final bool wantClosure = flagMoodPrompt || flagRecommendEnd;
-        round.allowClosure = wantClosure;
-
-        final hasHelpers = step.followups.isNotEmpty;
-        _chipMode = (step.expectsAnswer && !wantClosure && hasHelpers)
-            ? _ChipMode.answer
-            : _ChipMode.none;
-      });
-
-      // Persist best-effort
-      unawaited(() async {
-        try {
-          final mirror = _coerceMirror(turn);
-          final q = _coerceQuestion(turn);
-          final out = (q.isNotEmpty) ? ('$mirror\n\n$q') : mirror;
-          final dyn = MemoryService.instance as dynamic;
-          await dyn.savePandaTurn?.call(out, {
-            'screen': 'reflection',
-            'session': _session?.threadId,
-            'ts': DateTime.now().toUtc().toIso8601String(),
-          });
-          await dyn.saveFromWorker?.call(turn);
-        } catch (_) {}
-      }());
-
-      _fadeSlideCtrl.forward(from: 0);
-      _scrollToBottom();
-      _focusInput();
-
-      // NEW: Mood-Prompt nur hier (nicht im Save-Flow) und nur wenn vom Worker signalisiert.
-      unawaited(_maybeAskMood(
-        context,
-        round: round,
-        moodPrompt: flagMoodPrompt,
-        afterClosure: false,
-      ));
-
-      if (flagRecommendEnd) {
-        unawaited(_requestClosureFromWorker(round: round, userAnswer: ''));
-      }
-    } finally {
-      if (mounted) setState(() => loading = false);
-    }
-  }
-
-  // --- Continue --------------------------------------------------------------
-  Future<void> _continueReflectionFromWorker({
-    required ReflectionRound round,
-    required String userAnswer,
-  }) async {
-    if (!mounted) return;
-    setState(() => loading = true);
-    _scrollToBottom();
-
-    // Name lokal lernen
-    unawaited(MemoryService.instance.learnNameFromText(userAnswer));
-
-    // Phase-9: User-Turn speichern (unsichtbar)
-    unawaited(() async {
-      try {
-        final dyn = MemoryService.instance as dynamic;
-        await dyn.saveUserTurn?.call(userAnswer, {
-          'screen': 'reflection',
-          'mode': 'answer',
-          'ts': DateTime.now().toUtc().toIso8601String(),
-        });
-      } catch (_) {}
-    }());
-
-    dynamic turn;
-    final meta = _buildMeta(userAnswer: userAnswer);
-
-    try {
-      if (_session != null) {
-        try {
-          // 1) Neuer Name mit Meta
-          turn = await (GuidanceService.instance as dynamic)
-              .nextTurnFull(
-                session: _session!,
-                text: userAnswer,
-                locale: 'de',
-                tz: 'Europe/Zurich',
-                meta: meta,
-              )
-              .timeout(_netTimeout);
-        } on NoSuchMethodError {
-          try {
-            // 2) Älterer Name (reflectFull) mit Meta
-            turn = await (GuidanceService.instance as dynamic)
-                .reflectFull(
-                  session: _session!,
-                  text: userAnswer,
-                  locale: 'de',
-                  tz: 'Europe/Zurich',
-                  meta: meta,
-                )
-                .timeout(_netTimeout);
-          } on NoSuchMethodError {
-            // 3) Fallback ohne Meta
-            turn = await GuidanceService.instance
-                .startSessionFull(
-                  text: userAnswer,
-                  locale: 'de',
-                  tz: 'Europe/Zurich',
-                  session: _session!,
-                )
-                .timeout(_netTimeout);
-          }
-        }
-      } else {
-        // Keine Session bekannt → (re)start
-        try {
-          turn = await (GuidanceService.instance as dynamic)
-              .startSessionFull(
-                text: userAnswer,
-                locale: 'de',
-                tz: 'Europe/Zurich',
-                meta: meta,
-              )
-              .timeout(_netTimeout);
-        } on NoSuchMethodError {
-          turn = await GuidanceService.instance
-              .startSessionFull(
-                text: userAnswer,
-                locale: 'de',
-                tz: 'Europe/Zurich',
-              )
-              .timeout(_netTimeout);
-        }
-      }
-    } on TimeoutException {
-      if (!mounted) return;
-      setState(() => loading = false);
-      _showRetryError(_errorHint, () {
-        if (!mounted) return;
-        unawaited(_continueReflectionFromWorker(
-            round: round, userAnswer: userAnswer));
-      });
-      return;
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => loading = false);
-      _showRetryError(_errorHint, () {
-        if (!mounted) return;
-        unawaited(_continueReflectionFromWorker(
-            round: round, userAnswer: userAnswer));
-      });
-      return;
-    }
-
-    if (!mounted) return;
-
-    final bool flagMoodPrompt = _safeBool(turn, ['mood', 'prompt']) ||
-        _safeBool(turn, ['flow', 'mood_prompt']);
-    final bool flagRecommendEnd = _safeBool(turn, ['flow', 'recommend_end']);
-
-    final step = _buildStepFromTurn(turn);
-    setState(() {
-      _session = _coerceSession(turn);
-      if (round.shouldAppendStep(step)) {
-        round.steps.add(step);
-      }
-
-      if (flagMoodPrompt || flagRecommendEnd) round.allowClosure = true;
-
-      final hasHelpers = step.followups.isNotEmpty;
-      _chipMode = (step.expectsAnswer &&
-              !(flagMoodPrompt || flagRecommendEnd) &&
-              hasHelpers)
-          ? _ChipMode.answer
-          : _ChipMode.none;
-    });
-
-    // Controller: history update
-    unawaited(_ctrl.send(userAnswer, context: context));
-
-    // Persist best-effort
-    unawaited(() async {
-      try {
-        final mirror = _coerceMirror(turn);
-        final q = _coerceQuestion(turn);
-        final out = (q.isNotEmpty) ? ('$mirror\n\n$q') : mirror;
-        final dyn = MemoryService.instance as dynamic;
-        await dyn.savePandaTurn?.call(out, {
-          'screen': 'reflection',
-          'session': _session?.threadId,
-          'ts': DateTime.now().toUtc().toIso8601String(),
-        });
-        await dyn.saveFromWorker?.call(turn);
-      } catch (_) {}
-    }());
-
-    _fadeSlideCtrl.forward(from: 0);
-    _scrollToBottom();
-    _focusInput();
-
-    // NEW: Mood-Prompt nur hier (nicht im Save-Flow) und nur wenn vom Worker signalisiert.
-    unawaited(_maybeAskMood(
-      context,
-      round: round,
-      moodPrompt: flagMoodPrompt,
-      afterClosure: false,
-    ));
-
-    if (flagRecommendEnd) {
-      unawaited(
-          _requestClosureFromWorker(round: round, userAnswer: userAnswer));
-    }
-
-    if (mounted) setState(() => loading = false);
-  }
-
-  void _handleTurnError(ReflectionRound round) {
-    const fallbackMirror = 'Ich höre dich. Ich bleibe bei dir.';
-    final step = _PandaStep(
-      mirror: _capChars(fallbackMirror, kMirrorMaxChars),
-      question: '',
-      talkLines: const <String>[],
-      risk: false,
-      followups: const <String>[],
-    );
-    setState(() {
-      round.steps.add(step);
-      round.allowClosure = false;
-      _chipMode = _ChipMode.none;
-    });
-    _fadeSlideCtrl.forward(from: 0);
-    _scrollToBottom();
-  }
-
-  // ---------------- Turn → Step ----------------------------------------------
+  // ---------------- Turn → Step (Legacy, für Fallback) -----------------------
   _PandaStep _buildStepFromTurn(dynamic t) {
     final bool isClosure = _safeBool(t, ['mood', 'prompt']) ||
         _safeBool(t, ['flow', 'mood_prompt']) ||
@@ -1137,7 +803,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       'userAnswer': lastAns.isNotEmpty ? lastAns : null,
       'hidden': false,
       'tags': tags,
-      'sourceRef': 'reflection|session:${_session?.threadId ?? ''}',
+      'sourceRef': 'reflection|session:',
     };
 
     final entry = jm.JournalEntry.fromMap(entryMap);
@@ -1175,72 +841,14 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     _toast('Gelöscht.');
   }
 
-  // ---------------- Abschluss/Mood-Einleitung --------------------------------
+  // ---------------- Abschluss/Mood-Einleitung (Legacy) -----------------------
   Future<void> _requestClosureFromWorker({
     required ReflectionRound round,
     required String userAnswer,
   }) async {
+    // Im neuen Full-Session-Mode läuft Closure über ReflectionController.completeClosureWithMood.
+    // Diese Funktion bleibt als Fallback bestehen, wird aber aktuell nicht verwendet.
     if (!mounted) return;
-    setState(() => loading = true);
-    _scrollToBottom();
-
-    dynamic res;
-    final meta = _buildMeta(userAnswer: userAnswer, isClosure: true);
-
-    try {
-      // 1) Neuer Closure-Endpunkt mit Meta
-      res = await (GuidanceService.instance as dynamic)
-          .closureFull(
-            session: _session,
-            answer: userAnswer,
-            locale: 'de',
-            tz: 'Europe/Zurich',
-            meta: meta,
-          )
-          .timeout(_netTimeout);
-    } on NoSuchMethodError {
-      try {
-        // 2) Fallback ohne Meta
-        res = await GuidanceService.instance
-            .closureFull(
-              session: _session,
-              answer: userAnswer,
-              locale: 'de',
-            )
-            .timeout(_netTimeout);
-      } on NoSuchMethodError {
-        if (mounted) setState(() => loading = false);
-        return;
-      }
-    } on TimeoutException {
-      if (mounted) setState(() => loading = false);
-      return;
-    } catch (_) {
-      if (mounted) setState(() => loading = false);
-      return;
-    }
-
-    if (!mounted) return;
-
-    final closure = _safeString(res, ['closure', 'mood_intro', 'text']).trim();
-    final level = _safeString(res, ['risk_level']).toLowerCase();
-    final risk = _safeBool(res, ['risk']) || level == 'high' || level == 'mild';
-
-    setState(() => loading = false);
-
-    // Wir zeigen *keinen* Mood-Picker in der Closure-Phase.
-    setState(() {
-      round.moodIntro = _capChars(closure, kMirrorMaxChars);
-      round.allowClosure = true;
-      if (round.steps.isNotEmpty) {
-        final last = round.steps.last;
-        if (risk && !last.risk) {
-          round.steps[round.steps.length - 1] = last.copyWith(risk: true);
-        }
-      }
-    });
-    _fadeSlideCtrl.forward(from: 0);
-    _scrollToBottom();
   }
 
   // --- Coercion helpers -------------------------------------------------------
@@ -2326,6 +1934,70 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       }
       _chipMode = _ChipMode.answer;
     });
+    _fadeSlideCtrl.forward(from: 0);
+    _scrollToBottom();
+  }
+
+  // ---------------- Sync aus ReflectionController ----------------------------
+
+  /// Übernimmt den aktuellen ReflectionVM aus dem Controller in die lokale
+  /// Rundendarstellung (_rounds). Dadurch bleibt der Screen reines UI und
+  /// der Full-Session-Flow liegt in reflection_logic.dart.
+  void _syncFromControllerVm() {
+    final vmDyn = _ctrl.vm;
+    if (vmDyn == null) return;
+
+    final sess = _ctrl.session;
+    final key = '${sess?.id ?? ''}::${vmDyn.mirror}::${vmDyn.question}::${vmDyn.hopeText ?? ''}::${vmDyn.talkLines.join('|')}';
+
+    if (key == _lastAssistantKey) {
+      // Kein neuer Panda-Turn → nur UI refreshen, falls nötig
+      setState(() {});
+      return;
+    }
+    _lastAssistantKey = key;
+
+    final step = _PandaStep(
+      mirror: _capChars(vmDyn.mirror, kMirrorMaxChars),
+      question: _limitWords(vmDyn.question, kQuestionMaxWords),
+      talkLines: vmDyn.talkLines,
+      risk: vmDyn.risk,
+      followups: vmDyn.answerChips,
+      helperSuggestion:
+          (vmDyn.helperSuggestion ?? '').trim().isNotEmpty ? vmDyn.helperSuggestion : null,
+    );
+
+    setState(() {
+      if (_rounds.isEmpty) {
+        _rounds.add(
+          ReflectionRound(
+            id: _makeId(),
+            ts: DateTime.now(),
+            mode: 'text',
+            userInput: '',
+            allowClosure: vmDyn.allowClosure,
+          ),
+        );
+      }
+
+      final round = _rounds.last;
+
+      if (round.steps.isEmpty) {
+        round.steps.add(step);
+      } else {
+        final last = round.steps.last;
+        if (last.mirror == step.mirror &&
+            last.question == step.question &&
+            listEquals(last.talkLines, step.talkLines)) {
+          round.steps[round.steps.length - 1] = step;
+        } else {
+          round.steps.add(step);
+        }
+      }
+
+      round.allowClosure = vmDyn.allowClosure;
+    });
+
     _fadeSlideCtrl.forward(from: 0);
     _scrollToBottom();
   }
