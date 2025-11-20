@@ -1,7 +1,8 @@
-// [PATCHED] lib/features/reflection/reflection_screen.dart — v6.8.0
-// MERGE SIGNAL: Reflection v6.8.0 — Therapeutische Kernlinie, Worker-only Chips,
+// [PATCHED] lib/features/reflection/reflection_screen.dart — v6.8.1
+// MERGE SIGNAL: Reflection v6.8.1 — Therapeutische Kernlinie, Worker-only Chips,
 // Dual-Mood (🍃/🌿), UIEvent-Fix, History+Bridge via ReflectionController,
 // Full-Session-Mode: Screen nutzt nur ReflectionController (kein direkter Worker-Call).
+// + Voice-Flow v1: STT-Integration mit Partial-Transkription & fromVoice-Flag.
 
 library reflection_screen;
 
@@ -135,8 +136,13 @@ class _ReflectionScreenState extends State<ReflectionScreen>
 
   // Speech
   final SpeechService _speech = SpeechService();
+  StreamSubscription<String>? _partialSub;
   StreamSubscription<String>? _finalSub;
   StreamSubscription<String>? _speechErrorSub;
+
+  // STT-Context
+  String _sttBaseText = '';
+  bool _lastFromVoice = false;
 
   // Runden / Session
   final List<ReflectionRound> _rounds = <ReflectionRound>[];
@@ -353,7 +359,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
               final round = ReflectionRound(
                 id: _makeId(),
                 ts: DateTime.now(),
-                mode: _speech.isRecording ? 'voice' : 'text',
+                mode: _lastFromVoice ? 'voice' : 'text',
                 userInput: text,
                 allowClosure: false,
               );
@@ -457,7 +463,29 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     // Controller-Bridge (History-basiert)
     unawaited(_ctrl.prefetchBridge());
 
-    // Live-Transkript → direkt in Input einfügen
+    // Live-Transkript (partial) → direkt in Input einfügen
+    _partialSub = _speech.partial$.listen((t) {
+      if (!mounted) return;
+      final partial = t.trim();
+      if (partial.isEmpty) return;
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+
+        final base = _sttBaseText.trim();
+        final joined =
+            base.isEmpty ? partial : ('$base\n$partial').trimRight();
+
+        _controller
+          ..text = joined
+          ..selection = TextSelection.fromPosition(
+            TextPosition(offset: joined.length),
+          );
+        _maybeHideStarterChipsOnTyping();
+      });
+    });
+
+    // Live-Transkript (final) → Input stabilisieren & fromVoice setzen
     _finalSub = _speech.transcript$.listen((t) async {
       if (!mounted) return;
       final spoken = t.trim();
@@ -465,15 +493,21 @@ class _ReflectionScreenState extends State<ReflectionScreen>
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        final cur = _controller.text.trim();
-        final joined = (cur.isEmpty ? spoken : '$cur\n$spoken').trim();
+
+        final base = _sttBaseText.trim();
+        final joined =
+            base.isEmpty ? spoken : ('$base\n$spoken').trimRight();
+
         _controller
           ..text = joined
           ..selection = TextSelection.fromPosition(
-            TextPosition(offset: _controller.text.length),
+            TextPosition(offset: joined.length),
           );
         _maybeHideStarterChipsOnTyping();
         _focusInput();
+
+        _lastFromVoice = true;
+        _sttBaseText = joined;
       });
     });
 
@@ -537,6 +571,7 @@ class _ReflectionScreenState extends State<ReflectionScreen>
 
   @override
   void dispose() {
+    _partialSub?.cancel();
     _finalSub?.cancel();
     _speechErrorSub?.cancel();
     _speech.dispose();
@@ -592,9 +627,13 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       } else {
         HapticFeedback.selectionClick();
         FocusScope.of(context).unfocus();
+        _sttBaseText = _controller.text;
+        _lastFromVoice = false;
         await _speech.start(locale: 'de-DE');
       }
-      if (mounted) setState(() => _speech.isRecording);
+      if (mounted) {
+        setState(() {});
+      }
     } catch (_) {
       _toast('Mikrofon nicht verfügbar. Bitte Berechtigung erlauben.');
     }
@@ -623,10 +662,11 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     // Full-Session-Start/Next komplett über ReflectionController
     _ctrl.sendUser(
       text,
-      fromVoice: _speech.isRecording,
+      fromVoice: _lastFromVoice,
       context: context,
     );
 
+    _lastFromVoice = false;
     _controller.clear();
     _focusInput();
     HapticFeedback.lightImpact();
@@ -1948,7 +1988,8 @@ class _ReflectionScreenState extends State<ReflectionScreen>
     if (vmDyn == null) return;
 
     final sess = _ctrl.session;
-    final key = '${sess?.id ?? ''}::${vmDyn.mirror}::${vmDyn.question}::${vmDyn.hopeText ?? ''}::${vmDyn.talkLines.join('|')}';
+    final key =
+        '${sess?.id ?? ''}::${vmDyn.mirror}::${vmDyn.question}::${vmDyn.hopeText ?? ''}::${vmDyn.talkLines.join('|')}';
 
     if (key == _lastAssistantKey) {
       // Kein neuer Panda-Turn → nur UI refreshen, falls nötig
@@ -1964,7 +2005,9 @@ class _ReflectionScreenState extends State<ReflectionScreen>
       risk: vmDyn.risk,
       followups: vmDyn.answerChips,
       helperSuggestion:
-          (vmDyn.helperSuggestion ?? '').trim().isNotEmpty ? vmDyn.helperSuggestion : null,
+          (vmDyn.helperSuggestion ?? '').trim().isNotEmpty
+              ? vmDyn.helperSuggestion
+              : null,
     );
 
     setState(() {

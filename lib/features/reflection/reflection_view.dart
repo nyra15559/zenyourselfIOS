@@ -1,4 +1,4 @@
-// [UPDATED] lib/features/reflection/reflection_view.dart (Stand: 2025-11-19, v6.8.3e)
+// [UPDATED] lib/features/reflection/reflection_view.dart (Stand: 2025-11-20, v6.8.3f)
 // ReflectionView — reine Layout-Schicht (Plan v6.2.2 + v6.3.x VM-Wiring)
 // + v6.4 AutoScroll v1 (2025-10-31):
 //   • Stateful (ScrollController, extentAfter-Heuristik, Jump-to-Bottom FAB)
@@ -47,6 +47,11 @@
 // v6.8.3e (2025-11-19):
 //   • DevMemBadge zeigt jetzt den Text „Mem ON (n)“ / „Mem OFF“ neben dem Icon.
 //   • Keine weiteren Änderungen (reines UI-Micro-Polishing).
+//
+// v6.8.3f (2025-11-20):
+//   • Scroll-Reserve `_kInputReserve` deutlich reduziert, damit neue Nachrichten wie bei WhatsApp
+//     nah am unteren Rand sichtbar bleiben (kein „Loch“ unter der letzten Bubble).
+//   • ZenBackdrop-Aufruf syntaktisch korrigiert (kein Verhaltensänderung).
 
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
@@ -321,7 +326,7 @@ class _ReflectionViewState extends State<ReflectionView> {
           ),
           // Sanfter Hintergrund
           Positioned.fill(
-            child: ZenBackdrop,
+            child: ZenBackdrop(
               asset: 'assets/flusspanda.png',
               alignment: Alignment.centerRight,
               glow: .36,
@@ -1179,4 +1184,4 @@ class _NoGlowScrollBehavior extends ScrollBehavior {
 
 // --------------------------- Consts ------------------------------------------
 
-const double _kInputReserve = 104;
+const double _kInputReserve = 32;
