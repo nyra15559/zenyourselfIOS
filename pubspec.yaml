@@ -3,7 +3,7 @@ description: ZenYourself App mit Sprach-Input und GPT-Antwort
 publish_to: "none"
 
 # Version-Bump (Patch + Build)
-version: 1.0.89+1089
+version: 1.0.99+1099
 
 # Dart/Flutter Basis – passt zu Flutter ≥3.19 (Dart 3.3)
 environment:
