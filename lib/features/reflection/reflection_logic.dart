@@ -1,6 +1,6 @@
-// [UPDATED] lib/features/reflection/reflection_logic.dart (Stand: 2025-11-19, v6.8.5a)
+// [UPDATED] lib/features/reflection/reflection_logic.dart (Stand: 2025-11-20, v6.8.6)
 // ZenYourself — ReflectionLogic (Controller & Handler)
-// PANDA-REFLECT-12.9 → v6.8.5a (Full-Session-Mode + lokale Session-ID)
+// PANDA-REFLECT-12.9 → v6.8.6 (Full-Session-Mode + lokale Session-ID + Voice-Hook)
 //
 // Änderungen ggü. v6.8.4:
 // • Neu: _sessionId + startNewSession() – lokale Session-Kennung pro Reflexionslauf.
@@ -10,6 +10,11 @@
 // v6.8.5a (2025-11-19):
 // • _ensureSessionId() jetzt auch in send(), handleAction() und completeClosureWithMood() → konsistente local_session_id.
 // • Fix: Bei geblocktem Send (Send-Gap) wird der Typing-Indicator sofort wieder deaktiviert.
+//
+// v6.8.6 (2025-11-20):
+// • Neu: sendFromVoice(...) – Hybrid aus getipptem Text + STT-Transkript, inkl. Voice-Trigger (Thema wechseln / Abbrechen etc.).
+// • Fix: _sendNow() ignoriert leere Texte nun immer und schaltet Typing sauber aus (kein leeres User-Bubble).
+// • Verbessert: _afterTurnBookkeeping() reichert saveFromWorker-Payload mit thread.id, session_id & local_session_id + meta.flags.client_memory an.
 
 import 'dart:async';
 import 'package:flutter/foundation.dart';
@@ -351,6 +356,27 @@ class ReflectionController extends ChangeNotifier {
     }
   }
 
+  /// Voice-spezifische API: kombiniert getippten Text + STT-Transkript
+  /// und nutzt Voice-Trigger (Abbrechen / Thema wechseln etc.).
+  Future<void> sendFromVoice({
+    required String transcript,
+    String? typedDraft,
+    BuildContext? context,
+  }) async {
+    final hybrid = composeHybridNote(
+      typed: typedDraft ?? '',
+      transcript: transcript,
+    );
+    if (hybrid.trim().isEmpty) return;
+
+    // Erst prüfen, ob es ein Voice-Command ist (Thema wechseln, abbrechen …)
+    final handled = await tryVoiceTrigger(hybrid);
+    if (handled) return;
+
+    // Ansonsten normal als User-Text senden, aber mit fromVoice=true
+    await sendUser(hybrid, fromVoice: true, context: context);
+  }
+
   Future<void> start(String text, {bool fromVoice = false, BuildContext? context}) async {
     if (context != null) wireSessionFromContext(context);
 
@@ -470,7 +496,12 @@ class ReflectionController extends ChangeNotifier {
     }
 
     text = _sanitizeInput(text);
-    if (text.isEmpty && _apiSession == null) return;
+
+    // Neu: immer abbrechen, wenn nach dem Sanitisieren nichts übrig ist
+    if (text.isEmpty) {
+      _emitTypingOff();
+      return;
+    }
 
     if (_apiSession == null) {
       await start(text);
@@ -1048,7 +1079,7 @@ class ReflectionController extends ChangeNotifier {
     return {
       'ui': {
         'controller': 'reflection_logic',
-        'version': 'v6.8.5a',
+        'version': 'v6.8.6',
       },
       'memory': {
         'bridge': _bridgeText,
@@ -1522,11 +1553,55 @@ class ReflectionController extends ChangeNotifier {
       //    an den MemoryService geben – best-effort, ohne den Flow zu brechen.
       try {
         final payload = Map<String, dynamic>.from(turn.toJson());
-        if (turn.metaClientMemory != null) {
-          payload['meta'] = {
-            'flags': {'client_memory': turn.metaClientMemory}
-          };
+
+        // Thread-Block vorsichtig anlegen/erweitern
+        Map<String, dynamic> thread;
+        if (payload['thread'] is Map) {
+          thread = Map<String, dynamic>.from(payload['thread'] as Map);
+        } else {
+          thread = <String, dynamic>{};
         }
+
+        if (_threadId != null &&
+            (thread['id'] == null || (thread['id'] as String).trim().isEmpty)) {
+          thread['id'] = _threadId;
+        }
+        if (_apiSession?.id != null &&
+            (thread['session_id'] == null || (thread['session_id'] as String).toString().trim().isEmpty)) {
+          thread['session_id'] = _apiSession!.id;
+        }
+        if (_sessionId != null &&
+            (thread['local_session_id'] == null || (thread['local_session_id'] as String).toString().trim().isEmpty)) {
+          thread['local_session_id'] = _sessionId;
+        }
+
+        if (thread.isNotEmpty) {
+          payload['thread'] = thread;
+        }
+
+        // Meta-Block vorsichtig anlegen/erweitern
+        Map<String, dynamic> meta;
+        if (payload['meta'] is Map) {
+          meta = Map<String, dynamic>.from(payload['meta'] as Map);
+        } else {
+          meta = <String, dynamic>{};
+        }
+
+        if (turn.metaClientMemory != null) {
+          Map<String, dynamic> flags;
+          if (meta['flags'] is Map) {
+            flags = Map<String, dynamic>.from(meta['flags'] as Map);
+          } else {
+            flags = <String, dynamic>{};
+          }
+          flags['client_memory'] = turn.metaClientMemory;
+          meta['flags'] = flags;
+        }
+
+        if (meta.isNotEmpty) {
+          payload['meta'] = meta;
+        }
+
         await ms.saveFromWorker?.call(payload);
       } catch (_) {
         // Fehler beim Speichern sind ok – dürfen die Reflexion nie abbrechen.

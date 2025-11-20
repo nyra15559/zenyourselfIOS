@@ -3,6 +3,9 @@
 // Dual-Mood (🍃/🌿), UIEvent-Fix, History+Bridge via ReflectionController,
 // Full-Session-Mode: Screen nutzt nur ReflectionController (kein direkter Worker-Call).
 // + Voice-Flow v1: STT-Integration mit Partial-Transkription & fromVoice-Flag.
+// v6.8.1a (2025-11-20):
+//   • _inputReserve von 104 → 32 reduziert, damit neue Nachrichten wie bei WhatsApp
+//     nah am unteren Rand bleiben und kein „leerer Bildschirm“ nach dem Senden entsteht.
 
 library reflection_screen;
 
@@ -70,9 +73,12 @@ const int kQuestionMaxWords = 40; // weich, UI-Schutz
 const int kInputSoftLimit = 500; // Anzeige im _InputBar
 const int kInputHardLimit = 800;
 
+// WICHTIG: kleinere Reserve, damit die letzte Bubble nah am Input bleibt
+// und der Screen nach dem Senden nicht „leer“ wirkt.
+const double _inputReserve = 32;
+
 const Duration _animShort = Duration(milliseconds: 240);
 const Duration _netTimeout = Duration(seconds: 18);
-const double _inputReserve = 104;
 
 // ---------------- Optionaler Hook + Navigation --------------------------------
 typedef AddToGedankenbuch = void Function(

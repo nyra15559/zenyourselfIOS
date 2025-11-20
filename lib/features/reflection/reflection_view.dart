@@ -1,4 +1,4 @@
-// [UPDATED] lib/features/reflection/reflection_view.dart (Stand: 2025-11-20, v6.8.3f)
+// [UPDATED] lib/features/reflection/reflection_view.dart (Stand: 2025-11-20, v6.8.3g)
 // ReflectionView — reine Layout-Schicht (Plan v6.2.2 + v6.3.x VM-Wiring)
 // + v6.4 AutoScroll v1 (2025-10-31):
 //   • Stateful (ScrollController, extentAfter-Heuristik, Jump-to-Bottom FAB)
@@ -52,6 +52,11 @@
 //   • Scroll-Reserve `_kInputReserve` deutlich reduziert, damit neue Nachrichten wie bei WhatsApp
 //     nah am unteren Rand sichtbar bleiben (kein „Loch“ unter der letzten Bubble).
 //   • ZenBackdrop-Aufruf syntaktisch korrigiert (kein Verhaltensänderung).
+//
+// v6.8.3g (2025-11-20):
+//   • WICHTIGER FIX: ListView bekommt unten **kein Keyboard-Inset** mehr, sondern nur eine kleine
+//     Reserve. Dadurch bleibt die letzte Nachricht direkt über dem Composer sichtbar – kein
+//     „leerer Bildschirm nach Senden“ mehr, auch nicht mit offener Tastatur.
 
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
@@ -188,7 +193,6 @@ class _ReflectionViewState extends State<ReflectionView> {
   double _effectiveBottomInset(double raw) {
     // Auf Desktop/Web kein Keyboard-Inset → 0; auf Mobile sanft klammern
     if (_isDesktop) return 0;
-    // harte Klammer verhindert wilde Sprünge bei Keyboard-Animation
     final clamped = raw.clamp(0.0, 320.0);
     return clamped is double ? clamped : (clamped as num).toDouble();
   }
@@ -276,7 +280,6 @@ class _ReflectionViewState extends State<ReflectionView> {
     sig = 31 * sig + (p.bridgeText ?? '').length;
     sig = 31 * sig + (p.hopeText ?? '').length;
     sig = 31 * sig + (p.moodPrompt ? 1 : 0);
-    // allowClosure wird nicht mehr für die CTA-Sichtbarkeit verwendet
     return sig & 0x7fffffff;
   }
 
@@ -302,6 +305,8 @@ class _ReflectionViewState extends State<ReflectionView> {
       _scheduleAutoScroll(); // sanft nachregeln
     }
     final bottomInset = _effectiveBottomInset(_lastBottomInset);
+    // bottomInset wird weiterhin für sanftes Auto-Scrollen berücksichtigt,
+    // aber NICHT mehr als zusätzlicher Padding-Abstand in der ListView genutzt.
 
     final cardMaxW = _cardMaxWidthFor(w, widget.props.maxCardWidth);
     final props = widget.props;
@@ -367,7 +372,6 @@ class _ReflectionViewState extends State<ReflectionView> {
                                   thumbVisibility: true,
                                   child: _buildListView(
                                     cardMaxW,
-                                    bottomInset,
                                     w,
                                     props,
                                     showIntro: _showIntro,
@@ -381,7 +385,6 @@ class _ReflectionViewState extends State<ReflectionView> {
                                 )
                               : _buildListView(
                                   cardMaxW,
-                                  bottomInset,
                                   w,
                                   props,
                                   showIntro: _showIntro,
@@ -443,7 +446,6 @@ class _ReflectionViewState extends State<ReflectionView> {
 
   Widget _buildListView(
     double cardMaxW,
-    double bottomInset,
     double w,
     ReflectionViewProps props, {
     required bool showIntro,
@@ -459,11 +461,11 @@ class _ReflectionViewState extends State<ReflectionView> {
       physics: _platformPhysics,
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       cacheExtent: 512,
-      padding: EdgeInsets.fromLTRB(
+      padding: const EdgeInsets.fromLTRB(
         0,
         0,
         0,
-        12 + _kInputReserve + bottomInset,
+        12 + _kInputReserve,
       ),
       children: [
         // Header
@@ -680,7 +682,6 @@ class _ReflectionViewState extends State<ReflectionView> {
   }
 
   double _cardMaxWidthFor(double w, double max) {
-    // robust: immer sinnvolle positive Max-Breite liefern
     final inner = (w - 24).clamp(180.0, max); // nie <180, nie >max
     return inner is double ? inner : (inner as num).toDouble();
   }
@@ -1064,7 +1065,6 @@ class _Markdownish extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // sehr leichte, sichere Formatierung für fett **…**
     final spans = <InlineSpan>[];
     final regex = RegExp(r'(\*\*[^*]+\*\*)');
     final parts = text.split(regex);
@@ -1131,7 +1131,7 @@ class _DevMemBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bg = on
-        ? const Color(0xFF2E7D32).withValues(alpha: .90) // grünlich
+        ? const Color(0xFF2E7D32).withValues(alpha: .90)
         : Colors.black.withValues(alpha: .60);
     const fg = Colors.white;
     final label = on ? 'Mem ON (${count.clamp(0, 999)})' : 'Mem OFF';
